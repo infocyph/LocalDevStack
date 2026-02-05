@@ -4,7 +4,7 @@ LocalDevStack Documentation
 LocalDevStack is a modular, Docker-based local development stack designed to replace traditional local bundles
 (XAMPP/MAMP/LAMP) with a reproducible, profile-driven setup.
 
-It is built around a small orchestrator (the ``server`` CLI + Compose profiles) and a set of purpose-built images
+It is built around a small orchestrator (the ``lds`` CLI + Compose profiles) and a set of purpose-built images
 that work together (tools, HTTP, runner).
 
 .. toctree::
@@ -27,6 +27,5 @@ that work together (tools, HTTP, runner).
 
    guides/domain-setup
    guides/tls-and-certificates
-   guides/node-apps
    guides/secrets-sops-age
    guides/notifications
