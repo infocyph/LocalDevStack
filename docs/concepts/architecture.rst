@@ -3,7 +3,7 @@ Architecture
 
 LocalDevStack is composed of:
 
-- The **orchestrator**: ``server`` / ``server.bat`` (selects profiles, runs Compose, common workflows)
+- The **orchestrator**: ``lds`` / ``lds.bat`` (selects profiles, runs Compose, common workflows)
 - The **HTTP layer**: Nginx (front proxy) and optionally Apache (backend HTTP) depending on your stack choice
 - The **runtimes**: PHP (FPM) and Node (and future stacks)
 - The **control plane**: the **server-tools** image (domain/vhost generation, TLS automation, secrets helpers)
@@ -21,12 +21,13 @@ Instead of a monolithic "one container does everything" model, LocalDevStack use
 How containers cooperate
 ------------------------
 
-1. You generate or edit vhost configs (usually via ``mkhost`` in the Tools container).
-2. The Tools container can scan all vhosts and generate certificates (``certify`` + ``mkcert``).
-3. Nginx loads vhosts and routes requests either:
+1. You generate vhost configs (via ``server setup domain``).
+2. The Tools container can scan all vhosts and generate certificates.
+3. Nginx loads hosts and routes requests either:
 
-   - directly to PHP-FPM (fastcgi), or
-   - to Apache (reverse proxy) when Apache mode is enabled, or
+   - directly to PHP-FPM (fastcgi) or
+   - to Apache (reverse proxy) when Apache mode is enabled or
    - to a Node service (reverse proxy).
 
 4. The Runner handles background services (cron/logrotate) and gives you a consistent place for helper utilities.
+5. You also get following services: EMail, DB, Caching
