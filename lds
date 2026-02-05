@@ -313,9 +313,9 @@ fix_perms() {
 
   chmod 755 "$DIR/bin"
   find "$DIR/bin" -type f -exec chmod +x {} +
-  chmod +x "$DIR/server"
+  chmod +x "$DIR/lds"
 
-  ln -fs "$DIR/server" /usr/local/bin/server
+  ln -fs "$DIR/lds" /usr/local/bin/lds
   printf "%bPermissions assigned.%b\n" "$GREEN" "$NC"
 }
 
@@ -342,7 +342,7 @@ setup_domain() {
 
 cmd_delhost() {
   local domain="${1:-}"
-  [[ -n "$domain" ]] || die "Usage: server delhost <domain>"
+  [[ -n "$domain" ]] || die "Usage: lds delhost <domain>"
 
   delhost "$domain"
   delhost --RESET >/dev/null 2>&1 || true
@@ -498,7 +498,7 @@ launch_php() {
 ###############################################################################
 launch_node() {
   local domain="${1:-}"
-  [[ -n "$domain" ]] || die "Usage: server core <domain>"
+  [[ -n "$domain" ]] || die "Usage: lds core <domain>"
 
   local nconf="$DIR/configuration/nginx/$domain.conf"
   [[ -f "$nconf" ]] || die "No Nginx config for $domain"
@@ -1198,7 +1198,7 @@ cmd_cli() {
   local ctr="${1:-}"
   shift || true
 
-  [[ -n "$ctr" ]] || die "Usage: server cli <container> [cmd...]"
+  [[ -n "$ctr" ]] || die "Usage: lds cli <container> [cmd...]"
 
   docker inspect "$ctr" >/dev/null 2>&1 || die "Container not found: $ctr"
   docker inspect -f '{{.State.Running}}' "$ctr" 2>/dev/null | grep -qx true || die "Container not running: $ctr"
@@ -1225,8 +1225,8 @@ cmd_cli() {
 
 cmd_core() {
   # Usage:
-  #   server core <domain>  -> open correct container for that domain (PHP/Node)
-  #   server core           -> auto-detect project by current directory and open correct container
+  #   lds core <domain>  -> open correct container for that domain (PHP/Node)
+  #   lds core           -> auto-detect project by current directory and open correct container
 
   local domain="${1:-}"
   if [[ -n "$domain" ]]; then
@@ -1351,7 +1351,7 @@ core_auto() {
     fi
   fi
 
-  [[ -n "$best_container" ]] || die "No matching domain for current directory: $pwd (try: server core <domain>)"
+  [[ -n "$best_container" ]] || die "No matching domain for current directory: $pwd (try: lds core <domain>)"
 
   # Map host PWD -> /app path inside container
   local rel_path container_path
@@ -1448,17 +1448,6 @@ cmd_certificate() {
   esac
 }
 
-# Backward-compatible aliases (not documented)
-cmd_install() {
-  # deprecated: use `server certificate install`
-  cmd_certificate install "${@:-}"
-}
-
-cmd_uninstall() {
-  # deprecated: use `server certificate uninstall`
-  cmd_certificate uninstall "${@:-}"
-}
-
 cmd_doctor() {
   # Quick environment diagnostics + install hints (best-effort).
   local os_id os_like family
@@ -1506,7 +1495,7 @@ cmd_doctor() {
 
   # layout checks
   [[ -f "$COMPOSE_FILE" ]] && _ok "compose file: $COMPOSE_FILE" || _bad "compose file missing: $COMPOSE_FILE"
-  [[ -f "$ENV_DOCKER" ]] && _ok "env file: $ENV_DOCKER" || _warn "env file missing: $ENV_DOCKER (run: server setup init)"
+  [[ -f "$ENV_DOCKER" ]] && _ok "env file: $ENV_DOCKER" || _warn "env file missing: $ENV_DOCKER (run: lds setup init)"
 
   # CA tooling by distro family
   if _has update-ca-certificates; then
@@ -1559,8 +1548,8 @@ cmd_doctor() {
   fi
 
   printf "\n%bTips%b\n" "$CYAN" "$NC"
-  printf "  - Use: %bserver certificate uninstall --all%b if you switched distros/paths.\n" "$BLUE" "$NC"
-  printf "  - Use: %bserver run --publish 8025:8025%b to expose ports for 'server run open'.\n" "$BLUE" "$NC"
+  printf "  - Use: %blds certificate uninstall --all%b if you switched distros/paths.\n" "$BLUE" "$NC"
+  printf "  - Use: %blds run --publish 8025:8025%b to expose ports for 'lds run open'.\n" "$BLUE" "$NC"
 }
 
 ###############################################################################
@@ -1721,15 +1710,15 @@ run_plan() {
   local dir="$1" slug
   slug="$(run_slug "$dir")"
   printf '%s|%s|%s\n' \
-    "server-run-${slug}" \
+    "lds-run-${slug}" \
     "${slug}:local" \
     "$dir"
 }
 
 run_find_container() {
   local dir="$1"
-  docker ps -a --filter "label=com.infocyph.server.run=1" \
-    --filter "label=com.infocyph.server.dir=${dir}" \
+  docker ps -a --filter "label=com.infocyph.lds.run=1" \
+    --filter "label=com.infocyph.lds.dir=${dir}" \
     --format '{{.Names}}' | head -n 1
 }
 
@@ -1744,9 +1733,9 @@ run_start() {
   shift 5 || true
 
   local -a args=(docker run -d --name "$name"
-    --label "com.infocyph.server.run=1"
-    --label "com.infocyph.server.dir=$dir"
-    --label "com.infocyph.server.tag=$tag"
+    --label "com.infocyph.lds.run=1"
+    --label "com.infocyph.lds.dir=$dir"
+    --label "com.infocyph.lds.tag=$tag"
     -w /workspace
     -v "$dir:/workspace"
   )
@@ -1787,12 +1776,12 @@ run_exec_shell() {
 
 cmd_run() {
   # Usage:
-  #   server run                          # build+start+exec for current directory
-  #   server run stop                     # stop container for current directory
-  #   server run rm                       # remove container (and image tag) for current directory
-  #   server run ps                       # list run containers
-  #   server run logs                     # follow logs for current directory container
-  #   server run open [--port P]          # open first published port (or P) in browser
+  #   lds run                          # build+start+exec for current directory
+  #   lds run stop                     # stop container for current directory
+  #   lds run rm                       # remove container (and image tag) for current directory
+  #   lds run ps                       # list run containers
+  #   lds run logs                     # follow logs for current directory container
+  #   lds run open [--port P]          # open first published port (or P) in browser
   #
   # Flags:
   #   --dir PATH                          # run from another directory
@@ -1886,7 +1875,7 @@ cmd_run() {
 
   case "$action" in
   ps)
-    docker ps -a --filter "label=com.infocyph.server.run=1" \
+    docker ps -a --filter "label=com.infocyph.lds.run=1" \
       --format 'table {{.Names}}	{{.Image}}	{{.Status}}	{{.Labels}}'
     return 0
     ;;
@@ -1922,7 +1911,7 @@ cmd_run() {
     if [[ -z "$line" ]]; then
       printf "%b[run]%b No published ports found.
 " "$YELLOW" "$NC"
-      printf "%b[run]%b Tip: start with %bserver run --publish 8025:8025%b then %bserver run open%b
+      printf "%b[run]%b Tip: start with %blds run --publish 8025:8025%b then %blds run open%b
 " \
         "$YELLOW" "$NC" "$BLUE" "$NC" "$BLUE" "$NC"
       return 1
@@ -1983,7 +1972,7 @@ cmd_run() {
 
 cmd_help() {
   cat <<EOF
-${CYAN}Usage:${NC} server [--verbose|-v] <command> [options]
+${CYAN}Usage:${NC} lds [--verbose|-v] <command> [options]
 
 ${CYAN}Default:${NC} quiet docker compose operations. Add ${CYAN}-v${NC} / ${CYAN}--verbose${NC} to see pull/build progress.
 

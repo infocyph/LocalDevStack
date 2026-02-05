@@ -3,37 +3,35 @@ Profiles and Environment
 
 LocalDevStack uses Docker Compose **profiles** so you can enable only the services you want for a given project.
 
-Where profiles are set
+Setting up Environment usable by Your Projects
 ----------------------
 
-- Primary: ``docker/.env`` (this repo)
-- Optional: root ``.env`` (project-level overrides)
+- Use root ``.env`` (project-level overrides)
+- These are common & directly shared to projects you host
+- If you want project specific only a single project you need to handle that inside your project
 
-The key variable is typically:
+Guided setup for on demands services (DB, Cache)
+------------
 
-- ``COMPOSE_PROFILES``: comma-separated profile list
+The ``lds`` CLI typically includes helpers like:
 
-Examples
---------
+- ``lds setup profiles``
 
-Enable Nginx + PHP 8.4 + tools + MariaDB + Redis:
+These helpers are opinionated: they try to keep profiles and generated configs consistent.
+
+Manual setup (Don't use unless you are fully aware of internals)
+------------
+
+Enable PHP 8.4 + MariaDB + Redis:
 
 .. code-block:: none
 
-   COMPOSE_PROFILES=nginx,php,php84,tools,mariadb,redis
+   COMPOSE_PROFILES=php84,mariadb,redis
 
 Enable Apache mode (Nginx -> Apache -> PHP-FPM):
 
 .. code-block:: none
 
-   COMPOSE_PROFILES=nginx,apache,php,php84,tools
+   COMPOSE_PROFILES=apache,php84
 
-Guided setup
-------------
-
-The ``server`` CLI typically includes helpers like:
-
-- ``server setup profiles``
-- ``server setup domain``
-
-These helpers are opinionated: they try to keep profiles and generated configs consistent.
+These are just some of the samples.

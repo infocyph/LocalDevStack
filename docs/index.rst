@@ -30,12 +30,3 @@ that work together (tools, HTTP, runner).
    guides/node-apps
    guides/secrets-sops-age
    guides/notifications
-
-.. toctree::
-   :maxdepth: 2
-   :caption: Images
-
-   images/server-tools
-   images/nginx
-   images/apache
-   images/runner

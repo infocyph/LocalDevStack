@@ -1,18 +1,68 @@
 Domain Setup
 ============
 
-Most users create domains and vhosts through the Tools container (``mkhost``).
+LocalDevStack creates domains and vhosts, when you run ``lds setup domain``.
 
-What ``mkhost`` typically does
+How ``lds setup domain`` works
 ------------------------------
 
-- Generates Nginx vhost config for your domain.
-- Generates Apache vhost config when Apache mode is enabled.
-- Generates a Node compose fragment when you choose a Node app.
-- Optionally triggers certificate generation workflow (see :doc:`tls-and-certificates`).
+1. Run the interactive wizard.
+2. Enable the selected profiles.
+3. Bring the stack up and reload HTTP.
+
+Wizard flow (what the user answers)
+-----------------------------------
+
+``lds setup domain`` runs an interactive 8-step flow:
+
+1. Domain name
+2. App type (PHP or NodeJs)
+3. Runtime version (PHP Major.Minor, or Node major/tags)
+4. Server type (PHP: Nginx or Apache; Node: Nginx forced + optional Node start command)
+5. Protocol (HTTP only / HTTPS only / both + optional redirect)
+6. Document root (relative path mapped under ``/app``)
+7. Client max body size
+8. Mutual TLS toggle (only available when HTTPS is enabled; this requires client side certificate)
+
+What it generates
+-------------------------
+
+Vhost configs
+~~~~~~~~~~~~~~~~~~
+
+Writes generated vhost files:
+
+- Nginx vhost:
+  ``configuration/nginx/<domain>.conf``
+
+- Apache vhost (only when Apache mode is selected):
+  ``configuration/apache/<domain>.conf``
+
+TLS handling (HTTPS)
+~~~~~~~~~~~~~~~~~~~~
+
+If you select HTTPS in the wizard, after writing the HTTPS config;
+this generates/refreshes certificates for all known hosts.
+
+See: :doc:`tls-and-certificates`
+
+Node apps (optional)
+~~~~~~~~~~~~~~~~~~~~
+
+If you choose **NodeJs** app type:
+
+- It generates a Node compose fragment:
+
+  ``docker/extras/<token>.yaml``
+
+The token is derived from the domain (slugified).
+This compose fragment defines a Node service (internal port is always ``3000``) and sets a profile like:
+
+- ``node_<token>``
 
 Tips
 ----
 
-- Keep vhost configs under ``configuration/nginx`` / ``configuration/apache``.
-- Prefer a consistent domain scheme (e.g., ``project.localhost``) for easy routing.
+- Prefer a consistent domain scheme (e.g., ``project.localhost``) so your routing stays predictable.
+- After any vhost/cert changes, ``lds`` will run ``lds http reload`` automatically as part of setup;
+  you can also run it manually when you edit configs yourself.

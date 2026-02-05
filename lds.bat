@@ -36,19 +36,19 @@ if not defined BASH_EXE (
   exit /b 3
 )
 
-if not exist "%DEVHOME%\server" (
-  echo %WARN% Cannot find server script: "%DEVHOME%\server"
+if not exist "%DEVHOME%\lds" (
+  echo %WARN% Cannot find script: "%DEVHOME%\lds"
   exit /b 4
 )
 
 where docker.exe >nul 2>&1
-if errorlevel 1 echo %WARN% docker.exe not found on Windows PATH. If ./server uses docker, it may fail.
+if errorlevel 1 echo %WARN% docker.exe not found on Windows PATH. It may fail.
 if errorlevel 1 goto :run
 
 docker info >nul 2>&1
 if errorlevel 1 echo %WARN% Docker installed but NOT running/reachable (docker info failed). Start Docker Desktop / engine.
 
 :run
-"%BASH_EXE%" -lc "set -euo pipefail; export TERM=xterm-256color; DEVHOME_WIN=\"$1\"; CALLER_WIN=\"$2\"; DEVHOME=$(cygpath -u \"$DEVHOME_WIN\"); CALLER=$(cygpath -u \"$CALLER_WIN\"); cd \"$DEVHOME\"; chmod +x ./server >/dev/null 2>&1 || true; cd \"$CALLER\"; shift 2; exec \"$DEVHOME/server\" --__win_workdir \"$CALLER_WIN\" \"$@\"" bash "%DEVHOME%" "%WORKDIR%" %*
+"%BASH_EXE%" -lc "set -euo pipefail; export TERM=xterm-256color; DEVHOME_WIN=\"$1\"; CALLER_WIN=\"$2\"; DEVHOME=$(cygpath -u \"$DEVHOME_WIN\"); CALLER=$(cygpath -u \"$CALLER_WIN\"); cd \"$DEVHOME\"; chmod +x ./lds >/dev/null 2>&1 || true; cd \"$CALLER\"; shift 2; exec \"$DEVHOME/lds\" --__win_workdir \"$CALLER_WIN\" \"$@\"" bash "%DEVHOME%" "%WORKDIR%" %*
 
 exit /b %ERRORLEVEL%
