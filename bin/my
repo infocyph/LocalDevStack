@@ -1,0 +1,544 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+die(){ echo "Error: $*" >&2; exit 1; }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Repo layout:
+#   <root>/bin/my
+#   <root>/docker/.env
+# ─────────────────────────────────────────────────────────────────────────────
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ENV_FILE="$ROOT_DIR/docker/.env"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MSYS/Git Bash: prevent path auto-conversion when calling docker.exe
+# ─────────────────────────────────────────────────────────────────────────────
+is_msys() {
+  case "${OSTYPE:-}" in
+  msys*|cygwin*) return 0 ;;
+  *) return 1 ;;
+  esac
+}
+
+msys_no_pathconv() {
+  if is_msys; then
+    export MSYS_NO_PATHCONV=1
+    export MSYS2_ARG_CONV_EXCL='*'
+  fi
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Optional host .env load (whitelist only)
+# ─────────────────────────────────────────────────────────────────────────────
+if [[ -r "$ENV_FILE" ]]; then
+  while IFS='=' read -r k v; do
+    [[ -z "${k:-}" || "$k" =~ ^[[:space:]]*# ]] && continue
+    k="${k//[[:space:]]/}"
+    case "$k" in
+    MYSQL_CONTAINER|MYSQL_PORT_IN) ;;
+    *) continue ;;
+    esac
+    v="${v%$'\r'}"
+    v="${v#\"}"; v="${v%\"}"
+    v="${v#\'}"; v="${v%\'}"
+    export "$k=$v"
+  done < "$ENV_FILE"
+fi
+
+SERVICE="${MYSQL_CONTAINER:-MYSQL}"
+MYSQL_PORT_IN="${MYSQL_PORT_IN:-}"
+
+require_container() {
+  docker inspect "$SERVICE" >/dev/null 2>&1 || die "container '$SERVICE' is not running."
+}
+
+is_tty(){ [[ -t 0 ]] && echo "-it" || echo "-i"; }
+
+# POSIX-safe env read from container (works in sh/ash/dash)
+cenv() {
+  local key="$1"
+  docker exec -i "$SERVICE" sh -lc 'eval "printf %s \"\${$1-}\""' sh "$key" 2>/dev/null || true
+}
+
+cenv_any() {
+  local v key
+  for key in "$@"; do
+    v="$(cenv "$key")"
+    [[ -n "${v:-}" ]] && { printf "%s" "$v"; return 0; }
+  done
+  return 1
+}
+
+infer_port() {
+  [[ -n "${MYSQL_PORT_IN:-}" ]] && return 0
+  MYSQL_PORT_IN="$(cenv_any MYSQL_PORT MYSQL_TCP_PORT || true)"
+  MYSQL_PORT_IN="${MYSQL_PORT_IN:-3306}"
+}
+
+# Run mysql inside the container using a temp defaults file (no password in argv)
+mysql_exec_root() {
+  local flags; flags="$(is_tty)"
+  exec docker exec $flags "$SERVICE" sh -lc '
+    umask 077
+    f="$(mktemp)"; trap "rm -f $f" EXIT
+    cat >"$f" <<EOF
+[client]
+user=root
+password=${MYSQL_ROOT_PASSWORD-}
+host=127.0.0.1
+port=${MYSQL_PORT_IN-3306}
+protocol=TCP
+EOF
+    exec mysql --defaults-extra-file="$f" "$@"
+  ' sh "$@"
+}
+
+mysql_exec_user() {
+  local flags; flags="$(is_tty)"
+  exec docker exec $flags "$SERVICE" sh -lc '
+    umask 077
+    f="$(mktemp)"; trap "rm -f $f" EXIT
+    cat >"$f" <<EOF
+[client]
+user=${MYSQL_USER-}
+password=${MYSQL_PASSWORD-}
+host=127.0.0.1
+port=${MYSQL_PORT_IN-3306}
+protocol=TCP
+EOF
+    exec mysql --defaults-extra-file="$f" "$@"
+  ' sh "$@"
+}
+
+# Dump to stdout (host decides where to write)
+mysqldump_stdout_root() {
+  docker exec -i "$SERVICE" sh -lc '
+    umask 077
+    f="$(mktemp)"; trap "rm -f $f" EXIT
+    cat >"$f" <<EOF
+[client]
+user=root
+password=${MYSQL_ROOT_PASSWORD-}
+host=127.0.0.1
+port=${MYSQL_PORT_IN-3306}
+protocol=TCP
+EOF
+    exec mysqldump --defaults-extra-file="$f" \
+      --single-transaction --quick --routines --events \
+      "$@"
+  ' sh "$@"
+}
+
+has_execute_flag() {
+  local a
+  for a in "$@"; do
+    [[ "$a" == "-e" || "$a" == "--execute" ]] && return 0
+  done
+  return 1
+}
+
+looks_like_sql() {
+  local s="$1"
+  [[ "$s" == *";"* || "$s" == *" "* ]] && return 0
+  [[ "$s" =~ ^[[:space:]]*(select|insert|update|delete|with|show|describe|desc|explain|use|set|create|alter|drop|truncate|grant|revoke)[[:space:]] ]] && return 0
+  return 1
+}
+
+# NAME shorthand for import: ./NAME.sql or ./NAME.sql.gz
+resolve_import_path() {
+  local in="$1"
+  if [[ -f "$in" ]]; then
+    printf "%s" "$in"
+    return 0
+  fi
+  # If user passed NAME without extension, try ./NAME.sql(.gz)
+  if [[ "$in" != *.* ]]; then
+    if [[ -f "./${in}.sql" ]]; then
+      printf "%s" "./${in}.sql"
+      return 0
+    fi
+    if [[ -f "./${in}.sql.gz" ]]; then
+      printf "%s" "./${in}.sql.gz"
+      return 0
+    fi
+  fi
+  return 1
+}
+
+usage() {
+  cat >&2 <<'TXT'
+my (docker wrapper) — includes dump helpers
+
+Core:
+  my [--user] [mysql args...]
+  my dbs
+  my tables [db]
+  my create-db [db]
+  my drop-db   <db>
+  my status
+
+Import (SQL only):
+  my import <file.sql|file.sql.gz|NAME> [db]
+    - NAME shorthand: uses ./NAME.sql or ./NAME.sql.gz if exists; db defaults to NAME
+
+Export/Dump (writes local files; uses mount):
+  my dump   [db] [out.sql|out.sql.gz]
+  my export [db] [out.sql|out.sql.gz]   # alias of dump
+
+Convenience:
+  my "SELECT 1"         -> runs on default DB
+  my mydb "SELECT 1"    -> runs on mydb
+  cat file.sql | mysql     -> runs on default DB (stdin)
+
+Notes:
+- tables shows all tables across schemas: information_schema.tables
+TXT
+}
+
+main() {
+  case "${1:-}" in help|-h|--help) usage; exit 0;; esac
+
+  require_container
+  infer_port
+  msys_no_pathconv
+
+  local as_user=false
+  if [[ "${1:-}" == "--user" ]]; then
+    as_user=true
+    shift
+  fi
+
+  # Prefer container env (these are your defaults)
+  local ROOT_PW USER USER_PW DEF_DB
+  ROOT_PW="$(cenv_any MYSQL_ROOT_PASSWORD || true)"
+  USER="$(cenv_any MYSQL_USER || true)"
+  USER_PW="$(cenv_any MYSQL_PASSWORD || true)"
+  DEF_DB="$(cenv_any MYSQL_DATABASE || true)"
+
+  # Stdin pipe mode: cat file.sql | my
+  if [[ $# -eq 0 && ! -t 0 ]]; then
+    [[ -n "${DEF_DB:-}" ]] || die "No default database set in container (MYSQL_DATABASE)."
+    if [[ "$as_user" == true ]]; then
+      exec docker exec -i "$SERVICE" sh -lc '
+        db="$1"
+        umask 077
+        f="$(mktemp)"; trap "rm -f $f" EXIT
+        cat >"$f" <<EOF
+[client]
+user=${MYSQL_USER-}
+password=${MYSQL_PASSWORD-}
+host=127.0.0.1
+port=${MYSQL_PORT_IN-3306}
+protocol=TCP
+EOF
+        exec mysql --defaults-extra-file="$f" "$db"
+      ' sh "$DEF_DB"
+    else
+      exec docker exec -i "$SERVICE" sh -lc '
+        db="$1"
+        umask 077
+        f="$(mktemp)"; trap "rm -f $f" EXIT
+        cat >"$f" <<EOF
+[client]
+user=root
+password=${MYSQL_ROOT_PASSWORD-}
+host=127.0.0.1
+port=${MYSQL_PORT_IN-3306}
+protocol=TCP
+EOF
+        exec mysql --defaults-extra-file="$f" "$db"
+      ' sh "$DEF_DB"
+    fi
+  fi
+
+  # No args => interactive mysql shell
+  if [[ $# -eq 0 ]]; then
+    if [[ "$as_user" == true ]]; then mysql_exec_user; else mysql_exec_root; fi
+    exit 0
+  fi
+
+  local cmd="${1:-}"
+  case "$cmd" in
+  status)
+    docker ps --filter "name=^/${SERVICE}$" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+    exit 0
+    ;;
+  esac
+
+  case "$cmd" in
+  dbs)
+    if [[ "$as_user" == true ]]; then
+      mysql_exec_user -e "SHOW DATABASES;"
+    else
+      mysql_exec_root -e "SHOW DATABASES;"
+    fi
+    ;;
+
+  tables)
+    shift
+    local db="${1:-$DEF_DB}"
+
+    if [[ -n "${db:-}" ]]; then
+      # Show tables for a specific db (includes views)
+      if [[ "$as_user" == true ]]; then
+        mysql_exec_user -N -e "SELECT TABLE_SCHEMA, TABLE_NAME, TABLE_TYPE FROM information_schema.tables WHERE TABLE_SCHEMA='${db}' ORDER BY TABLE_NAME;"
+      else
+        mysql_exec_root -N -e "SELECT TABLE_SCHEMA, TABLE_NAME, TABLE_TYPE FROM information_schema.tables WHERE TABLE_SCHEMA='${db}' ORDER BY TABLE_NAME;"
+      fi
+    else
+      # All schemas (avoid "no tables" confusion)
+      if [[ "$as_user" == true ]]; then
+        mysql_exec_user -N -e "SELECT TABLE_SCHEMA, TABLE_NAME, TABLE_TYPE FROM information_schema.tables WHERE TABLE_SCHEMA NOT IN ('mysql','sys','performance_schema','information_schema') ORDER BY TABLE_SCHEMA, TABLE_NAME;"
+      else
+        mysql_exec_root -N -e "SELECT TABLE_SCHEMA, TABLE_NAME, TABLE_TYPE FROM information_schema.tables WHERE TABLE_SCHEMA NOT IN ('mysql','sys','performance_schema','information_schema') ORDER BY TABLE_SCHEMA, TABLE_NAME;"
+      fi
+    fi
+    ;;
+
+  create-db)
+    shift
+    local db="${1:-$DEF_DB}"
+    [[ -n "${db:-}" ]] || die "create-db requires a db name (or set MYSQL_DATABASE)."
+    [[ "$db" =~ ^[A-Za-z0-9_]+$ ]] || die "invalid db name '$db' (allowed: A-Z a-z 0-9 _)"
+
+    docker exec -i "$SERVICE" sh -lc '
+        db="$1"
+        u="${MYSQL_USER-}"
+        umask 077
+        f="$(mktemp)"; trap "rm -f $f" EXIT
+        cat >"$f" <<EOF
+[client]
+user=root
+password=${MYSQL_ROOT_PASSWORD-}
+host=127.0.0.1
+port=${MYSQL_PORT_IN-3306}
+protocol=TCP
+EOF
+        mysql --defaults-extra-file="$f" -e "
+          CREATE DATABASE IF NOT EXISTS \`$db\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+          $( [ -n \"$u\" ] && printf \"GRANT ALL PRIVILEGES ON \\\`%s\\\`.* TO '%s'@'%%';\" \"$db\" \"$u\" )
+          FLUSH PRIVILEGES;
+        "
+      ' sh "$db"
+
+    echo "OK: database '$db' ensured${USER:+ + privileges granted to $USER}" >&2
+    ;;
+
+  drop-db)
+    shift
+    local db="${1:-}"
+    [[ -n "${db:-}" ]] || die "drop-db requires a db name."
+    [[ "$db" =~ ^[A-Za-z0-9_]+$ ]] || die "invalid db name '$db' (allowed: A-Z a-z 0-9 _)"
+
+    docker exec -i "$SERVICE" sh -lc '
+        db="$1"
+        umask 077
+        f="$(mktemp)"; trap "rm -f $f" EXIT
+        cat >"$f" <<EOF
+[client]
+user=root
+password=${MYSQL_ROOT_PASSWORD-}
+host=127.0.0.1
+port=${MYSQL_PORT_IN-3306}
+protocol=TCP
+EOF
+        mysql --defaults-extra-file="$f" -e "DROP DATABASE IF EXISTS \`$db\`;"
+      ' sh "$db"
+
+    echo "OK: dropped database '$db' (if existed)" >&2
+    ;;
+
+  import)
+    shift
+    local in="${1:-}"; shift || true
+    [[ -n "${in:-}" ]] || die "import requires <file.sql|file.sql.gz|NAME>."
+
+    local file
+    if ! file="$(resolve_import_path "$in")"; then
+      die "file not found: $in (also tried ./${in}.sql and ./${in}.sql.gz)"
+    fi
+
+    local db="${1:-}"
+    if [[ -z "${db:-}" ]]; then
+      # If shorthand NAME was used, default DB = NAME
+      if [[ "$in" != *.* ]]; then db="$in"; else db="${DEF_DB:-}"; fi
+    fi
+    [[ -n "${db:-}" ]] || die "import requires a db name (or set MYSQL_DATABASE)."
+    [[ "$db" =~ ^[A-Za-z0-9_]+$ ]] || die "invalid db name '$db' (allowed: A-Z a-z 0-9 _)"
+
+    if [[ "$file" == *.gz ]]; then
+      if command -v gunzip >/dev/null 2>&1; then
+        gunzip -c "$file" | docker exec -i "$SERVICE" sh -lc '
+            db="$1"
+            umask 077
+            f="$(mktemp)"; trap "rm -f $f" EXIT
+            cat >"$f" <<EOF
+[client]
+user=root
+password=${MYSQL_ROOT_PASSWORD-}
+host=127.0.0.1
+port=${MYSQL_PORT_IN-3306}
+protocol=TCP
+EOF
+            exec mysql --defaults-extra-file="$f" "$db"
+          ' sh "$db"
+      else
+        die "gunzip not found on host; cannot import .gz"
+      fi
+    else
+      cat "$file" | docker exec -i "$SERVICE" sh -lc '
+          db="$1"
+          umask 077
+          f="$(mktemp)"; trap "rm -f $f" EXIT
+          cat >"$f" <<EOF
+[client]
+user=root
+password=${MYSQL_ROOT_PASSWORD-}
+host=127.0.0.1
+port=${MYSQL_PORT_IN-3306}
+protocol=TCP
+EOF
+          exec mysql --defaults-extra-file="$f" "$db"
+        ' sh "$db"
+    fi
+
+    echo "OK: imported '$file' -> db '$db'" >&2
+    ;;
+
+  export|dump)
+    shift
+    local db="${1:-$DEF_DB}"
+    [[ -n "${db:-}" ]] || die "dump requires a db name (or set MYSQL_DATABASE)."
+    [[ "$db" =~ ^[A-Za-z0-9_]+$ ]] || die "invalid db name '$db' (allowed: A-Z a-z 0-9 _)"
+
+    local out="${2:-${db}.sql}"
+    # Write on HOST (fixes /workspace permission + uid mapping issues)
+    umask 077
+
+    if [[ "$out" == *.gz ]]; then
+      if command -v gzip >/dev/null 2>&1; then
+        mysqldump_stdout_root "$db" | gzip -c > "$out"
+      else
+        # fallback gzip inside container
+        docker exec -i "$SERVICE" sh -lc '
+            umask 077
+            f="$(mktemp)"; trap "rm -f $f" EXIT
+            cat >"$f" <<EOF
+[client]
+user=root
+password=${MYSQL_ROOT_PASSWORD-}
+host=127.0.0.1
+port=${MYSQL_PORT_IN-3306}
+protocol=TCP
+EOF
+            mysqldump --defaults-extra-file="$f" --single-transaction --quick --routines --events "$1" | gzip -c
+          ' sh "$db" > "$out"
+      fi
+    else
+      mysqldump_stdout_root "$db" > "$out"
+    fi
+
+    echo "OK: dumped '$db' -> ./$out" >&2
+    ;;
+
+  *)
+    shift 0
+
+    # explicit -e passthrough
+    if has_execute_flag "$@"; then
+      if [[ "$as_user" == true ]]; then mysql_exec_user "$@"; else mysql_exec_root "$@"; fi
+      exit 0
+    fi
+
+    # Convenience: my "SELECT 1"
+    if [[ $# -eq 1 ]]; then
+      if looks_like_sql "$1"; then
+        [[ -n "${DEF_DB:-}" ]] || die "No default database set (MYSQL_DATABASE). Provide db: my <db> \"SQL...\""
+        if [[ "$as_user" == true ]]; then
+          exec docker exec "$(is_tty)" "$SERVICE" sh -lc '
+              db="$1"; sql="$2"
+              umask 077
+              f="$(mktemp)"; trap "rm -f $f" EXIT
+              cat >"$f" <<EOF
+[client]
+user=${MYSQL_USER-}
+password=${MYSQL_PASSWORD-}
+host=127.0.0.1
+port=${MYSQL_PORT_IN-3306}
+protocol=TCP
+EOF
+              exec mysql --defaults-extra-file="$f" "$db" -e "$sql"
+            ' sh "$DEF_DB" "$1"
+        else
+          exec docker exec "$(is_tty)" "$SERVICE" sh -lc '
+              db="$1"; sql="$2"
+              umask 077
+              f="$(mktemp)"; trap "rm -f $f" EXIT
+              cat >"$f" <<EOF
+[client]
+user=root
+password=${MYSQL_ROOT_PASSWORD-}
+host=127.0.0.1
+port=${MYSQL_PORT_IN-3306}
+protocol=TCP
+EOF
+              exec mysql --defaults-extra-file="$f" "$db" -e "$sql"
+            ' sh "$DEF_DB" "$1"
+        fi
+      fi
+    fi
+
+    # Convenience: my mydb "SELECT 1"
+    if [[ $# -ge 2 && "$1" =~ ^[A-Za-z0-9_]+$ ]]; then
+      local db="$1"
+      shift
+      local sql="$*"
+      if looks_like_sql "$sql"; then
+        if [[ "$as_user" == true ]]; then
+          exec docker exec "$(is_tty)" "$SERVICE" sh -lc '
+              db="$1"; sql="$2"
+              umask 077
+              f="$(mktemp)"; trap "rm -f $f" EXIT
+              cat >"$f" <<EOF
+[client]
+user=${MYSQL_USER-}
+password=${MYSQL_PASSWORD-}
+host=127.0.0.1
+port=${MYSQL_PORT_IN-3306}
+protocol=TCP
+EOF
+              exec mysql --defaults-extra-file="$f" "$db" -e "$sql"
+            ' sh "$db" "$sql"
+        else
+          exec docker exec "$(is_tty)" "$SERVICE" sh -lc '
+              db="$1"; sql="$2"
+              umask 077
+              f="$(mktemp)"; trap "rm -f $f" EXIT
+              cat >"$f" <<EOF
+[client]
+user=root
+password=${MYSQL_ROOT_PASSWORD-}
+host=127.0.0.1
+port=${MYSQL_PORT_IN-3306}
+protocol=TCP
+EOF
+              exec mysql --defaults-extra-file="$f" "$db" -e "$sql"
+            ' sh "$db" "$sql"
+        fi
+      fi
+    fi
+
+    # passthrough: if no db provided and default exists, append it
+    local has_pos=false a
+    for a in "$@"; do
+      [[ "$a" != "-"* ]] && has_pos=true && break
+    done
+    [[ "$has_pos" == false && -n "${DEF_DB:-}" ]] && set -- "$@" "$DEF_DB"
+
+    if [[ "$as_user" == true ]]; then mysql_exec_user "$@"; else mysql_exec_root "$@"; fi
+    ;;
+  esac
+}
+
+main "$@"

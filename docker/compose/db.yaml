@@ -1,0 +1,165 @@
+x-db-service: &db-service
+  restart: unless-stopped
+  networks:
+    datastore: {}
+
+services:
+  redis:
+    <<: *db-service
+    container_name: REDIS
+    hostname: redis
+    image: redis/redis-stack-server:${REDIS_VERSION:-latest}
+    profiles: [redis]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - ../../data/redis:/data
+    environment:
+      - TZ=${TZ:-}
+      - REDIS_ARGS=--save 10 1 --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      datastore:
+        ipv4_address: 172.30.0.100
+
+  postgres:
+    <<: *db-service
+    container_name: POSTGRESQL
+    hostname: postgres
+    image: postgres:${POSTGRES_VERSION:-alpine}
+    profiles: [postgresql]
+    environment:
+      - TZ=${TZ:-}
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_DB=${POSTGRES_DATABASE:-postgres}
+    volumes:
+      - ../../data/postgresql:/var/lib/postgresql
+      - ../conf/pg_hba.conf:/etc/postgresql/pg_hba.conf
+#      - ../conf/postgresql.conf:/etc/postgresql/postgresql.conf
+    command:
+      [
+        "postgres",
+        "-c", "hba_file=/etc/postgresql/pg_hba.conf",
+#        "-c", "config_file=/etc/postgresql/postgresql.conf",
+      ]
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "PGPASSWORD=${POSTGRES_PASSWORD:-postgres} pg_isready -U ${POSTGRES_USER:-postgres} -h localhost -d ${POSTGRES_DB:-postgres}"
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      datastore:
+        ipv4_address: 172.30.0.101
+
+  mysql:
+    <<: *db-service
+    container_name: MYSQL
+    hostname: mysql
+    image: mysql:${MYSQL_VERSION:-latest}
+    profiles: [mysql]
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    environment:
+      - TZ=${TZ:-}
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-12345}
+      - MYSQL_USER=${MYSQL_USER:-infocyph}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-12345}
+      - MYSQL_DATABASE=${MYSQL_DATABASE:-localdb}
+    volumes:
+      - ../../data/mysql:/var/lib/mysql
+      - ../../logs/mysql:/var/log/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h127.0.0.1 -u root -p${MYSQL_ROOT_PASSWORD:-12345}"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      datastore:
+        ipv4_address: 172.30.0.102
+
+  mongodb:
+    <<: *db-service
+    container_name: MONGODB
+    hostname: mongodb
+    image: mongo:${MONGODB_VERSION:-latest}
+    profiles: [mongodb]
+    ports:
+      - "${MONGODB_PORT:-27017}:27017"
+    environment:
+      - TZ=${TZ:-}
+      - MONGO_INITDB_ROOT_USERNAME=${MONGODB_ROOT_USERNAME:-root}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGODB_ROOT_PASSWORD:-12345}
+    volumes:
+      - ../../data/mongo:/data/db
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "mongosh \"mongodb://${MONGODB_ROOT_USERNAME:-root}:${MONGODB_ROOT_PASSWORD:-12345}@localhost:${MONGODB_PORT:-27017}/admin\" --eval \"db.adminCommand('ping')\" --quiet || exit 1"
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      datastore:
+        ipv4_address: 172.30.0.103
+
+  mariadb:
+    <<: *db-service
+    container_name: MARIADB
+    hostname: mariadb
+    image: mariadb:${MARIADB_VERSION:-latest}
+    profiles: [mariadb]
+    ports:
+      - "${MARIADB_PORT:-3306}:3306"
+    environment:
+      - TZ=${TZ:-}
+      - MARIADB_ROOT_PASSWORD=${MARIADB_ROOT_PASSWORD:-12345}
+      - MARIADB_USER=${MARIADB_USER:-infocyph}
+      - MARIADB_PASSWORD=${MARIADB_PASSWORD:-12345}
+      - MARIADB_DATABASE=${MARIADB_DATABASE:-localdb}
+    volumes:
+      - ../../data/mariadb:/var/lib/mysql
+      - ../../logs/mariadb:/var/log/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p${MARIADB_ROOT_PASSWORD:-12345}"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      datastore:
+        ipv4_address: 172.30.0.104
+
+  elasticsearch:
+    <<: *db-service
+    container_name: ELASTICSEARCH
+    hostname: elasticsearch
+    image: elasticsearch:${ELASTICSEARCH_VERSION:-8.18.0}
+    profiles: [elasticsearch]
+    ports:
+      - "${ELASTICSEARCH_PORT:-9200}:9200"
+    environment:
+      - TZ=${TZ:-}
+      - "discovery.type=single-node"
+      - "xpack.security.enabled=false"
+      - "cluster.name=single_node_cluster"
+      - "node.name=elasticsearch-node-single"
+    volumes:
+      - ../../data/elasticsearch:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      datastore:
+        ipv4_address: 172.30.0.105

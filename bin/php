@@ -1,3 +1,278 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
 
-docker exec -it Core php $@
+die() {
+  echo "Error: $*" >&2
+  exit 1
+}
+
+if [[ -t 2 ]]; then
+  C_RESET=$'\033[0m'
+  C_CYAN=$'\033[0;36m'
+  C_YELLOW=$'\033[0;33m'
+  C_DIM=$'\033[2m'
+else
+  C_RESET=""
+  C_CYAN=""
+  C_YELLOW=""
+  C_DIM=""
+fi
+kv() { printf "%s%s%s %s%s%s\n" "$C_CYAN" "$1" "$C_RESET" "$C_YELLOW" "$2" "$C_RESET" >&2; }
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+normalize_container() {
+  local v="$1"
+  [[ -z "$v" ]] && return 0
+  if [[ "$v" =~ ^PHP_[0-9]+\.[0-9]+$ ]]; then
+    echo "$v"
+  elif [[ "$v" =~ ^[0-9]+\.[0-9]+$ ]]; then
+    echo "PHP_$v"
+  else
+    die "invalid version '$v' (use like 8.4)"
+  fi
+}
+
+relpath_under_pwd() {
+  local p="$1"
+  local cwd abs rel
+  cwd="$(cd "$PWD" && pwd)"
+  abs="$(cd "$(dirname "$p")" && pwd)/$(basename "$p")"
+
+  if command -v python3 >/dev/null 2>&1; then
+    rel="$(
+      python3 - "$cwd" "$abs" <<'PY' 2>/dev/null || true
+import os,sys
+cwd=sys.argv[1]; p=sys.argv[2]
+try:
+  r=os.path.relpath(p,cwd)
+  print(r)
+except Exception:
+  pass
+PY
+    )"
+  else
+    if [[ "$abs" == "$cwd/"* ]]; then
+      rel="${abs#"$cwd/"}"
+    else
+      rel=""
+    fi
+  fi
+
+  [[ -n "${rel:-}" && "$rel" != /* && "$rel" != ..* ]] || return 1
+  printf "%s" "$rel"
+}
+
+port_in_use() {
+  local port="$1"
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -i:"$port" >/dev/null 2>&1 && return 0
+    return 1
+  fi
+  if command -v ss >/dev/null 2>&1; then
+    ss -lnt 2>/dev/null | grep -qE "[:.]$port[[:space:]]" && return 0
+    return 1
+  fi
+  if command -v netstat >/dev/null 2>&1; then
+    netstat -lnt 2>/dev/null | grep -qE "[:.]$port[[:space:]]" && return 0
+    return 1
+  fi
+  return 1
+}
+
+pick_highest_php_container() {
+  local names
+  names="$(docker ps --format '{{.Names}}' | awk '/^PHP_[0-9]+\.[0-9]+$/')"
+  [[ -n "$names" ]] || return 1
+  printf "%s\n" "$names" | sed 's/^PHP_//' | sort -Vr | head -n1 | awk 'NF{print "PHP_"$0}'
+}
+
+resolve_host_pwd() {
+  local host="${WORKDIR_WIN:-${WORKING_DIR:-}}"
+  if [[ -z "${host}" ]]; then
+    host="$PWD"
+  fi
+  [[ -n "${host}" ]] || host="$REPO_ROOT"
+
+  if command -v cygpath >/dev/null 2>&1; then
+    [[ "$host" == /* ]] && host="$(cygpath -w "$host")"
+  fi
+
+  printf '%s' "$host"
+}
+
+is_msys() {
+  case "${OSTYPE:-}" in
+  msys* | cygwin*) return 0 ;;
+  *) return 1 ;;
+  esac
+}
+
+msys_no_pathconv() {
+  if is_msys; then
+    export MSYS_NO_PATHCONV=1
+    export MSYS2_ARG_CONV_EXCL='*'
+  fi
+}
+
+EXPLICIT_VER=""
+ARGS=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+  -V | --v | --php)
+    [[ -n "${2:-}" ]] || die "$1 requires a version (e.g. $1 8.4)"
+    EXPLICIT_VER="$2"
+    shift 2
+    ;;
+  --)
+    shift
+    ARGS+=("$@")
+    break
+    ;;
+  *)
+    ARGS+=("$1")
+    shift
+    ;;
+  esac
+done
+
+TARGET="$(normalize_container "$EXPLICIT_VER")"
+
+if [[ -n "$TARGET" ]]; then
+  docker ps --format '{{.Names}}' | grep -qx "$TARGET" || die "container '$TARGET' is not running."
+else
+  TARGET="$(pick_highest_php_container)" || die "no PHP container is running (expected names like PHP_8.4)."
+fi
+
+IMAGE="$(docker inspect -f '{{.Config.Image}}' "$TARGET" 2>/dev/null)" || die "failed to inspect '$TARGET'."
+
+kv "Container:" "$TARGET"
+kv "Image:" "$IMAGE"
+
+HOST_PWD="$(resolve_host_pwd)"
+msys_no_pathconv
+
+serve_mode() {
+  local host="127.0.0.1"
+  local port="8000"
+  local root_dir="$PWD"
+  local verbose=false
+  local router_file=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+    --host=*) host="${1#*=}" ;;
+    --host)
+      shift
+      host="${1:-}"
+      ;;
+    --port=*) port="${1#*=}" ;;
+    --port)
+      shift
+      port="${1:-}"
+      ;;
+    --root=*) root_dir="${1#*=}" ;;
+    --root)
+      shift
+      root_dir="${1:-}"
+      ;;
+    --router=*) router_file="${1#*=}" ;;
+    --router)
+      shift
+      router_file="${1:-}"
+      ;;
+    -v | --verbose) verbose=true ;;
+    *) die "unknown serve option: $1" ;;
+    esac
+    shift
+  done
+
+  [[ -n "${host:-}" ]] || die "serve: --host requires a value"
+  [[ "$port" =~ ^[0-9]+$ ]] || die "serve: invalid --port '$port'"
+  ((port >= 1 && port <= 65535)) || die "serve: port out of range: $port"
+
+  if [[ "$root_dir" != /* ]]; then root_dir="$PWD/$root_dir"; fi
+  [[ -d "$root_dir" ]] || die "serve: root directory not found: $root_dir"
+
+  local root_rel=""
+  if [[ "$root_dir" == "$PWD" ]]; then
+    root_rel="."
+  else
+    root_rel="$(relpath_under_pwd "$root_dir")" || die "serve: --root must be under current directory ($PWD)"
+  fi
+
+  local router_rel=""
+  if [[ -n "$router_file" ]]; then
+    [[ "$router_file" != /* ]] && router_file="$PWD/$router_file"
+    [[ -f "$router_file" ]] || die "serve: router file not found: $router_file"
+    router_rel="$(relpath_under_pwd "$router_file")" || die "serve: router must be under current directory ($PWD)"
+  fi
+
+  if port_in_use "$port"; then
+    die "serve: port $port is already in use (use --port <n>)"
+  fi
+
+  local found_root="$root_dir"
+  if [[ -z "$router_rel" ]]; then
+    local candidates=(
+      "$root_dir/public/index.php"
+      "$root_dir/public/index.html"
+      "$root_dir/index.php"
+      "$root_dir/index.html"
+    )
+    local c
+    for c in "${candidates[@]}"; do
+      if [[ -f "$c" ]]; then
+        found_root="$(dirname "$c")"
+        break
+      fi
+    done
+  fi
+
+  local found_rel=""
+  if [[ "$found_root" == "$PWD" ]]; then
+    found_rel="."
+  else
+    found_rel="$(relpath_under_pwd "$found_root")" || die "serve: discovered root must be under current directory ($PWD)"
+  fi
+
+  if $verbose; then
+    kv "Serve:" "${C_DIM}host=${host} port=${port} root=${found_rel} router=${router_rel:-<none>}${C_RESET}"
+  else
+    kv "Serve:" "${C_DIM}${host}:${port}  root=${found_rel}${C_RESET}"
+  fi
+
+  local publish=()
+  if [[ "$host" == "0.0.0.0" || "$host" == "::" ]]; then
+    publish=(-p "${port}:${port}")
+  else
+    publish=(-p "${host}:${port}:${port}")
+  fi
+
+  local RUN_FLAGS=(--rm -v "$HOST_PWD":/workspace -w /workspace)
+  [[ -t 0 ]] && RUN_FLAGS+=(-it) || RUN_FLAGS+=(-i)
+  RUN_FLAGS+=(-u "$(id -u):$(id -g)")
+  RUN_FLAGS+=("${publish[@]}")
+
+  if [[ -n "$router_rel" ]]; then
+    exec docker run "${RUN_FLAGS[@]}" "$IMAGE" php -S "0.0.0.0:${port}" -t "/workspace/${found_rel#./}" "/workspace/${router_rel#./}"
+  fi
+
+  if [[ "$found_rel" == "." ]]; then
+    exec docker run "${RUN_FLAGS[@]}" "$IMAGE" php -S "0.0.0.0:${port}"
+  else
+    exec docker run "${RUN_FLAGS[@]}" "$IMAGE" php -S "0.0.0.0:${port}" -t "/workspace/${found_rel#./}"
+  fi
+}
+
+if [[ "${ARGS[0]:-}" == "serve" ]]; then
+  serve_mode "${ARGS[@]:1}"
+fi
+
+RUN_FLAGS=(--rm -v "$HOST_PWD":/workspace -w /workspace)
+[[ -t 0 ]] && RUN_FLAGS+=(-it) || RUN_FLAGS+=(-i)
+RUN_FLAGS+=(-u "$(id -u):$(id -g)")
+
+exec docker run "${RUN_FLAGS[@]}" "$IMAGE" php "${ARGS[@]}"

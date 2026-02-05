@@ -1,0 +1,45 @@
+services:
+  nginx:
+    container_name: NGINX
+    hostname: nginx
+    image: infocyph/nginx:latest
+    restart: unless-stopped
+    environment:
+      - TZ=${TZ:-}
+    ports:
+      - "${NGINX_HTTP_PORT:-80}:80"
+      - "${NGINX_HTTPS_PORT:-443}:443"
+    volumes:
+      - ../../logs/nginx:/var/log/nginx
+      - ../../configuration/nginx:/etc/nginx/conf.d:ro
+      - ../../configuration/ssl:/etc/mkcert:ro
+      - ../../configuration/rootCA:/etc/share/rootCA:ro
+      - "${PROJECT_DIR:-./../../../application}:/app"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      frontend:
+        ipv4_address: 172.28.0.10
+    depends_on:
+      - server-tools
+
+  apache:
+    container_name: APACHE
+    hostname: apache
+    image: infocyph/apache:latest
+    restart: always
+    profiles:
+      - apache
+    environment:
+      - TZ=${TZ:-}
+    volumes:
+      - ../../configuration/ssl:/etc/mkcert:ro
+      - ../../configuration/apache:/usr/local/apache2/conf/extra:ro
+      - ../../logs/apache:/var/log/apache2
+      - ../../configuration/rootCA:/etc/share/rootCA:ro
+      - "${PROJECT_DIR:-./../../../application}:/app"
+    depends_on:
+      - nginx
+    networks:
+      frontend:
+        ipv4_address: 172.28.0.11

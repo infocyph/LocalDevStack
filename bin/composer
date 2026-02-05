@@ -1,0 +1,343 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+die() {
+  echo "Error: $*" >&2
+  exit 1
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Repo layout:
+#   <root>/bin/composer        (this script)
+#   <root>/docker/.env
+#   <root>/configuration/ssh
+# ─────────────────────────────────────────────────────────────────────────────
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ENV_FILE="$ROOT_DIR/docker/.env"
+SSH_DIR="$ROOT_DIR/configuration/ssh"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Pretty output (auto-disable when stderr isn't a TTY)
+# ─────────────────────────────────────────────────────────────────────────────
+if [[ -t 2 ]]; then
+  C_RESET=$'\033[0m'
+  C_CYAN=$'\033[0;36m'
+  C_YELLOW=$'\033[0;33m'
+else
+  C_RESET=""
+  C_CYAN=""
+  C_YELLOW=""
+fi
+
+kv() {
+  local title="$1" value="$2"
+  printf "%s%s%s %s\n" "$C_CYAN" "$title" "$C_RESET" "$value" >&2
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Load docker/.env safely (skip UID/EUID because bash has readonly UID/EUID)
+# ─────────────────────────────────────────────────────────────────────────────
+if [[ -r "$ENV_FILE" ]]; then
+  set -o allexport
+  # shellcheck disable=SC1090
+  source <(grep -vE '^(UID|EUID)=' "$ENV_FILE")
+  set +o allexport
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MSYS/Git Bash detection (parser-safe)
+# ─────────────────────────────────────────────────────────────────────────────
+is_msys() {
+  case "${OSTYPE:-}" in
+  msys* | cygwin*) return 0 ;;
+  *) return 1 ;;
+  esac
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MSYS/Git Bash: prevent path auto-conversion when calling docker.exe
+# Fixes: "-w /workspace" becoming "-w D:/Program Files/Git/workspace"
+# ─────────────────────────────────────────────────────────────────────────────
+msys_no_pathconv() {
+  if is_msys; then
+    export MSYS_NO_PATHCONV=1
+    export MSYS2_ARG_CONV_EXCL='*'
+  fi
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Resolve host working directory for Docker Desktop bind mount.
+# Priority:
+#   1) WORKDIR_WIN  (from server.bat wrapper)
+#   2) WORKING_DIR  (from docker/.env)
+#   3) $PWD
+#   4) repo root (safe fallback)
+# NOTE: host path should be Windows absolute for Docker Desktop on Windows.
+# ─────────────────────────────────────────────────────────────────────────────
+resolve_host_pwd() {
+  local host="${WORKDIR_WIN:-${WORKING_DIR:-}}"
+
+  if [[ -z "${host}" ]]; then
+    host="$PWD"
+  fi
+  [[ -n "${host}" ]] || host="$ROOT_DIR"
+
+  if command -v cygpath >/dev/null 2>&1; then
+    # Convert MSYS /c/... -> C:\... for docker.exe bind mount
+    [[ "$host" == /* ]] && host="$(cygpath -w "$host")"
+  fi
+
+  # Guard: if launched in Git install "workspace", fallback to repo root
+  case "$host" in
+  *"Program Files/Git/workspace"* | *"Program Files\\Git\\workspace"*)
+    if command -v cygpath >/dev/null 2>&1; then
+      host="$(cygpath -w "$ROOT_DIR")"
+    else
+      host="$ROOT_DIR"
+    fi
+    ;;
+  esac
+
+  printf '%s' "$host"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Version helpers
+# ─────────────────────────────────────────────────────────────────────────────
+ver_norm() {
+  local v="$1"
+  if [[ "$v" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]]; then
+    local a b c
+    IFS='.' read -r a b c <<<"$v"
+    b="${b:-0}"
+    c="${c:-0}"
+    echo "${a}.${b}.${c}"
+  else echo "$v"; fi
+}
+ver_cmp_ge() {
+  local a b
+  a="$(ver_norm "$1")"
+  b="$(ver_norm "$2")"
+  [[ "$(printf "%s\n%s\n" "$b" "$a" | sort -V | tail -n1)" == "$a" ]]
+}
+ver_cmp_gt() {
+  local a b
+  a="$(ver_norm "$1")"
+  b="$(ver_norm "$2")"
+  [[ "$a" != "$b" ]] && ver_cmp_ge "$a" "$b"
+}
+ver_cmp_le() {
+  local a b
+  a="$(ver_norm "$1")"
+  b="$(ver_norm "$2")"
+  [[ "$(printf "%s\n%s\n" "$a" "$b" | sort -V | head -n1)" == "$a" ]]
+}
+ver_cmp_lt() {
+  local a b
+  a="$(ver_norm "$1")"
+  b="$(ver_norm "$2")"
+  [[ "$a" != "$b" ]] && ver_cmp_le "$a" "$b"
+}
+
+read_php_constraint() {
+  [[ -f composer.json ]] || return 1
+
+  if command -v jq >/dev/null 2>&1; then
+    local v
+    v="$(jq -r '.require.php // empty' composer.json 2>/dev/null || true)"
+    [[ -n "$v" && "$v" != "null" ]] && {
+      echo "$v"
+      return 0
+    }
+  fi
+
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - <<'PY' 2>/dev/null || true
+import json
+try:
+    with open("composer.json","r",encoding="utf-8") as f:
+        data=json.load(f)
+    v=(data.get("require") or {}).get("php") or ""
+    if isinstance(v,str) and v.strip():
+        print(v.strip())
+except Exception:
+    pass
+PY
+    return 0
+  fi
+
+  local line
+  line="$(grep -Eo '"php"[[:space:]]*:[[:space:]]*"[^"]+"' composer.json 2>/dev/null | head -n1 || true)"
+  [[ -n "$line" ]] || return 1
+  echo "$line" | sed -E 's/.*"php"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/'
+}
+
+constraint_allows() {
+  local constraint="$1" cand="$2"
+  local cand_full
+  cand_full="$(ver_norm "$cand")"
+  [[ -z "${constraint// /}" ]] && return 0
+  local c="$constraint"
+  c="${c//,/ }"
+
+  local IFS=$'\n' parts=()
+  # shellcheck disable=SC2207
+  parts=($(echo "$c" | sed -E 's/[[:space:]]*\|\|[[:space:]]*/\n/g; s/[[:space:]]+\|[[:space:]]+/\n/g'))
+
+  local part tok
+  for part in "${parts[@]}"; do
+    part="${part#"${part%%[![:space:]]*}"}"
+    part="${part%"${part##*[![:space:]]}"}"
+    [[ -z "$part" ]] && continue
+
+    local ok=true
+    for tok in $part; do
+      tok="${tok#"${tok%%[![:space:]]*}"}"
+      tok="${tok%"${tok##*[![:space:]]}"}"
+      [[ -z "$tok" ]] && continue
+
+      if [[ "$tok" == "*" || "$tok" == "x" || "$tok" == "X" ]]; then continue; fi
+      if [[ "$tok" =~ ^[0-9]+\.x$ || "$tok" =~ ^[0-9]+\.X$ || "$tok" =~ ^[0-9]+\.\*$ ]]; then
+        [[ "${cand%%.*}" == "${tok%%.*}" ]] || ok=false
+        continue
+      fi
+      if [[ "$tok" =~ ^[0-9]+\.[0-9]+\.x$ || "$tok" =~ ^[0-9]+\.[0-9]+\.X$ || "$tok" =~ ^[0-9]+\.[0-9]+\.?\*$ ]]; then
+        [[ "$cand" == "${tok%.*}" ]] || ok=false
+        continue
+      fi
+
+      if [[ "$tok" =~ ^\^([0-9]+)\.([0-9]+) ]]; then
+        local maj="${BASH_REMATCH[1]}" min="${BASH_REMATCH[2]}"
+        local lower="${maj}.${min}" upper="$((maj + 1)).0"
+        ver_cmp_ge "$cand_full" "$(ver_norm "$lower")" && ver_cmp_lt "$cand_full" "$(ver_norm "$upper")" || ok=false
+        continue
+      fi
+
+      if [[ "$tok" =~ ^~([0-9]+)\.([0-9]+) ]]; then
+        local maj="${BASH_REMATCH[1]}" min="${BASH_REMATCH[2]}"
+        local lower="${maj}.${min}" upper="${maj}.$((min + 1))"
+        ver_cmp_ge "$cand_full" "$(ver_norm "$lower")" && ver_cmp_lt "$cand_full" "$(ver_norm "$upper")" || ok=false
+        continue
+      fi
+
+      if [[ "$tok" =~ ^(>=|<=|>|<)([0-9]+(\.[0-9]+)?)$ ]]; then
+        local op="${BASH_REMATCH[1]}" v="${BASH_REMATCH[2]}"
+        case "$op" in
+        '>=') ver_cmp_ge "$cand_full" "$(ver_norm "$v")" || ok=false ;;
+        '<=') ver_cmp_le "$cand_full" "$(ver_norm "$v")" || ok=false ;;
+        '>') ver_cmp_gt "$cand_full" "$(ver_norm "$v")" || ok=false ;;
+        '<') ver_cmp_lt "$cand_full" "$(ver_norm "$v")" || ok=false ;;
+        esac
+        continue
+      fi
+
+      if [[ "$tok" =~ ^([0-9]+)\.([0-9]+)$ ]]; then
+        [[ "$cand" == "${BASH_REMATCH[1]}.${BASH_REMATCH[2]}" ]] || ok=false
+        continue
+      fi
+      :
+    done
+
+    [[ "$ok" == true ]] && return 0
+  done
+  return 1
+}
+
+running_php_versions() {
+  docker ps --format '{{.Names}}' | awk -F'_' '/^PHP_[0-9]+\.[0-9]+$/ {print $2}' | sort -Vr
+}
+pick_container_by_version() { echo "PHP_$1"; }
+
+pick_best_container() {
+  local explicit_ver="$1" constraint="${2:-}"
+  local versions=()
+  mapfile -t versions < <(running_php_versions)
+  [[ ${#versions[@]} -gt 0 ]] || die "no PHP container is running (expected names like PHP_8.4)."
+
+  if [[ -n "$explicit_ver" ]]; then
+    local cname
+    cname="$(pick_container_by_version "$explicit_ver")"
+    docker ps --format '{{.Names}}' | grep -qx "$cname" || die "container '$cname' is not running."
+    printf "%s\n%s\n%s\n" "$cname" "$explicit_ver" "explicit via -V"
+    return 0
+  fi
+
+  if [[ -n "${constraint// /}" ]]; then
+    local v
+    for v in "${versions[@]}"; do
+      if constraint_allows "$constraint" "$v"; then
+        printf "%s\n%s\n%s\n" "$(pick_container_by_version "$v")" "$v" "composer.json: ${constraint}"
+        return 0
+      fi
+    done
+  fi
+
+  printf "%s\n%s\n%s\n" "$(pick_container_by_version "${versions[0]}")" "${versions[0]}" "fallback: highest running container"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Args
+# ─────────────────────────────────────────────────────────────────────────────
+EXPLICIT_VER=""
+ARGS=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+  -V | --php)
+    [[ -n "${2:-}" ]] || die "-V/--php requires a version (e.g. -V 8.3)"
+    EXPLICIT_VER="$2"
+    shift 2
+    ;;
+  --)
+    shift
+    ARGS+=("$@")
+    break
+    ;;
+  *)
+    ARGS+=("$1")
+    shift
+    ;;
+  esac
+done
+
+PHP_CONSTRAINT=""
+[[ -z "$EXPLICIT_VER" ]] && PHP_CONSTRAINT="$(read_php_constraint || true)"
+
+TARGET_CONTAINER=""
+DETECTED_VER=""
+DETECT_REASON=""
+{
+  read -r TARGET_CONTAINER
+  read -r DETECTED_VER
+  read -r DETECT_REASON
+} < <(pick_best_container "$EXPLICIT_VER" "$PHP_CONSTRAINT")
+
+IMAGE="$(docker inspect -f '{{.Config.Image}}' "$TARGET_CONTAINER" 2>/dev/null)" ||
+  die "failed to inspect container '$TARGET_CONTAINER'."
+
+kv "PHP detected:" "${C_YELLOW}${DETECTED_VER}${C_RESET} ${C_CYAN}(${DETECT_REASON})${C_RESET}"
+kv "Container:" "${C_YELLOW}${TARGET_CONTAINER}${C_RESET}"
+kv "Image:" "${C_YELLOW}${IMAGE}${C_RESET}"
+
+HOST_PWD="$(resolve_host_pwd)"
+msys_no_pathconv
+
+RUN_FLAGS=(--rm -v "$HOST_PWD":/workspace -w /workspace --network "container:$TARGET_CONTAINER")
+[[ -t 0 ]] && RUN_FLAGS+=(-it) || RUN_FLAGS+=(-i)
+RUN_FLAGS+=(-u "$(id -u):$(id -g)")
+
+if [[ -d "$SSH_DIR" ]]; then
+  RUN_FLAGS+=(-v "$SSH_DIR:/home/${USER:-root}/.ssh:ro")
+fi
+
+if [[ -n "${HOME:-}" && -d "$HOME" ]]; then
+  mkdir -p "$HOME/.cache/composer" "$HOME/.composer" 2>/dev/null || true
+  RUN_FLAGS+=(
+    -e "COMPOSER_CACHE_DIR=/tmp/composer-cache"
+    -v "$HOME/.cache/composer:/tmp/composer-cache"
+    -v "$HOME/.composer:/tmp/composer-home"
+    -e "COMPOSER_HOME=/tmp/composer-home"
+  )
+fi
+
+exec docker run "${RUN_FLAGS[@]}" "$IMAGE" composer "${ARGS[@]}"

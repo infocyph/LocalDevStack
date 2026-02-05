@@ -1,0 +1,74 @@
+services:
+  server-tools:
+    container_name: SERVER_TOOLS
+    hostname: local-dock
+    image: infocyph/tools:latest
+    restart: unless-stopped
+    environment:
+      - TZ=${TZ:-}
+    volumes:
+      - ../../configuration/apache:/etc/share/vhosts/apache
+      - ../../configuration/nginx:/etc/share/vhosts/nginx
+      - ../extras:/etc/share/vhosts/node
+      - ../../configuration/ssl:/etc/mkcert
+      - "../../configuration/ssh:/home/root/.ssh:ro"
+      - "${PROJECT_DIR:-./../../../application}:/app"
+      - ../../configuration/rootCA:/etc/share/rootCA
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ../../configuration/sops/config:/etc/share/sops/config
+      - ../../configuration/sops/global:/etc/share/sops/global
+      - ../../configuration/sops/keys:/etc/share/sops/keys
+      - "${SOP_REPO:-./../../../sops-repo}:/etc/share/vhosts/sops"
+      - "${HOME}/.gitconfig:/home/root/.gitconfig:ro"
+    networks:
+      backend:
+        ipv4_address: 172.29.0.10
+
+  runner:
+    container_name: RUNNER
+    hostname: runner
+    image: infocyph/runner:latest
+    restart: unless-stopped
+    environment:
+      - TZ=${TZ:-}
+    volumes:
+      - ../../configuration/scheduler/supervisor:/etc/supervisor/conf.d:ro
+      - ../../configuration/scheduler/cron-jobs:/etc/cron.d:ro
+      - ../../logs/runner:/var/log/supervisor
+      - ../../logs/apache:/global/log/apache
+      - ../../logs/nginx:/global/log/nginx
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      - server-tools
+    networks:
+      backend:
+        ipv4_address: 172.29.0.11
+
+  mailpit:
+    container_name: MAILPIT
+    hostname: mailpit
+    image: axllent/mailpit:latest
+    restart: unless-stopped
+    environment:
+      - TZ=${TZ:-}
+      - MP_MAX_MESSAGES=5000
+      - MP_DATABASE=/data/mailpit.db
+      - MP_SMTP_TLS_CERT=/certs/local.pem
+      - MP_SMTP_TLS_KEY=/certs/local-key.pem
+      - MP_SMTP_REQUIRE_STARTTLS=true
+      - MP_SMTP_AUTH_ACCEPT_ANY=1
+    volumes:
+      - ../../data/mailpit:/data
+      - ../../configuration/ssl:/certs:ro
+    depends_on:
+      - server-tools
+    networks:
+      frontend:
+        ipv4_address: 172.28.0.12
+      backend:
+        ipv4_address: 172.29.0.12
+    healthcheck:
+      test: [ "CMD", "wget", "-qO-", "http://127.0.0.1:8025/" ]
+      interval: 10s
+      timeout: 3s
+      retries: 10
