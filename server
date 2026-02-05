@@ -2,7 +2,6 @@
 # Force bash even if invoked via sh
 if [ -z "${BASH_VERSION:-}" ]; then exec /usr/bin/env bash "$0" "$@"; fi
 
-# server – Devtainer CLI launcher
 # shellcheck disable=SC1090,SC2155
 
 set -euo pipefail
@@ -517,7 +516,7 @@ launch_node() {
 
   [[ -n "${host:-}" ]] || die "Could not parse upstream host for $domain"
 
-  # Standard Devtainer mapping: node_<token> -> NODE_<TOKEN>
+  # Standard mapping: node_<token> -> NODE_<TOKEN>
   ctr=""
   if docker inspect "$host" >/dev/null 2>&1; then
     ctr="$host"
@@ -1257,8 +1256,8 @@ core_auto() {
   local working_dir
   if [[ -n "${WORKING_DIR:-}" ]]; then
     working_dir="${WORKING_DIR}"
-  elif [[ -d /opt/project/Devtainer ]]; then
-    working_dir="/opt/project/Devtainer"
+  elif [[ -d /opt/project/LocalDevStack ]]; then
+    working_dir="/opt/project/LocalDevStack"
   else
     working_dir="${DIR}"
   fi
@@ -1505,7 +1504,7 @@ cmd_doctor() {
   _has openssl && _ok "openssl: present" || _warn "openssl: not found (useful for debugging certs)"
   (_has wget || _has curl) && _ok "http client: present" || _warn "http client: missing (wget/curl recommended)"
 
-  # Devtainer layout checks
+  # layout checks
   [[ -f "$COMPOSE_FILE" ]] && _ok "compose file: $COMPOSE_FILE" || _bad "compose file missing: $COMPOSE_FILE"
   [[ -f "$ENV_DOCKER" ]] && _ok "env file: $ENV_DOCKER" || _warn "env file missing: $ENV_DOCKER (run: server setup init)"
 

@@ -1,4 +1,4 @@
-name: Devtainer
+name: LocalDevStack
 
 networks:
   frontend:

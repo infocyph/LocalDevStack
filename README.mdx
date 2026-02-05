@@ -4,13 +4,12 @@ This project provides easy to use docker based development environment for your 
 can be enabled based on Environment file (.env)! Supports multiple domains.
 
 >1. This is for local development only!
->2. Don't state both apache & nginx in COMPOSE_PROFILES.
->3. Domain(s) should be available in the hosts file `<your_ip>    <your_domain>`.
+>2. Domain(s) should be available in the hosts file `<your_ip>    <your_domain>` or DNS propageted to your host unless the TLD is localhost (*.localhost).
 
 ## Prerequisites (Docker)
 Install docker on your system first. If you already have docker installed, you can skip this step. 
-- To install on Linux, it is recommended to use [Docker Engine](https://docs.docker.com/engine/install/).
-- To install on other OS, use [Docker Desktop](https://docs.docker.com/desktop/) (although you can also install this on linux as well).
+- It is recommended to use [Docker Engine](https://docs.docker.com/engine/install/).
+- If Docker Engine not supported in your OS, use [Docker Desktop](https://docs.docker.com/desktop/) (although you can also install this on linux as well).
 
 ## The directory structure
 

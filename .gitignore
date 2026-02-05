@@ -3,3 +3,4 @@
 *~
 Local
 *.txt
+!docs/requirements.txt
