@@ -1079,7 +1079,7 @@ cmd_rebuild() {
 
     local i
     for i in "${!all_svcs[@]}"; do
-      printf "  %2d) %s\n" "$((i+1))" "${all_svcs[$i]}"
+      printf "  %2d) %s\n" "$((i + 1))" "${all_svcs[$i]}"
     done
 
     echo
@@ -1102,15 +1102,20 @@ cmd_rebuild() {
       # range like 3-7
       if [[ "$arg" =~ ^[0-9]+-[0-9]+$ ]]; then
         local a b
-        a="${arg%-*}"; b="${arg#*-}"
-        (( a >= 1 )) || continue
-        (( b >= 1 )) || continue
-        (( a <= b )) || { local t="$a"; a="$b"; b="$t"; }
+        a="${arg%-*}"
+        b="${arg#*-}"
+        ((a >= 1)) || continue
+        ((b >= 1)) || continue
+        ((a <= b)) || {
+          local t="$a"
+          a="$b"
+          b="$t"
+        }
 
         local n
-        for ((n=a; n<=b; n++)); do
-          (( n >= 1 && n <= ${#all_svcs[@]} )) || continue
-          _add_target "${all_svcs[$((n-1))]}"
+        for ((n = a; n <= b; n++)); do
+          ((n >= 1 && n <= ${#all_svcs[@]})) || continue
+          _add_target "${all_svcs[$((n - 1))]}"
         done
         continue
       fi
@@ -1118,8 +1123,8 @@ cmd_rebuild() {
       # single index
       if [[ "$arg" =~ ^[0-9]+$ ]]; then
         local n="$arg"
-        (( n >= 1 && n <= ${#all_svcs[@]} )) || continue
-        _add_target "${all_svcs[$((n-1))]}"
+        ((n >= 1 && n <= ${#all_svcs[@]})) || continue
+        _add_target "${all_svcs[$((n - 1))]}"
         continue
       fi
 
@@ -1559,21 +1564,65 @@ notify_watch() {
   local container="${1:-SERVER_TOOLS}"
   local prefix="__HOST_NOTIFY__"
 
-  need docker notify-send
+  need docker
+
+  local _disp="${DISPLAY-}"
+  local _dbus="${DBUS_SESSION_BUS_ADDRESS-}"
+
+  # Args: timeout(ms) urgency title body
+  _host_notify() {
+    local timeout="${1:-2500}" urgency="${2:-normal}" title="${3:-Notification}" body="${4:-}"
+
+    # Linux desktop (or WSLg)
+    if command -v notify-send >/dev/null 2>&1; then
+      (env DISPLAY="${_disp-}" DBUS_SESSION_BUS_ADDRESS="${_dbus-}" \
+        setsid -f notify-send -u "$urgency" -t "$timeout" "$title" "$body" \
+        >/dev/null 2>&1 || true) &
+      return 0
+    fi
+
+    # Windows toast (Git Bash) / WSL-on-Windows
+    if command -v powershell.exe >/dev/null 2>&1; then
+      # Pass values as args to avoid quoting issues entirely.
+      # Note: urgency/timeout not used by toast api here; kept for parity.
+      powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \
+        'param([string]$t,[string]$b)
+          try {
+            [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null
+            [Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] > $null
+
+            function Esc([string]$s) {
+              if ($null -eq $s) { return "" }
+              return ($s -replace "&","&amp;" -replace "<","&lt;" -replace ">","&gt;" -replace "\"","&quot;" -replace "'\''","&apos;")
+            }
+
+            $title = Esc $t
+            $body  = Esc $b
+
+            $xml = New-Object Windows.Data.Xml.Dom.XmlDocument
+            $xml.LoadXml("<toast><visual><binding template=`"ToastGeneric`"><text>$title</text><text>$body</text></binding></visual></toast>")
+            $toast = New-Object Windows.UI.Notifications.ToastNotification $xml
+            [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("Devtainer").Show($toast)
+          } catch { }' \
+        --% "$title" "$body" >/dev/null 2>&1 || true
+
+      return 0
+    fi
+
+    # Fallback
+    printf "%s [%s] %s - %s\n" "$(date '+%Y-%m-%d %H:%M:%S')" "$urgency" "$title" "$body" >&2
+    return 0
+  }
 
   trap - ERR
   set +e
   set +o pipefail
 
-  local _disp="${DISPLAY-}"
-  local _dbus="${DBUS_SESSION_BUS_ADDRESS-}"
   local _stop=0
 
   _watcher_notify() {
     local urgency="${1:-critical}" title="${2:-Notifier}" body="${3:-Watcher event}"
-    (env DISPLAY="${_disp-}" DBUS_SESSION_BUS_ADDRESS="${_dbus-}" \
-      setsid -f notify-send -u "$urgency" -t 2500 "$title" "$body" \
-      >/dev/null 2>&1 || true) &
+    _host_notify 2500 "$urgency" "$title" "$body"
   }
 
   _watcher_int_term() {
@@ -1584,7 +1633,7 @@ notify_watch() {
   trap _watcher_int_term INT TERM
 
   local grep_cmd=(grep -a --line-buffered -E "^${prefix}([[:space:]]|$)")
-  command -v stdbuf &>/dev/null && grep_cmd=(stdbuf -oL -eL "${grep_cmd[@]}")
+  command -v stdbuf >/dev/null 2>&1 && grep_cmd=(stdbuf -oL -eL "${grep_cmd[@]}")
 
   printf "%bNotify Watch:%b monitoring is active. Ctrl+C to stop.\n" "$GREEN" "$NC"
 
@@ -1599,6 +1648,7 @@ notify_watch() {
       ("${grep_cmd[@]}" || true) |
       while IFS=$'\t' read -r _ f1 f2 f3 f4 rest; do
         local timeout urgency title body
+
         if [[ "${f1:-}" =~ ^[0-9]{1,6}$ ]]; then
           timeout="$f1"
           urgency="${f2:-normal}"
@@ -1610,10 +1660,11 @@ notify_watch() {
           title="${f2:-Notification}"
           body="${f3:-}"
         fi
+
         [[ -n "${rest:-}" ]] && body+=$'\t'"${rest}"
         case "$urgency" in low | normal | critical) ;; *) urgency="normal" ;; esac
 
-        notify-send -t "$timeout" -u "$urgency" "$title" "$body" >/dev/null 2>&1 || true
+        _host_notify "$timeout" "$urgency" "$title" "$body"
         printf "%s [%s] %s - %s\n" "$(date '+%Y-%m-%d %H:%M:%S')" "$urgency" "$title" "$body" >&2
       done
 
@@ -2009,7 +2060,7 @@ EOF
 ###############################################################################
 main() {
   need docker
-  ensure_files_exist "/docker/.env" "/configuration/php/php.ini" "/.env"
+  ((EUID == 0)) || ensure_files_exist "/docker/.env" "/configuration/php/php.ini" "/.env"
 
   [[ $# -gt 0 ]] || {
     cmd_help

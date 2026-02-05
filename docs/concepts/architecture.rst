@@ -21,7 +21,7 @@ Instead of a monolithic "one container does everything" model, LocalDevStack use
 How containers cooperate
 ------------------------
 
-1. You generate vhost configs (via ``server setup domain``).
+1. You generate vhost configs (via ``lds setup domain``).
 2. The Tools container can scan all vhosts and generate certificates.
 3. Nginx loads hosts and routes requests either:
 
