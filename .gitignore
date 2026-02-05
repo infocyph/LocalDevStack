@@ -1,2 +1,6 @@
 .idea
 .env
+*~
+Local
+*.txt
+!docs/requirements.txt

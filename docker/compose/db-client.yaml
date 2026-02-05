@@ -1,0 +1,87 @@
+x-db-client-service: &db-client-service
+  restart: unless-stopped
+  networks:
+    datastore: {}
+    frontend: {}
+
+services:
+  redis-insight:
+    <<: *db-client-service
+    container_name: REDIS_INSIGHT
+    hostname: redis-insight
+    image: redis/redisinsight:latest
+    profiles: [redis]
+    depends_on:
+      - redis
+    ports:
+      - "${REDIS_INSIGHT_PORT:-5540}:5540"
+    environment:
+      - RI_REDIS_HOST=redis
+    volumes:
+      - ../../data/redis-insight:/data
+    networks:
+      datastore:
+        ipv4_address: 172.30.0.150
+      frontend:
+        ipv4_address: 172.28.0.150
+
+  cloudbeaver:
+    <<: *db-client-service
+    container_name: CLOUD_BEAVER
+    hostname: cloud-beaver
+    image: dbeaver/cloudbeaver:latest
+    profiles: [mysql, mariadb, postgresql]
+    ports:
+      - "${DBEAVER_PORT:-8080}:8978"
+    environment:
+      - TZ=${TZ:-}
+    volumes:
+      - ../../data/cloudbeaver:/opt/cloudbeaver/workspace
+    networks:
+      datastore:
+        ipv4_address: 172.30.0.151
+      frontend:
+        ipv4_address: 172.28.0.151
+
+  mongo-express:
+    <<: *db-client-service
+    container_name: MONGO_EXPRESS
+    hostname: mongo-express
+    image: mongo-express:${MONGO_EXPRESS_VERSION:-latest}
+    profiles: [mongodb]
+    depends_on:
+      - mongodb
+    ports:
+      - "${MONGO_EXPRESS_PORT:-8081}:8081"
+    environment:
+      - TZ=${TZ:-}
+      - ME_CONFIG_BASICAUTH=false
+      - ME_CONFIG_MONGODB_ADMINUSERNAME=${MONGODB_ROOT_USERNAME:-root}
+      - ME_CONFIG_MONGODB_ADMINPASSWORD=${MONGODB_ROOT_PASSWORD:-12345}
+      - ME_CONFIG_MONGODB_URL=mongodb://${MONGODB_ROOT_USERNAME:-root}:${MONGODB_ROOT_PASSWORD:-12345}@mongodb:${MONGODB_PORT:-27017}/admin
+    networks:
+      datastore:
+        ipv4_address: 172.30.0.152
+      frontend:
+        ipv4_address: 172.28.0.152
+
+  kibana:
+    <<: *db-client-service
+    container_name: KIBANA
+    hostname: kibana
+    image: kibana:${ELASTICSEARCH_VERSION:-8.18.0}
+    profiles: [elasticsearch]
+    depends_on:
+      - elasticsearch
+    ports:
+      - "${KIBANA_PORT:-5601}:5601"
+    environment:
+      - TZ=${TZ:-}
+      - "ELASTICSEARCH_HOSTS=http://elasticsearch:9200"
+    volumes:
+      - ../../data/kibana:/usr/share/kibana/data
+    networks:
+      datastore:
+        ipv4_address: 172.30.0.153
+      frontend:
+        ipv4_address: 172.28.0.153

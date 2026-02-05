@@ -1,0 +1,234 @@
+x-php-service: &php-service
+  restart: unless-stopped
+  environment:
+    - TZ=${TZ:-}
+  env_file:
+    - "../../.env"
+  networks:
+    frontend: {}
+    backend: {}
+    datastore: {}
+  volumes:
+    - "${PROJECT_DIR:-./../../../application}:/app"
+    - ../conf/www.conf:/usr/local/etc/php-fpm.d/www.conf
+    - ../conf/openssl.cnf:/etc/ssl/openssl.cnf
+    - ../../configuration/php/php.ini:/usr/local/etc/php/conf.d/99-overrides.ini
+    - "../../configuration/ssh:/home/${USER}/.ssh:ro"
+    - "${HOME}/.gitconfig:/home/${USER}/.gitconfig:ro"
+    - ../../configuration/rootCA:/etc/share/rootCA:ro
+  depends_on:
+    - server-tools
+  healthcheck:
+    test: ["CMD-SHELL", "php-fpm -t || exit 1"]
+    interval: 30s
+    timeout: 10s
+    retries: 3
+
+services:
+  php73:
+    <<: *php-service
+    container_name: PHP_7.3
+    hostname: php-73
+    networks:
+      frontend:
+        ipv4_address: 172.28.0.50
+      backend:
+        ipv4_address: 172.29.0.50
+      datastore:
+        ipv4_address: 172.30.0.50
+    build:
+      context: ../dockerfiles
+      dockerfile: php.Dockerfile
+      args:
+        UID: ${UID:-1000}
+        GID: ${GID:-root}
+        USERNAME: ${USER}
+        PHP_EXT: ${PHP_EXT:-}
+        LINUX_PKG: ${LINUX_PKG:-}
+        WORKING_DIR: ${WORKING_DIR}
+        PHP_VERSION: 7.3
+        PHP_EXT_VERSIONED: ${PHP_EXT_73:-}
+        LINUX_PKG_VERSIONED: ${LINUX_PKG_73:-}
+    profiles: [php, php73]
+
+  php74:
+    <<: *php-service
+    container_name: PHP_7.4
+    hostname: php-74
+    networks:
+      frontend:
+        ipv4_address: 172.28.0.51
+      backend:
+        ipv4_address: 172.29.0.51
+      datastore:
+        ipv4_address: 172.30.0.51
+    build:
+      context: ../dockerfiles
+      dockerfile: php.Dockerfile
+      args:
+        UID: ${UID:-1000}
+        GID: ${GID:-1000}
+        USERNAME: ${USER}
+        PHP_EXT: ${PHP_EXT:-}
+        LINUX_PKG: ${LINUX_PKG:-}
+        WORKING_DIR: ${WORKING_DIR}
+        PHP_VERSION: 7.4
+        PHP_EXT_VERSIONED: ${PHP_EXT_74:-}
+        LINUX_PKG_VERSIONED: ${LINUX_PKG_74:-}
+    profiles: [php, php74]
+
+  php80:
+    <<: *php-service
+    container_name: PHP_8.0
+    hostname: php-80
+    networks:
+      frontend:
+        ipv4_address: 172.28.0.52
+      backend:
+        ipv4_address: 172.29.0.52
+      datastore:
+        ipv4_address: 172.30.0.52
+    build:
+      context: ../dockerfiles
+      dockerfile: php.Dockerfile
+      args:
+        UID: ${UID:-1000}
+        GID: ${GID:-root}
+        USERNAME: ${USER}
+        PHP_EXT: ${PHP_EXT:-}
+        LINUX_PKG: ${LINUX_PKG:-}
+        WORKING_DIR: ${WORKING_DIR}
+        PHP_VERSION: 8.0
+        PHP_EXT_VERSIONED: ${PHP_EXT_80:-}
+        LINUX_PKG_VERSIONED: ${LINUX_PKG_80:-}
+    profiles: [php, php80]
+
+  php81:
+    <<: *php-service
+    container_name: PHP_8.1
+    hostname: php-81
+    networks:
+      frontend:
+        ipv4_address: 172.28.0.53
+      backend:
+        ipv4_address: 172.29.0.53
+      datastore:
+        ipv4_address: 172.30.0.53
+    build:
+      context: ../dockerfiles
+      dockerfile: php.Dockerfile
+      args:
+        UID: ${UID:-1000}
+        GID: ${GID:-root}
+        USERNAME: ${USER}
+        PHP_EXT: ${PHP_EXT:-}
+        LINUX_PKG: ${LINUX_PKG:-}
+        WORKING_DIR: ${WORKING_DIR}
+        PHP_VERSION: 8.1
+        PHP_EXT_VERSIONED: ${PHP_EXT_81:-}
+        LINUX_PKG_VERSIONED: ${LINUX_PKG_81:-}
+    profiles: [php, php81]
+
+  php82:
+    <<: *php-service
+    container_name: PHP_8.2
+    hostname: php-82
+    networks:
+      frontend:
+        ipv4_address: 172.28.0.54
+      backend:
+        ipv4_address: 172.29.0.54
+      datastore:
+        ipv4_address: 172.30.0.54
+    build:
+      context: ../dockerfiles
+      dockerfile: php.Dockerfile
+      args:
+        UID: ${UID:-1000}
+        GID: ${GID:-root}
+        USERNAME: ${USER}
+        PHP_EXT: ${PHP_EXT:-}
+        LINUX_PKG: ${LINUX_PKG:-}
+        WORKING_DIR: ${WORKING_DIR}
+        PHP_VERSION: 8.2
+        PHP_EXT_VERSIONED: ${PHP_EXT_82:-}
+        LINUX_PKG_VERSIONED: ${LINUX_PKG_82:-}
+    profiles: [php, php82]
+
+  php83:
+    <<: *php-service
+    container_name: PHP_8.3
+    hostname: php-83
+    networks:
+      frontend:
+        ipv4_address: 172.28.0.55
+      backend:
+        ipv4_address: 172.29.0.55
+      datastore:
+        ipv4_address: 172.30.0.55
+    build:
+      context: ../dockerfiles
+      dockerfile: php.Dockerfile
+      args:
+        UID: ${UID:-1000}
+        GID: ${GID:-root}
+        USERNAME: ${USER}
+        PHP_EXT: ${PHP_EXT:-}
+        LINUX_PKG: ${LINUX_PKG:-}
+        WORKING_DIR: ${WORKING_DIR}
+        PHP_VERSION: 8.3
+        PHP_EXT_VERSIONED: ${PHP_EXT_83:-}
+        LINUX_PKG_VERSIONED: ${LINUX_PKG_83:-}
+    profiles: [php, php83]
+
+  php84:
+    <<: *php-service
+    container_name: PHP_8.4
+    hostname: php-84
+    networks:
+      frontend:
+        ipv4_address: 172.28.0.56
+      backend:
+        ipv4_address: 172.29.0.56
+      datastore:
+        ipv4_address: 172.30.0.56
+    build:
+      context: ../dockerfiles
+      dockerfile: php.Dockerfile
+      args:
+        UID: ${UID:-1000}
+        GID: ${GID:-root}
+        USERNAME: ${USER}
+        PHP_EXT: ${PHP_EXT:-}
+        LINUX_PKG: ${LINUX_PKG:-}
+        WORKING_DIR: ${WORKING_DIR}
+        PHP_VERSION: 8.4
+        PHP_EXT_VERSIONED: ${PHP_EXT_84:-}
+        LINUX_PKG_VERSIONED: ${LINUX_PKG_84:-}
+    profiles: [php, php84]
+
+  php85:
+    <<: *php-service
+    container_name: PHP_8.5
+    hostname: php-85
+    networks:
+      frontend:
+        ipv4_address: 172.28.0.57
+      backend:
+        ipv4_address: 172.29.0.57
+      datastore:
+        ipv4_address: 172.30.0.57
+    build:
+      context: ../dockerfiles
+      dockerfile: php.Dockerfile
+      args:
+        UID: ${UID:-1000}
+        GID: ${GID:-root}
+        USERNAME: ${USER}
+        PHP_EXT: ${PHP_EXT:-}
+        LINUX_PKG: ${LINUX_PKG:-}
+        WORKING_DIR: ${WORKING_DIR}
+        PHP_VERSION: 8.5
+        PHP_EXT_VERSIONED: ${PHP_EXT_85:-}
+        LINUX_PKG_VERSIONED: ${LINUX_PKG_85:-}
+    profiles: [php, php85]
