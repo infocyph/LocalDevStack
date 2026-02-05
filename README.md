@@ -61,22 +61,6 @@ lds http reload
 
 ---
 
-## Minimal configuration
-
-Most setups only need:
-
-* `PROJECT_DIR` (where your apps live)
-* `COMPOSE_PROFILES` (what to run)
-
-Example:
-
-```dotenv
-PROJECT_DIR=../application
-COMPOSE_PROFILES=nginx,php,php84,tools,mariadb,redis
-```
-
----
-
 ## CLI help (built-in “man”)
 
 ```bash
@@ -92,7 +76,7 @@ lds help certificate
 
 This README stays intentionally short.
 
-* Full documentation: **Read the Docs** (Sphinx docs in `docs/`)
+* Full documentation: https://docs.infocyph.com/projects/LocalDevStack
 * Quick reference: `lds help ...`
 
 ---
