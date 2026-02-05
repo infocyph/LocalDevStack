@@ -1231,199 +1231,102 @@ cmd_cli() {
 cmd_core() {
   # Usage:
   #   lds core <domain>  -> open correct container for that domain (PHP/Node)
-  #   lds core           -> auto-detect project by current directory and open correct container
+  #   lds core           -> list domains and let user pick
 
   local domain="${1:-}"
-  if [[ -n "$domain" ]]; then
-    local nconf="$DIR/configuration/nginx/$domain.conf"
-    [[ -f "$nconf" ]] || die "No Nginx config for $domain"
+  if [[ -z "$domain" ]]; then
+    # No domain supplied: show an indexed list so selection is explicit and reliable.
+    domain="$(core_pick_domain)" || {
+      local rc=$?
+      ((rc == 130)) && return 130
+      die "No domain selected"
+    }
+  fi
 
-    # Node vhost?
-    if grep -Eq 'proxy_pass[[:space:]]+http://node_[A-Za-z0-9._-]+:[0-9]+' "$nconf"; then
-      launch_node "$domain"
-      return 0
-    fi
+  local nconf="$DIR/configuration/nginx/$domain.conf"
+  [[ -f "$nconf" ]] || die "No Nginx config for $domain"
 
-    # Otherwise keep legacy PHP behavior
-    launch_php "$domain"
+  # Node vhost?
+  if grep -Eq 'proxy_pass[[:space:]]+http://node_[A-Za-z0-9._-]+:[0-9]+' "$nconf"; then
+    launch_node "$domain"
     return 0
   fi
 
-  core_auto
-}
-
-# ------------------------------------------------------------
-# core auto-detect (host PWD -> /app in php container)
-# ------------------------------------------------------------
-core_auto() {
-  local pwd="${PWD}"
-
-  local working_dir
-  if [[ -n "${WORKING_DIR:-}" ]]; then
-    working_dir="${WORKING_DIR}"
-  elif [[ -d /opt/project/LocalDevStack ]]; then
-    working_dir="/opt/project/LocalDevStack"
-  else
-    working_dir="${DIR}"
-  fi
-
-  # Compose default: "${PROJECT_DIR:-./../../../application}:/app"
-  local host_app_root
-  if [[ -n "${PROJECT_DIR:-}" ]]; then
-    host_app_root="${PROJECT_DIR}"
-  else
-    host_app_root="${working_dir%/}/../application"
-  fi
-
-  local -a confs=()
-  local d f
-  for d in "${working_dir%/}/configuration/nginx" "${working_dir%/}/configuration/apache" "${working_dir%/}/configuration/httpd" "${working_dir%/}/configuration/apache/sites-enabled" "${working_dir%/}/configuration/httpd/sites-enabled"; do
-    [[ -d "$d" ]] || continue
-    while IFS= read -r -d "" f; do
-      confs+=("$f")
-    done < <(find "$d" -maxdepth 1 -type f -name "*.conf" -print0 2>/dev/null || true)
-  done
-
-  local best_container="" best_host_root="" best_len=0
-
-  local php c_src app_path app_root rel host_proj l
-  for f in "${confs[@]:-}"; do
-    php="$(conf_php_container "$f")"
-    if [[ -n "$php" ]]; then
-      # Real host source for /app from the php container (beats env guesses)
-      c_src="$(docker_mount_source "$php" "/app")"
-      [[ -n "$c_src" ]] || c_src="$host_app_root"
-
-      while IFS= read -r app_path; do
-        [[ -n "$app_path" ]] || continue
-        app_root="$(normalize_app_root "$app_path")"
-
-        rel="${app_root#/app/}"
-        host_proj="${c_src%/}/${rel}"
-
-        # Candidate is meaningful only if PWD is inside it
-        [[ "$pwd" == "$host_proj"* ]] || continue
-
-        l="${#host_proj}"
-        if ((l > best_len)); then
-          best_len=$l
-          best_container="$php"
-          best_host_root="$host_proj"
-        fi
-      done < <(conf_app_paths "$f")
-
-      # fallback: if no /app paths were detected in conf
-      if [[ -z "$best_container" ]]; then
-        [[ "$pwd" == "$c_src"* ]] || continue
-        l="${#c_src}"
-        if ((l > best_len)); then
-          best_len=$l
-          best_container="$php"
-          best_host_root="$c_src"
-        fi
-      fi
-
-      continue
-    fi
-
-    local node ctr_src
-    node="$(conf_node_container "$f")"
-    [[ -n "$node" ]] || continue
-
-    ctr_src="$(docker_mount_source "$node" "/app")"
-    [[ -n "$ctr_src" ]] || ctr_src="$host_app_root"
-
-    [[ "$pwd" == "$ctr_src"* ]] || continue
-
-    l="${#ctr_src}"
-    if ((l > best_len)); then
-      best_len=$l
-      best_container="$node"
-      best_host_root="$ctr_src"
-    fi
-  done
-
-  # Fallback: if PWD is under /app mount of a running PHP_* container, use it
-  if [[ -z "$best_container" ]]; then
-    local cand cand_src
-    cand="$(docker ps --format "{{.Names}}" | grep -m1 "^PHP_" || true)"
-    if [[ -n "$cand" ]]; then
-      cand_src="$(docker_mount_source "$cand" "/app")"
-      if [[ -n "$cand_src" && "$pwd" == "${cand_src%/}/"* ]]; then
-        best_container="$cand"
-        best_host_root="$cand_src"
-      fi
-    fi
-  fi
-
-  [[ -n "$best_container" ]] || die "No matching domain for current directory: $pwd (try: lds core <domain>)"
-
-  # Map host PWD -> /app path inside container
-  local rel_path container_path
-  rel_path="${pwd#${best_host_root%/}/}"
-  container_path="/app/${rel_path}"
-
-  printf "%b[core]%b %s -> %s:%s
-" "$CYAN" "$NC" "$pwd" "$best_container" "$container_path"
-
-  docker exec -it "$best_container" sh -lc "cd \"$container_path\" 2>/dev/null || exit 1; if command -v bash >/dev/null 2>&1; then exec bash; else exec sh; fi"
-}
-
-conf_php_container() {
-  local f="$1"
-
-  # 1) Apache: SetHandler "proxy:fcgi://PHP_8.4:9000"
-  local c=""
-  c="$(grep -Eo 'proxy:fcgi://[^:/"]+' "$f" 2>/dev/null | head -n1 | sed 's#proxy:fcgi://##')"
-  [[ -n "$c" ]] && {
-    printf "%s" "$c"
-    return 0
-  }
-
-  # 2) Nginx: fastcgi_pass PHP_8.4:9000;
-  c="$(grep -Eo 'fastcgi_pass[[:space:]]+[^;:]+:9000' "$f" 2>/dev/null | head -n1 | awk '{print $2}' | sed 's/:9000$//')"
-  [[ -n "$c" ]] && {
-    printf "%s" "$c"
-    return 0
-  }
-
-  # 3) Nginx: proxy_cookie_domain PHP_8.4 local.example;
-  c="$(grep -Eo 'proxy_cookie_domain[[:space:]]+[^[:space:];]+' "$f" 2>/dev/null | head -n1 | awk '{print $2}')"
-  [[ -n "$c" ]] && {
-    printf "%s" "$c"
-    return 0
-  }
-
+  # Otherwise keep legacy PHP behavior
+  launch_php "$domain"
   return 0
 }
 
-conf_app_paths() {
-  local f="$1"
-  [[ -r "$f" ]] || return 0
+core_pick_domain() {
+  local -a domains=()
+  local f d
 
-  LC_ALL=C awk '
-    {
-      s=$0
-      while (match(s, /\/app\/[^;[:space:]"'\''<>]+/)) {
-        print substr(s, RSTART, RLENGTH)
-        s = substr(s, RSTART + RLENGTH)
-      }
-    }
-  ' "$f" | LC_ALL=C sort -u || true
-}
+  shopt -s nullglob
+  for f in "$DIR/configuration/nginx/"*.conf; do
+    d="$(basename -- "$f" .conf)"
+    [[ -n "$d" ]] && domains+=("$d")
+  done
+  shopt -u nullglob
 
-normalize_app_root() {
-  local p="$1"
-  p="${p%/}"
-  p="${p%/public}"
-  p="${p%/public_html}"
-  p="${p%/dist}"
-  printf "%s" "$p"
-}
+  ((${#domains[@]} > 0)) || die "No domains found in $DIR/configuration/nginx"
 
-docker_mount_source() {
-  local container="$1" dest="$2"
-  docker inspect -f '{{range .Mounts}}{{if eq .Destination "'"$dest"'"}}{{.Source}}{{end}}{{end}}' "$container" 2>/dev/null || true
+  # stable ordering
+  IFS=$'\n' domains=($(printf '%s\n' "${domains[@]}" | LC_ALL=C sort -u))
+
+  # If there's only one domain, just use it.
+  if ((${#domains[@]} == 1)); then
+    printf '%s' "${domains[0]}"
+    return 0
+  fi
+
+  # Must be interactive to pick.
+  if [[ ! -t 0 ]]; then
+    printf "%b[core]%b No domain provided. Available domains:\n" "$YELLOW" "$NC" >&2
+    local i=1
+    for d in "${domains[@]}"; do
+      printf "  %2d) %s\n" "$i" "$d" >&2
+      ((i++))
+    done
+    die "No TTY to prompt. Use: lds core <domain>"
+  fi
+
+  printf "%bSelect domain:%b\n" "$CYAN" "$NC" >&2
+  local i=1
+  for d in "${domains[@]}"; do
+    printf "  %2d) %s\n" "$i" "$d" >&2
+    ((i++))
+  done
+  printf "  %2d) %s\n" 0 "Cancel" >&2
+
+  local ans idx
+  while true; do
+    printf "%bDomain #%b " "$GREEN" "$NC" >&2
+    IFS= read -r ans || return 130
+    ans="${ans//[[:space:]]/}"
+    [[ -n "$ans" ]] || continue
+
+    if [[ "$ans" == "0" ]]; then
+      return 130
+    fi
+
+    if [[ "$ans" =~ ^[0-9]+$ ]]; then
+      idx=$((ans - 1))
+      if ((idx >= 0 && idx < ${#domains[@]})); then
+        printf '%s' "${domains[$idx]}"
+        return 0
+      fi
+    else
+      # allow typing domain directly
+      for d in "${domains[@]}"; do
+        if [[ "$d" == "$ans" ]]; then
+          printf '%s' "$d"
+          return 0
+        fi
+      done
+    fi
+
+    printf "%bInvalid selection.%b\n" "$YELLOW" "$NC" >&2
+  done
 }
 
 cmd_setup() {
