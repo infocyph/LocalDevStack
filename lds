@@ -290,8 +290,40 @@ http_reload() {
 ###############################################################################
 # 2. PERMISSIONS FIX-UP
 ###############################################################################
+add_to_windows_path() {
+  [[ "$OSTYPE" =~ (msys|cygwin) ]] || return 0
+  command -v cygpath >/dev/null 2>&1 || return 0
+
+  # Only add if lds.bat exists where we think it is
+  [[ -f "$DIR/lds.bat" ]] || return 0
+
+  local win_repo
+  win_repo="$(cygpath -w "$DIR")"
+
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "
+    \$t = '$win_repo'
+    \$cur = [Environment]::GetEnvironmentVariable('Path','User')
+    if ([string]::IsNullOrWhiteSpace(\$cur)) { \$cur = '' }
+
+    # Normalize (trim + case-insensitive compare) to avoid duplicates
+    \$parts = \$cur -split ';' | ForEach-Object { \$_.Trim() } | Where-Object { \$_ }
+    \$exists = \$false
+    foreach (\$p in \$parts) { if (\$p.ToLowerInvariant() -eq \$t.ToLowerInvariant()) { \$exists = \$true; break } }
+
+    if (-not \$exists) {
+      \$new = (\$parts + \$t) -join ';'
+      [Environment]::SetEnvironmentVariable('Path', \$new, 'User')
+    }
+  " >/dev/null 2>&1 || true
+}
+
 fix_perms() {
-  [[ "$OSTYPE" =~ (msys|cygwin) ]] && return
+  if [[ "$OSTYPE" =~ (msys|cygwin) ]]; then
+    add_to_windows_path
+    printf "%bWindows PATH configured.%b\n" "$GREEN" "$NC"
+    return 0
+  fi
+
   ((EUID == 0)) || die "Please run with sudo."
 
   chmod 755 "$DIR"
@@ -387,7 +419,7 @@ modify_profiles() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Profiles (merged from docker/utilities/profiles)
+# Profiles
 # ─────────────────────────────────────────────────────────────────────────────
 
 declare -A SERVICES=(
@@ -1934,12 +1966,12 @@ ${CYAN}Core commands:${NC}
   up / start                 Start docker stack (quiet pull by default)
   stop / down                Stop stack
   reload / restart           Restart stack + reload HTTP
-  rebuild all|<svc...>       Rebuild/pull services (no full down)
+  rebuild [all|<svc...>]       Rebuild/pull services (no full down)
   config                     Validate compose
   tools                      Enter SERVER_TOOLS container
   lzd | lazydocker           Start LazyDocker
   http reload                Reload Nginx/Apache
-  core <domain>              Open bash in PHP container for <domain>
+  core [domain]              Open bash in container for <domain>
 
 ${CYAN}Setup commands:${NC}
   setup init                 Initialize Primaries!

@@ -42,11 +42,20 @@ if not exist "%DEVHOME%\lds" (
 )
 
 where docker.exe >nul 2>&1
-if errorlevel 1 echo %WARN% docker.exe not found on Windows PATH. It may fail.
-if errorlevel 1 goto :run
+if errorlevel 1 goto :no_docker
 
 docker info >nul 2>&1
-if errorlevel 1 echo %WARN% Docker installed but NOT running/reachable (docker info failed). Start Docker Desktop / engine.
+if errorlevel 1 goto :docker_not_running
+
+goto :run
+
+:no_docker
+echo %WARN% docker.exe not found on Windows PATH
+exit /b 10
+
+:docker_not_running
+echo %WARN% Docker is installed but NOT running/reachable (docker info failed)
+exit /b 11
 
 :run
 "%BASH_EXE%" -lc "set -euo pipefail; export TERM=xterm-256color; DEVHOME_WIN=\"$1\"; CALLER_WIN=\"$2\"; DEVHOME=$(cygpath -u \"$DEVHOME_WIN\"); CALLER=$(cygpath -u \"$CALLER_WIN\"); cd \"$DEVHOME\"; chmod +x ./lds >/dev/null 2>&1 || true; cd \"$CALLER\"; shift 2; exec \"$DEVHOME/lds\" --__win_workdir \"$CALLER_WIN\" \"$@\"" bash "%DEVHOME%" "%WORKDIR%" %*
