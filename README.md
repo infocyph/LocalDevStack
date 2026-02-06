@@ -2,7 +2,7 @@
 
 LocalDevStack provides an easy-to-use Docker-based development environment for your projects.
 All modules are **selective** and can be enabled via environment settings (Compose profiles).
-Supports **multiple domains** and local TLS (mkcert).
+Supports **multiple domains** and local TLS.
 
 > 1) Local development only.  
 > 2) Your domain(s) must be resolvable on your host:
@@ -28,12 +28,19 @@ git clone https://github.com/infocyph/LocalDevStack.git
 cd LocalDevStack
 ````
 
-### 2) Permissions (Linux/macOS)
+### 2) Setup global shortcut and Permissions
 
+On Linux/Mac,
 ```bash
 chmod +x ./lds 2>/dev/null || true
 sudo ./lds setup permissions
 ```
+On Windows,
+```cmd
+./lds setup permissions
+```
+
+Once ran, it will add a globally available shortcut (lds). And necessary permissions(linux/mac) will be assigned as well.
 
 ### 3) Start the stack
 
@@ -51,12 +58,6 @@ lds setup domain
 
 ```bash
 sudo lds certificate install
-```
-
-### 6) Reload HTTP (after vhost/cert changes)
-
-```bash
-lds http reload
 ```
 
 ---
