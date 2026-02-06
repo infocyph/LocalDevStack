@@ -10,13 +10,16 @@ Supports **multiple domains** and local TLS.
 >    - use a DNS that resolves to your machine, **or**
 >    - use `*.localhost` (no hosts entry required in many setups)
 
----
-
 ## Prerequisites (Docker)
 
 Install docker on your system first. If you already have docker installed, you can skip this step. 
 - It is recommended to use [Docker Engine](https://docs.docker.com/engine/install/).
 - If Docker Engine not supported in your OS, use [Docker Desktop](https://docs.docker.com/desktop/) (although you can also install this on linux as well).
+
+## Supported Project Languages
+
+- PHP
+- NodeJs
 
 ---
 
@@ -59,8 +62,6 @@ lds setup domain
 ```bash
 sudo lds certificate install
 ```
-
----
 
 ## CLI help (built-in “man”)
 

@@ -675,7 +675,87 @@ ca_plan() {
   esac
 }
 
+
+is_windows_shell() {
+  [[ "${OSTYPE:-}" =~ (msys|cygwin) ]] || [[ -n "${WORKDIR_WIN:-}" ]]
+}
+
+need_windows_tools() {
+  command -v cygpath >/dev/null 2>&1 || die "Windows certificate install needs 'cygpath' (Git Bash)."
+  command -v powershell.exe >/dev/null 2>&1 || die "Windows certificate install needs 'powershell.exe' on PATH."
+}
+
+install_ca_windows() {
+  need_windows_tools
+
+  local src_ca="$DIR/configuration/rootCA/rootCA.pem"
+  [[ -r "$src_ca" ]] || die "certificate not found: $src_ca"
+
+  local win_ca
+  win_ca="$(cygpath -w "$src_ca")"
+
+  printf "%bInstalling root CA into Windows trust store (CurrentUser\\Root)…%b\n" "$CYAN" "$NC"
+
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "
+    \$ErrorActionPreference = 'Stop'
+    \$path = '$win_ca'
+    \$cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2(\$path)
+
+    \$store = New-Object System.Security.Cryptography.X509Certificates.X509Store('Root','CurrentUser')
+    \$store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+
+    \$exists = \$store.Certificates | Where-Object { \$_.Thumbprint -eq \$cert.Thumbprint }
+    if (-not \$exists) { \$store.Add(\$cert) }
+
+    \$store.Close()
+  " >/dev/null 2>&1 || die "Windows certificate install failed (PowerShell import)."
+
+  printf "%bRoot CA installed on Windows%b (CurrentUser\\Root)\n" "$GREEN" "$NC"
+  printf "%bNote:%b restart browsers if they still show trust errors.\n" "$YELLOW" "$NC"
+}
+
+uninstall_ca_windows() {
+  need_windows_tools
+
+  local src_ca="$DIR/configuration/rootCA/rootCA.pem"
+  [[ -r "$src_ca" ]] || die "certificate not found: $src_ca"
+
+  local win_ca
+  win_ca="$(cygpath -w "$src_ca")"
+
+  printf "%bUninstalling root CA from Windows trust store (CurrentUser\\Root)…%b\n" "$CYAN" "$NC"
+
+  local removed
+  removed="$(powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "
+    \$ErrorActionPreference = 'Stop'
+    \$path = '$win_ca'
+    \$cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2(\$path)
+    \$thumb = \$cert.Thumbprint
+
+    \$store = New-Object System.Security.Cryptography.X509Certificates.X509Store('Root','CurrentUser')
+    \$store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+
+    \$matches = @(\$store.Certificates | Where-Object { \$_.Thumbprint -eq \$thumb })
+    foreach (\$c in \$matches) { \$store.Remove(\$c) }
+
+    \$store.Close()
+    [string]\$matches.Count
+  " 2>/dev/null || true)"
+
+  removed="${removed//[$'\r\n\t ']/}"
+  if [[ "${removed:-0}" =~ ^[0-9]+$ ]] && ((removed > 0)); then
+    printf "%bRoot CA uninstalled on Windows%b (removed %s cert)\n" "$GREEN" "$NC" "$removed"
+  else
+    printf "%bRoot CA already absent on Windows%b (no matching cert)\n" "$YELLOW" "$NC"
+  fi
+}
+
 install_ca() {
+  if is_windows_shell; then
+    install_ca_windows
+    return 0
+  fi
+
   local src_ca="$DIR/configuration/rootCA/rootCA.pem"
   [[ ${EUID:-$(id -u)} -eq 0 ]] || die "certificate install requires sudo"
   [[ -r "$src_ca" ]] || die "certificate not found: $src_ca"
@@ -770,6 +850,11 @@ install_ca() {
 }
 
 uninstall_ca() {
+  if is_windows_shell; then
+    uninstall_ca_windows
+    return 0
+  fi
+
   [[ ${EUID:-$(id -u)} -eq 0 ]] || die "certificate uninstall requires sudo"
 
   local all=0
