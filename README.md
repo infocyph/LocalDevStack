@@ -81,13 +81,80 @@ lds setup domain
 sudo lds certificate install
 ```
 
+
+## Command hints (quick reference)
+
+
+```bash
+lds help
+```
+
+### Core stack
+
+```bash
+lds up            # start stack
+lds start         # alias of up
+lds stop          # stop stack (down)
+lds down          # alias of stop
+lds restart       # stop + up + HTTP reload
+lds reload        # recreate + HTTP reload
+lds rebuild all   # rebuild/pull images
+lds config        # show resolved docker compose config
+lds http reload   # reload the HTTP load balancer (nginx/apache)
+lds tools         # shell into SERVER_TOOLS container
+lds doctor        # host diagnostics
+```
+
+### Setup
+
+```bash
+lds setup init
+lds setup permissions
+lds setup profile      # (or: lds setup profiles) choose which services to configure
+lds setup domain
+```
+
+### Certificates
+
+```bash
+lds certificate install
+lds certificate uninstall
+lds certificate uninstall --all
+```
+
+### Run (ad-hoc Dockerfile runner)
+
+```bash
+lds run
+lds run --publish 8025:8025
+lds run ps
+lds run logs
+lds run stop
+lds run rm
+lds run open 8025
+```
+
+### Shortcuts
+
+```bash
+lds php -v
+lds composer install
+lds node -v
+lds npm i
+lds npx <pkg>
+
+lds my --login
+lds maria --login
+lds pg --login
+lds redis --login
+```
+
+> Tip: If you forget anything, `lds help` is the source of truth.
+
 ## CLI help (built-in “man”)
 
 ```bash
 lds help
-lds help <command>
-lds help setup
-lds help certificate
 ```
 
 ---
