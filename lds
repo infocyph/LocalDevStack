@@ -490,7 +490,7 @@ flush_profiles() {
 setup_menu_print() {
   # Print menu to stderr to avoid stdout buffering in some Windows wrappers.
   {
-    printf "\n%bSetup profiles%b — choose services to configure:\n\n" "$CYAN" "$NC"
+    printf "\n%bSetup profiles%b (will replace previous configuration, if exists):\n\n" "$CYAN" "$NC"
     local i=1 key slug
     for key in "${SERVICE_ORDER[@]}"; do
       slug="${SERVICES[$key]}"
