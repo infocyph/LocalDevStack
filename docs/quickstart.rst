@@ -42,15 +42,6 @@ Quick Start
 
    - :doc:`guides/tls-and-certificates`
 
-Next steps
-----------
-
-- Domain and vhosts: :doc:`guides/domain-setup`
-- Local TLS (mkcert + certify): :doc:`guides/tls-and-certificates`
-- Node apps behind Nginx: :doc:`guides/node-apps`
-- Encrypted secrets (SOPS + Age): :doc:`guides/secrets-sops-age`
-- Notifications: :doc:`guides/notifications`
-
 Directory Structure
 -------------------
 
@@ -135,3 +126,12 @@ Shells::
 Notes:
 
 - ``lds core <domain>`` is intended to open the right runtime container shell for that domain.
+
+Next steps
+----------
+
+- Domain and vhosts: :doc:`guides/domain-setup`
+- Local TLS (mkcert + certify): :doc:`guides/tls-and-certificates`
+- Node apps behind Nginx: :doc:`guides/node-apps`
+- Encrypted secrets (SOPS + Age): :doc:`guides/secrets-sops-age`
+- Notifications: :doc:`guides/notifications`
