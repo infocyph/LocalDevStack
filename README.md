@@ -25,6 +25,24 @@ Install docker on your system first. If you already have docker installed, you c
 
 ## Quickstart
 
+### 0) Default Layout
+
+```
+project-root/
+├─ application/
+│  ├─ site1/
+│  ├─ site2/
+│  └─ ...
+└─ LocalDevStack/        (this repository)
+```
+
+This layout is flexible. If you want a different projects folder, set `PROJECT_DIR` in your env.
+
+```bash
+# supports relative/absolute path (recommended to use absolute path for less confusion)
+PROJECT_DIR=/path/to/your/projects 
+```
+
 ### 1) Clone
 ```bash
 git clone https://github.com/infocyph/LocalDevStack.git
