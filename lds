@@ -2330,35 +2330,72 @@ cmd_run() {
 
 cmd_help() {
   cat <<EOF
-${CYAN}Usage:${NC} lds [--verbose|-v] <command> [options]
+${CYAN}Usage:${NC}
+  lds [--verbose|-v] <command> [args...]
+  lds <shortcut> [args...]                # php/composer/node/npm/npx, my/mysql, maria, pg/psql, redis-cli
 
-${CYAN}Default:${NC} quiet docker compose operations. Add ${CYAN}-v${NC} / ${CYAN}--verbose${NC} to see pull/build progress.
+${CYAN}Global:${NC}
+  -v, --verbose     Show docker pull/build progress + extra logs
+  -q, --quiet       Quiet mode (default)
 
-${CYAN}Core commands:${NC}
-  up / start                 Start docker stack (quiet pull by default)
-  stop / down                Stop stack
-  reload / restart           Restart stack + reload HTTP
-  rebuild [all|<svc...>]       Rebuild/pull services (no full down)
-  config                     Validate compose
-  tools                      Enter SERVER_TOOLS container
-  lzd | lazydocker           Start LazyDocker
-  http reload                Reload Nginx/Apache
-  core [domain]              Open bash in container for <domain>
+${CYAN}Core stack:${NC}
+  up                         Start stack (quiet pull by default)
+  start                      Alias of up
+  stop                       Stop stack (docker compose down)
+  down                       Alias of stop
+  reload                     Alias of start (recreate) + HTTP reload
+  restart                    Stop + up + HTTP reload
+  reboot                     Alias of restart
+  rebuild [all|<svc...>]     Pull/build selected services without full down (fast iteration)
+  config                     Print resolved compose config (uses extras + env-file)
+  http reload                Reload HTTP (Nginx/Apache) inside the LB container
+  tools                      Shell into SERVER_TOOLS container
+  lzd | lazydocker            Open LazyDocker inside SERVER_TOOLS
+  core [domain]              Open shell in the container for a domain (or core service)
 
-${CYAN}Setup commands:${NC}
-  setup init                 Initialize Primaries!
-  setup permissions          Assign/Fix directory/file permissions
-  setup domain               Setup domain
-  setup profiles             Setup database profiles
+${CYAN}Domains / hosts:${NC}
+  setup domain               Run mkhost wizard, update COMPOSE_PROFILES, up + HTTP reload
+  delhost <domain>           Remove a domain host entry + HTTP reload
 
-${CYAN}Misc:${NC}
-  doctor                     Diagnose environment + show install hints
-  certificate install         Install local rootCA
-  certificate uninstall [--all] Remove local rootCA (use --all to remove from all known anchor paths)
-  run [stop|rm|ps|logs|open] [opts]  Build/run/exec ad-hoc Dockerfile in current dir
-  notify watch [container]   Watch SERVER_TOOLS notifications and show desktop popups
-  notify test "T" "B"        Send a test notification into SERVER_TOOLS
-  help                       This help
+${CYAN}Setup:${NC}
+  setup init                 Create required files (.env, docker/.env, php.ini, etc.)
+  setup permissions           Fix permissions for data/logs/config/bin (Linux/macOS; no-op on Windows)
+  setup profile|profiles      Configure service profiles (selection menu; writes defaults into docker/.env)
+
+${CYAN}Certificates:${NC}
+  certificate install         Install local rootCA (Linux trust store / Windows CurrentUser\\Root)
+  certificate uninstall [--all]
+                              Remove local rootCA (use --all to remove from known anchor paths)
+
+${CYAN}Doctor:${NC}
+  doctor                     Host diagnostics (docker/compose, config validity, ports 80/443, disk, WSL on Windows)
+
+${CYAN}Notify:${NC}
+  notify watch [container]    Stream notifications from SERVER_TOOLS (desktop popups)
+  notify test "Title" "Body"  Send a test notification to SERVER_TOOLS
+
+${CYAN}Run (ad-hoc Dockerfile runner):${NC}
+  run                         Build+start+exec container for current directory (Dockerfile required)
+  run ps|logs|stop|rm          Manage the ad-hoc container for current directory
+  run open [port]             Open published port URL (best-effort)
+  run --publish|-p A:B         Publish ports (repeatable)
+  run --keepalive              Keep container running (exec later)
+  run --sock                   Mount /var/run/docker.sock into container (DinD style)
+
+${CYAN}Shortcuts:${NC}
+  php|composer <args...>
+  my|mysql|mysqldump <args...>
+  maria|mariadb|mariadb-dump <args...>
+  pg|psql|pg_dump|pg_restore <args...>
+  redis|redis-cli <args...>
+
+${CYAN}Examples:${NC}
+  lds setup init
+  lds setup profiles
+  lds up
+  lds http reload
+  lds certificate install
+  lds run --publish 8025:8025
 EOF
 }
 
