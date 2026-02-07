@@ -208,17 +208,39 @@ logv() { ((VERBOSE)) && printf "%b[%s]%b %s\n" "$CYAN" "${1:-info}" "$NC" "${2:-
 logq() { printf "%b[%s]%b %s\n" "$CYAN" "${1:-info}" "$NC" "${2:-}" >&2; }
 
 # Unified prompt helper (used by env_init + profiles)
+tty_readline() {
+  # Robust prompt/read across Linux/macOS/WSL/Windows Git Bash.
+  # Prefer stdin when it is a TTY (normal interactive use). If stdin is not a TTY,
+  # fall back to /dev/tty when available.
+  local __var_name="$1" __prompt="$2" __line
+
+  if [[ -t 0 ]]; then
+    # Interactive: show prompt on stderr (so it is never swallowed) and read stdin.
+    printf '%s' "$__prompt" >&2
+    IFS= read -r __line || return 1
+  elif [[ -r /dev/tty ]]; then
+    # Non-interactive stdin (piped) but we still have a controlling terminal.
+    printf '%s' "$__prompt" > /dev/tty
+    IFS= read -r __line < /dev/tty || return 1
+  else
+    return 1
+  fi
+
+  printf -v "$__var_name" '%s' "$__line"
+}
+
 read_default() {
   local prompt=$1 default=$2 input
-  read -rp "$(printf '%b%s [default: %s]:%b ' "$CYAN" "$prompt" "$default" "$NC")" input
+  tty_readline input "$(printf '%b%s [default: %s]:%b ' "$CYAN" "$prompt" "$default" "$NC")" || return 1
   printf '%s' "${input:-$default}"
 }
 
 ask_yes() {
   local prompt="$1" ans
-  read -rp "$(printf "%b%s (y/n): %b" "$BLUE" "$prompt" "$NC")" ans
+  tty_readline ans "$(printf '%b%s (y/n): %b' "$BLUE" "$prompt" "$NC")" || return 1
   [[ "${ans,,}" == "y" ]]
 }
+
 
 # ── dotenv quoting: only quote when needed (spaces, tabs, #, quotes, leading/trailing whitespace) ──
 env_quote() {
@@ -423,15 +445,15 @@ modify_profiles() {
 # ─────────────────────────────────────────────────────────────────────────────
 
 declare -A SERVICES=(
-  [ELASTICSEARCH]="elasticsearch"
+  [POSTGRESQL]="postgresql"
   [MYSQL]="mysql"
   [MARIADB]="mariadb"
+  [ELASTICSEARCH]="elasticsearch"
   [MONGODB]="mongodb"
   [REDIS]="redis"
-  [POSTGRESQL]="postgresql"
 )
 
-declare -a SERVICE_ORDER=(ELASTICSEARCH MYSQL MARIADB MONGODB REDIS POSTGRESQL)
+declare -a SERVICE_ORDER=(POSTGRESQL MYSQL MARIADB ELASTICSEARCH MONGODB REDIS)
 
 declare -A PROFILE_ENV=(
   [elasticsearch]="ELASTICSEARCH_VERSION=9.2.4 ELASTICSEARCH_PORT=9200"
@@ -463,15 +485,95 @@ flush_profiles() {
   done
 }
 
-process_service() {
-  local service="$1"
-  printf "\n%b→ %s%b\n" "$YELLOW" "$service" "$NC"
-  ask_yes "Enable $service?" || {
-    printf "%bSkipping %s%b\n" "$RED" "$service" "$NC"
-    return
-  }
+# ── setup menu (selection-first) ──────────────────────────────────────────────
 
-  local profile="${SERVICES[$service]}"
+setup_menu_print() {
+  # Print menu to stderr to avoid stdout buffering in some Windows wrappers.
+  {
+    printf "\n%bSetup profiles%b — choose services to configure:\n\n" "$CYAN" "$NC"
+    local i=1 key slug
+    for key in "${SERVICE_ORDER[@]}"; do
+      slug="${SERVICES[$key]}"
+      printf "  %2d) %-12s  (%s)\n" "$i" "$key" "$slug"
+      i=$((i+1))
+    done
+    printf "\n  a) ALL\n"
+    printf "  n) NONE / Back\n\n"
+  } >&2
+}
+
+# Parse user selection into indices or ALL/NONE (prints one token per line)
+setup_menu_parse() {
+  local input="${1//[[:space:]]/}"
+  [[ -n "$input" ]] || return 1
+  input="${input//;/,}"
+
+  echo "$input" | tr ',' '\n' | awk '
+    BEGIN { ok=1 }
+    /^[0-9]+-[0-9]+$/ {
+      split($0,a,"-")
+      if (a[1] > a[2]) { t=a[1]; a[1]=a[2]; a[2]=t }
+      for (i=a[1]; i<=a[2]; i++) print i
+      next
+    }
+    /^[0-9]+$/ { print $0; next }
+    /^[aA]$/ { print "ALL"; next }
+    /^[nN]$/ { print "NONE"; next }
+    { ok=0 }
+    END { if (!ok) exit 2 }
+  '
+}
+
+# Outputs: newline-separated service KEYS from SERVICE_ORDER (e.g. MYSQL, REDIS)
+setup_choose_services() {
+  local ans parsed
+  while :; do
+    setup_menu_print
+    tty_readline ans "Select (e.g. 1,3,5 or 2-4 or a): " || return 1
+
+    if ! parsed="$(setup_menu_parse "$ans" 2>/dev/null)"; then
+      printf "%bInvalid selection.%b Try again.\n" "$YELLOW" "$NC"
+      continue
+    fi
+
+    if grep -qx "NONE" <<<"$parsed"; then
+      return 1
+    fi
+
+    if grep -qx "ALL" <<<"$parsed"; then
+      printf "%s\n" "${SERVICE_ORDER[@]}"
+      return 0
+    fi
+
+    # Indices -> keys (de-dupe, preserve order)
+    local -A seen=()
+    local out=()
+    local idx key
+    while IFS= read -r idx; do
+      [[ "$idx" =~ ^[0-9]+$ ]] || continue
+      (( idx >= 1 && idx <= ${#SERVICE_ORDER[@]} )) || continue
+      key="${SERVICE_ORDER[idx-1]}"
+      [[ -n "${seen[$key]:-}" ]] && continue
+      seen[$key]=1
+      out+=("$key")
+    done <<<"$parsed"
+
+    if ((${#out[@]}==0)); then
+      printf "%bNo valid items selected.%b\n" "$YELLOW" "$NC"
+      continue
+    fi
+
+    printf "%s\n" "${out[@]}"
+    return 0
+  done
+}
+
+setup_service() {
+  local service="$1"
+  local profile="${SERVICES[$service]:-}"
+  [[ -n "$profile" ]] || die "Unknown service: $service"
+
+  printf "\n%b→ %s%b\n" "$YELLOW" "$service" "$NC"
   queue_profile "$profile"
 
   printf "%bEnter value(s) for %s:%b\n" "$BLUE" "$service" "$NC"
@@ -484,13 +586,26 @@ process_service() {
 }
 
 process_all() {
+  local selected
+  if ! selected="$(setup_choose_services)"; then
+    printf "\n%bSetup cancelled.%b\n" "$YELLOW" "$NC"
+    return 0
+  fi
+
+  printf "\n%bWill configure:%b\n" "$CYAN" "$NC"
+  while IFS= read -r svc; do
+    printf "  - %s (%s)\n" "$svc" "${SERVICES[$svc]}"
+  done <<<"$selected"
+  echo
+
   local svc
-  for svc in "${SERVICE_ORDER[@]}"; do
-    process_service "$svc"
-  done
+  while IFS= read -r svc; do
+    setup_service "$svc"
+  done <<<"$selected"
+
   flush_envs
   flush_profiles
-  printf "\n%b✅ All services configured!%b\n" "$GREEN" "$NC"
+  printf "\n%b✅ Selected services configured!%b\n" "$GREEN" "$NC"
 }
 
 ###############################################################################
@@ -1418,7 +1533,7 @@ core_pick_domain() {
   local ans idx
   while true; do
     printf "%bDomain #%b " "$GREEN" "$NC" >&2
-    IFS= read -r ans || return 130
+    tty_readline ans "" || return 130
     ans="${ans//[[:space:]]/}"
     [[ -n "$ans" ]] || continue
 
