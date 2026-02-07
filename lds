@@ -749,15 +749,30 @@ env_init() {
 # Root CA helpers (cross-distro)
 # ─────────────────────────────────────────────────────────────────────────────
 detect_os_family() {
-  local os_id="unknown" os_like="unknown"
+  # Output: "id|like"
+  # Must never fail under set -e
+  if [[ "${OSTYPE:-}" =~ (msys|cygwin|win32) ]]; then
+    echo "windows|windows"
+    return 0
+  fi
+
+  local id like
+  id="unknown"; like="unknown"
+
   if [[ -r /etc/os-release ]]; then
     # shellcheck disable=SC1091
-    . /etc/os-release
-    os_id="${ID:-unknown}"
-    os_like="${ID_LIKE:-unknown}"
+    . /etc/os-release || true
+    id="${ID:-unknown}"
+    like="${ID_LIKE:-unknown}"
+  elif command -v uname >/dev/null 2>&1; then
+    # fallback for macOS / other unix
+    case "$(uname -s 2>/dev/null || true)" in
+    Darwin) id="macos"; like="darwin" ;;
+    Linux)  id="linux"; like="linux" ;;
+    esac
   fi
-  printf '%s|%s
-' "$os_id" "$os_like"
+
+  echo "$id|$like"
 }
 
 # Decide destination path + update mechanism. Echo: family|dest|updater
@@ -1589,107 +1604,264 @@ cmd_certificate() {
 }
 
 cmd_doctor() {
-  # Quick environment diagnostics + install hints (best-effort).
-  local os_id os_like family
+  local os_id os_like
   IFS='|' read -r os_id os_like < <(detect_os_family)
 
+  local is_win=0
+  [[ "${OSTYPE:-}" =~ (msys|cygwin|win32) ]] && is_win=1
+
   printf "%bDoctor%b — environment checks\n" "$MAGENTA" "$NC"
-  printf "%bOS%b: id=%s like=%s\n" "$CYAN" "$NC" "$os_id" "$os_like"
+  printf "%bOS%b: id=%s like=%s\n" "$CYAN" "$NC" "${os_id:-unknown}" "${os_like:-unknown}"
+  ((is_win)) && printf "%bShell%b: Windows\n" "$CYAN" "$NC" || printf "%bShell%b: Unix\n" "$CYAN" "$NC"
 
-  _ok() { printf "  %b✔%b %s\n" "$GREEN" "$NC" "$*"; }
+  _ok()   { printf "  %b✔%b %s\n" "$GREEN" "$NC" "$*"; }
   _warn() { printf "  %b!%b %s\n" "$YELLOW" "$NC" "$*"; }
-  _bad() { printf "  %b✘%b %s\n" "$RED" "$NC" "$*"; }
+  _bad()  { printf "  %b✘%b %s\n" "$RED" "$NC" "$*"; }
+  _has()  { command -v "$1" >/dev/null 2>&1; }
+  _first(){ local c; for c in "$@"; do _has "$c" && { echo "$c"; return 0; }; done; return 1; }
 
-  _has() { command -v "$1" >/dev/null 2>&1; }
+  # ────────────────────────────────────────────────────────────────────────────
+  # TTY sanity (prompt/menus)
+  # ────────────────────────────────────────────────────────────────────────────
+  [[ -t 0 ]] && _ok "stdin: ok" || _warn "stdin: not a TTY"
+  [[ -t 1 ]] && _ok "stdout: ok" || _warn "stdout: not a TTY"
+  [[ -r /dev/tty ]] && _ok "tty: ok" || _warn "tty: not readable"
 
-  # Docker CLI + daemon
-  if _has docker; then
-    _ok "docker: $(docker --version 2>/dev/null || echo 'present')"
-    if docker info >/dev/null 2>&1; then
-      _ok "docker daemon: reachable"
+  # ────────────────────────────────────────────────────────────────────────────
+  # Required base tools
+  # ────────────────────────────────────────────────────────────────────────────
+  local c
+  for c in awk sed grep find sort; do
+    _has "$c" && _ok "$c: ok" || _bad "$c: missing"
+  done
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Windows essentials
+  # ────────────────────────────────────────────────────────────────────────────
+  if ((is_win)); then
+    _has powershell.exe && _ok "powershell.exe: ok" || _bad "powershell.exe: missing"
+    _has cygpath && _ok "cygpath: ok" || _bad "cygpath: missing"
+    _has git.exe && _ok "git.exe: ok" || _warn "git.exe: missing"
+    _has bash && _ok "bash: ok" || _bad "bash: missing"
+  fi
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Docker CLI + daemon + context
+  # ────────────────────────────────────────────────────────────────────────────
+  local docker_cmd
+  docker_cmd="$(_first docker docker.exe || true)"
+
+  if [[ -n "$docker_cmd" ]]; then
+    _ok "docker: $($docker_cmd --version 2>/dev/null || echo ok)"
+
+    if $docker_cmd context show >/dev/null 2>&1; then
+      _ok "docker context: $($docker_cmd context show 2>/dev/null)"
     else
-      _bad "docker daemon: not reachable (is Docker running? permissions?)"
+      _warn "docker context: unavailable"
+    fi
+
+    if $docker_cmd info >/dev/null 2>&1; then
+      _ok "docker daemon: ok"
+    else
+      _bad "docker daemon: not reachable"
+      ((is_win)) && _warn "hint: start Docker Desktop; enable WSL2 engine"
     fi
   else
     _bad "docker: missing"
   fi
 
-  # Compose
-  if docker compose version >/dev/null 2>&1; then
-    _ok "compose: docker compose"
-  elif _has docker-compose; then
-    _ok "compose: docker-compose"
+  # Compose presence (doctor should NOT print compose file path)
+  if docker_compose version >/dev/null 2>&1; then
+    _ok "compose: ok"
   else
-    _bad "compose: missing (need docker compose plugin or docker-compose)"
+    _bad "compose: missing"
   fi
 
-  # Common tools used by this script
-  for c in awk sed grep find sort; do
-    _has "$c" && _ok "$c: present" || _bad "$c: missing"
+  # Compose config validation (reuse your wrapper; keep quiet)
+  if docker_compose config -q >/dev/null 2>&1; then
+    _ok "compose config: ok"
+  else
+    _bad "compose config: invalid (run: lds config)"
+  fi
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Optional tools (high-signal only)
+  # ────────────────────────────────────────────────────────────────────────────
+  _has openssl && _ok "openssl: ok" || _warn "openssl: missing"
+  (_has wget || _has curl) && _ok "http client: ok" || _warn "http client: missing (curl/wget)"
+  _has jq && _ok "jq: ok" || _warn "jq: missing"
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # File/dir sanity (only show path when NOT ok)
+  # ────────────────────────────────────────────────────────────────────────────
+  [[ -f "$ENV_DOCKER" ]] && _ok "env: ok" || _warn "env: missing ($ENV_DOCKER)"
+  [[ -d "$DIR/docker" ]] && _ok "docker dir: ok" || _bad "docker dir: missing ($DIR/docker)"
+  [[ -d "$DIR/configuration" ]] && _ok "configuration dir: ok" || _bad "configuration dir: missing ($DIR/configuration)"
+  [[ -d "$DIR/data" ]] && _ok "data dir: ok" || _warn "data dir: missing ($DIR/data)"
+  [[ -d "$DIR/logs" ]] && _ok "logs dir: ok" || _warn "logs dir: missing ($DIR/logs)"
+
+  # Writable checks (mount stability)
+  if [[ -d "$DIR/data" ]]; then
+    [[ -w "$DIR/data" ]] && _ok "data writable: ok" || _bad "data writable: no ($DIR/data)"
+  fi
+  if [[ -d "$DIR/logs" ]]; then
+    [[ -w "$DIR/logs" ]] && _ok "logs writable: ok" || _bad "logs writable: no ($DIR/logs)"
+  fi
+
+  # Cert input (needed by your cert commands)
+  [[ -f "$DIR/configuration/rootCA/rootCA.pem" ]] \
+    && _ok "rootCA.pem: ok" \
+    || _warn "rootCA.pem: missing ($DIR/configuration/rootCA/rootCA.pem)"
+
+  # CRLF risk (bash scripts break)
+  if [[ -f "$DIR/lds" ]]; then
+    if grep -U $'\r' "$DIR/lds" >/dev/null 2>&1; then
+      _warn "line endings: CRLF detected ($DIR/lds)"
+    else
+      _ok "line endings: ok"
+    fi
+  fi
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # More checks (requested)
+  # ────────────────────────────────────────────────────────────────────────────
+  printf "\n%bMore checks%b\n" "$CYAN" "$NC"
+
+  # Ports availability — only public ports: 80/443
+  doctor_port_in_use() {
+    local p="$1"
+    if ((is_win)); then
+      netstat -ano 2>/dev/null | awk '{print $2}' | grep -Eq ":${p}\$" && return 0 || return 1
+    else
+      if _has ss; then
+        ss -lnt 2>/dev/null | awk '{print $4}' | grep -Eq "[:.]${p}\$" && return 0 || return 1
+      elif _has lsof; then
+        lsof -nP -iTCP:"$p" -sTCP:LISTEN >/dev/null 2>&1 && return 0 || return 1
+      else
+        return 2
+      fi
+    fi
+  }
+
+  local ports=(80 443)
+  local any_unknown=0 p
+  for p in "${ports[@]}"; do
+    if doctor_port_in_use "$p"; then
+      _warn "port $p: in use"
+    else
+      local rc=$?
+      if [[ $rc -eq 2 ]]; then
+        any_unknown=1
+      else
+        _ok "port $p: ok"
+      fi
+    fi
+  done
+  ((any_unknown)) && _warn "port scan: limited (install ss or lsof)"
+
+  # Disk space (warn only if low)
+  if df -Pk "$DIR" >/dev/null 2>&1; then
+    local avail_kb
+    avail_kb="$(df -Pk "$DIR" | awk 'NR==2{print $4}')"
+    if [[ -n "$avail_kb" ]] && (( avail_kb < 5*1024*1024 )); then
+      _warn "disk: low (<5GiB free)"
+    else
+      _ok "disk: ok"
+    fi
+  else
+    _warn "disk: unable to check"
+  fi
+
+  # WSL detection (Windows)
+  if ((is_win)); then
+    if _has wsl.exe; then
+      if wsl.exe -l -q >/dev/null 2>&1; then
+        _ok "WSL: ok"
+      else
+        _warn "WSL: present but not configured"
+      fi
+    else
+      _warn "WSL: not found"
+    fi
+  fi
+
+  # Compose profiles sanity (.env vs supported profiles)
+  doctor_list_enabled_profiles() {
+    [[ -f "$ENV_DOCKER" ]] || return 0
+    local line
+    line="$(grep -E '^(COMPOSE_PROFILES|PROFILES)=' "$ENV_DOCKER" 2>/dev/null | tail -n 1 || true)"
+    [[ -n "$line" ]] || return 0
+    line="${line#*=}"
+    line="${line%\"}"; line="${line#\"}"
+    line="${line%\'}"; line="${line#\'}"
+    echo "$line" | tr ', ' '\n' | awk 'NF{print}'
+  }
+
+  local -A valid_profiles=()
+  local key slug
+  for key in "${SERVICE_ORDER[@]}"; do
+    slug="${SERVICES[$key]}"
+    [[ -n "$slug" ]] && valid_profiles["$slug"]=1
   done
 
-  # Optional-but-valuable tools
-  _has mkcert && _ok "mkcert: present" || _warn "mkcert: not found (needed for local TLS automation)"
-  _has openssl && _ok "openssl: present" || _warn "openssl: not found (useful for debugging certs)"
-  (_has wget || _has curl) && _ok "http client: present" || _warn "http client: missing (wget/curl recommended)"
+  local seen_any=0 bad_any=0 prof
+  while IFS= read -r prof; do
+    [[ -n "$prof" ]] || continue
+    seen_any=1
+    if [[ -n "${valid_profiles[$prof]:-}" ]]; then
+      _ok "profiles: '$prof' ok"
+    else
+      bad_any=1
+      _warn "profiles: unknown '$prof'"
+    fi
+  done < <(doctor_list_enabled_profiles || true)
 
-  # layout checks
-  [[ -f "$COMPOSE_FILE" ]] && _ok "compose file: $COMPOSE_FILE" || _bad "compose file missing: $COMPOSE_FILE"
-  [[ -f "$ENV_DOCKER" ]] && _ok "env file: $ENV_DOCKER" || _warn "env file missing: $ENV_DOCKER (run: lds setup init)"
+  ((seen_any==0)) && _warn "profiles: none set (COMPOSE_PROFILES=...)"
+  ((bad_any)) && _warn "profiles: sync COMPOSE_PROFILES with supported services"
 
-  # CA tooling by distro family
-  if _has update-ca-certificates; then
-    _ok "update-ca-certificates: present"
-  else
-    _warn "update-ca-certificates: not found (Debian/Ubuntu/Alpine CA updates)"
-  fi
-
-  if _has update-ca-trust; then
-    _ok "update-ca-trust: present"
-  else
-    _warn "update-ca-trust: not found (RHEL/Fedora CA updates)"
-  fi
-
-  if _has trust; then
-    _ok "trust (p11-kit): present"
-  else
-    _warn "trust (p11-kit): not found (Arch / p11-kit trust store)"
-  fi
-
-  printf "\n%bInstall hints%b (best guess)\n" "$CYAN" "$NC"
-
-  # Package manager heuristics (print commands, do NOT execute)
-  if _has apt-get; then
-    _warn "Debian/Ubuntu:"
-    printf "    sudo apt-get update && sudo apt-get install -y ca-certificates curl wget openssl p11-kit\n"
-    printf "    # Docker: https://docs.docker.com/engine/install/\n"
-    printf "    sudo apt-get install -y docker-compose-plugin\n"
-  elif _has dnf; then
-    _warn "Fedora/RHEL (dnf):"
-    printf "    sudo dnf install -y ca-certificates curl wget openssl p11-kit-trust\n"
-    printf "    # Docker: https://docs.docker.com/engine/install/\n"
-  elif _has yum; then
-    _warn "RHEL/CentOS (yum):"
-    printf "    sudo yum install -y ca-certificates curl wget openssl p11-kit-trust\n"
-    printf "    # Docker: https://docs.docker.com/engine/install/\n"
-  elif _has pacman; then
-    _warn "Arch:"
-    printf "    sudo pacman -Syu --noconfirm ca-certificates curl wget openssl p11-kit\n"
-    printf "    # Docker + compose plugin per Arch wiki\n"
-  elif _has apk; then
-    _warn "Alpine:"
-    printf "    sudo apk add --no-cache ca-certificates curl wget openssl p11-kit\n"
-    printf "    sudo update-ca-certificates\n"
-  elif _has zypper; then
-    _warn "SUSE:"
-    printf "    sudo zypper install -y ca-certificates curl wget openssl p11-kit\n"
-  else
-    _warn "No known package manager detected. Install: docker + compose + ca-certificates + openssl + p11-kit."
-  fi
-
+  # ────────────────────────────────────────────────────────────────────────────
+  # Tips
+  # ────────────────────────────────────────────────────────────────────────────
   printf "\n%bTips%b\n" "$CYAN" "$NC"
   printf "  - Use: %blds certificate uninstall --all%b if you switched distros/paths.\n" "$BLUE" "$NC"
-  printf "  - Use: %blds run --publish 8025:8025%b to expose ports for 'lds run open'.\n" "$BLUE" "$NC"
+  printf "  - Use: %blds config%b to inspect full resolved compose config.\n" "$BLUE" "$NC"
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Install hints (bottom)
+  # ────────────────────────────────────────────────────────────────────────────
+  printf "\n%bInstall hints%b\n" "$CYAN" "$NC"
+
+  if ((is_win)); then
+    printf "  - Install Docker Desktop (WSL2 engine recommended)\n"
+    printf "  - Install Git for Windows (Git Bash)\n"
+    printf "  - Ensure docker.exe is on PATH and Docker Desktop is running\n"
+    printf "  - (Optional) Install WSL: wsl --install\n"
+  elif _has apt-get; then
+    printf "  - Debian/Ubuntu:\n"
+    printf "      sudo apt-get update && sudo apt-get install -y ca-certificates curl wget openssl p11-kit jq\n"
+    printf "      sudo apt-get install -y docker-compose-plugin\n"
+  elif _has dnf; then
+    printf "  - Fedora/RHEL (dnf):\n"
+    printf "      sudo dnf install -y ca-certificates curl wget openssl p11-kit-trust jq\n"
+  elif _has yum; then
+    printf "  - RHEL/CentOS (yum):\n"
+    printf "      sudo yum install -y ca-certificates curl wget openssl p11-kit-trust jq\n"
+  elif _has pacman; then
+    printf "  - Arch:\n"
+    printf "      sudo pacman -Syu --noconfirm ca-certificates curl wget openssl p11-kit jq\n"
+  elif _has apk; then
+    printf "  - Alpine:\n"
+    printf "      sudo apk add --no-cache ca-certificates curl wget openssl p11-kit jq\n"
+    printf "      sudo update-ca-certificates\n"
+  elif _has zypper; then
+    printf "  - SUSE:\n"
+    printf "      sudo zypper install -y ca-certificates curl wget openssl p11-kit jq\n"
+  else
+    printf "  - Install: docker + compose + ca-certificates + openssl + p11-kit (+ jq optional)\n"
+  fi
+
+  # Extra feature: show quick “where to go next” suggestion only if env missing
+  [[ -f "$ENV_DOCKER" ]] || _warn "next: run 'lds setup init' to generate env defaults"
 }
 
 ###############################################################################
@@ -2158,35 +2330,72 @@ cmd_run() {
 
 cmd_help() {
   cat <<EOF
-${CYAN}Usage:${NC} lds [--verbose|-v] <command> [options]
+${CYAN}Usage:${NC}
+  lds [--verbose|-v] <command> [args...]
+  lds <shortcut> [args...]                # php/composer/node/npm/npx, my/mysql, maria, pg/psql, redis-cli
 
-${CYAN}Default:${NC} quiet docker compose operations. Add ${CYAN}-v${NC} / ${CYAN}--verbose${NC} to see pull/build progress.
+${CYAN}Global:${NC}
+  -v, --verbose     Show docker pull/build progress + extra logs
+  -q, --quiet       Quiet mode (default)
 
-${CYAN}Core commands:${NC}
-  up / start                 Start docker stack (quiet pull by default)
-  stop / down                Stop stack
-  reload / restart           Restart stack + reload HTTP
-  rebuild [all|<svc...>]       Rebuild/pull services (no full down)
-  config                     Validate compose
-  tools                      Enter SERVER_TOOLS container
-  lzd | lazydocker           Start LazyDocker
-  http reload                Reload Nginx/Apache
-  core [domain]              Open bash in container for <domain>
+${CYAN}Core stack:${NC}
+  up                         Start stack (quiet pull by default)
+  start                      Alias of up
+  stop                       Stop stack (docker compose down)
+  down                       Alias of stop
+  reload                     Alias of start (recreate) + HTTP reload
+  restart                    Stop + up + HTTP reload
+  reboot                     Alias of restart
+  rebuild [all|<svc...>]     Pull/build selected services without full down (fast iteration)
+  config                     Print resolved compose config (uses extras + env-file)
+  http reload                Reload HTTP (Nginx/Apache) inside the LB container
+  tools                      Shell into SERVER_TOOLS container
+  lzd | lazydocker            Open LazyDocker inside SERVER_TOOLS
+  core [domain]              Open shell in the container for a domain (or core service)
 
-${CYAN}Setup commands:${NC}
-  setup init                 Initialize Primaries!
-  setup permissions          Assign/Fix directory/file permissions
-  setup domain               Setup domain
-  setup profiles             Setup database profiles
+${CYAN}Domains / hosts:${NC}
+  setup domain               Run mkhost wizard, update COMPOSE_PROFILES, up + HTTP reload
+  delhost <domain>           Remove a domain host entry + HTTP reload
 
-${CYAN}Misc:${NC}
-  doctor                     Diagnose environment + show install hints
-  certificate install         Install local rootCA
-  certificate uninstall [--all] Remove local rootCA (use --all to remove from all known anchor paths)
-  run [stop|rm|ps|logs|open] [opts]  Build/run/exec ad-hoc Dockerfile in current dir
-  notify watch [container]   Watch SERVER_TOOLS notifications and show desktop popups
-  notify test "T" "B"        Send a test notification into SERVER_TOOLS
-  help                       This help
+${CYAN}Setup:${NC}
+  setup init                 Create required files (.env, docker/.env, php.ini, etc.)
+  setup permissions           Fix permissions for data/logs/config/bin (Linux/macOS; no-op on Windows)
+  setup profile|profiles      Configure service profiles (selection menu; writes defaults into docker/.env)
+
+${CYAN}Certificates:${NC}
+  certificate install         Install local rootCA (Linux trust store / Windows CurrentUser\\Root)
+  certificate uninstall [--all]
+                              Remove local rootCA (use --all to remove from known anchor paths)
+
+${CYAN}Doctor:${NC}
+  doctor                     Host diagnostics (docker/compose, config validity, ports 80/443, disk, WSL on Windows)
+
+${CYAN}Notify:${NC}
+  notify watch [container]    Stream notifications from SERVER_TOOLS (desktop popups)
+  notify test "Title" "Body"  Send a test notification to SERVER_TOOLS
+
+${CYAN}Run (ad-hoc Dockerfile runner):${NC}
+  run                         Build+start+exec container for current directory (Dockerfile required)
+  run ps|logs|stop|rm          Manage the ad-hoc container for current directory
+  run open [port]             Open published port URL (best-effort)
+  run --publish|-p A:B         Publish ports (repeatable)
+  run --keepalive              Keep container running (exec later)
+  run --sock                   Mount /var/run/docker.sock into container (DinD style)
+
+${CYAN}Shortcuts:${NC}
+  php|composer <args...>
+  my|mysql|mysqldump <args...>
+  maria|mariadb|mariadb-dump <args...>
+  pg|psql|pg_dump|pg_restore <args...>
+  redis|redis-cli <args...>
+
+${CYAN}Examples:${NC}
+  lds setup init
+  lds setup profiles
+  lds up
+  lds http reload
+  lds certificate install
+  lds run --publish 8025:8025
 EOF
 }
 
