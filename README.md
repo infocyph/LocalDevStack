@@ -137,16 +137,21 @@ lds run open 8025
 ### Shortcuts
 
 ```bash
+# Run your hosts file using container
 lds php -v
 lds composer install
 lds node -v
 lds npm i
 lds npx <pkg>
 
+# Login into the service containers
 lds my --login
 lds maria --login
 lds pg --login
 lds redis --login
+
+# if You are not getting access to certain IP that is used via vpn
+lds vpn-fix
 ```
 
 > Tip: If you forget anything, `lds help` is the source of truth.
