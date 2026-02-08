@@ -2204,19 +2204,69 @@ cmd_vpn-fix() {
   fi
 
   # ---------------------------
+  # Find default-route interface (exclude it from VPN candidates)
+  # ---------------------------
+  local def_if=""
+  def_if="$(ip -4 route show default 2>/dev/null | awk '{for (i=1;i<=NF;i++) if ($i=="dev") {print $(i+1); exit}}' || true)"
+
+  # ---------------------------
   # Detect VPN interfaces
+  #   - Do NOT rely on state column (UNKNOWN is common for tun)
+  #   - Instead, require flags contain UP: "<...UP...>"
   # ---------------------------
   local vpn_ifs=()
-  while IFS= read -r ifc; do vpn_ifs+=("$ifc"); done < <(
-    ip -br link 2>/dev/null |
-      awk '$2 ~ /UP/ {print $1}' |
+
+  # A) Name-based (preferred)
+  while IFS= read -r ifc; do
+    [[ -n "$ifc" ]] || continue
+    [[ "$ifc" == "$def_if" ]] && continue
+    vpn_ifs+=("$ifc")
+  done < <(
+    ip -o link show 2>/dev/null |
+      awk -F': ' '
+        /<[^>]*UP[^>]*>/ {
+          # field after ": " begins with interface name (may include "@ifX")
+          split($2, a, " "); name=a[1]
+          sub(/@.*/, "", name)
+          print name
+        }' |
       grep -E '^(tun|tap|wg|ppp|cscotun|utun|tailscale|zt|nordlynx|proton|vpn)[0-9]*$' |
       LC_ALL=C sort -u || true
   )
 
+  # B) Route-based fallback (only if A found nothing)
   if ((${#vpn_ifs[@]} == 0)); then
-    echo "No VPN interface detected (tun*/wg*/ppp*/cscotun*/utun*)."
-    echo "Tip: run: ip -br link  (If you are actually running VPN then open an issue)"
+    local -a cand=()
+    while IFS= read -r ifc; do cand+=("$ifc"); done < <(
+      ip -4 route show 2>/dev/null |
+        awk '
+          $1 ~ /^(10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.|192\.168\.)/ {
+            for (i=1;i<=NF;i++) if ($i=="dev") {print $(i+1); break}
+          }' |
+        LC_ALL=C sort -u |
+        # exclude obvious non-vpn
+        grep -Ev '^(lo|docker0|br-[0-9a-f]{12}|veth|lxcbr0)$' || true
+    )
+
+    local ifc
+    for ifc in "${cand[@]:-}"; do
+      [[ -n "$ifc" ]] || continue
+      [[ "$ifc" == "$def_if" ]] && continue
+      # ensure flags contain UP (don’t care about state)
+      if ip -o link show "$ifc" 2>/dev/null | grep -q '<[^>]*UP[^>]*>'; then
+        vpn_ifs+=("$ifc")
+      fi
+    done
+
+    # de-dupe
+    if ((${#vpn_ifs[@]})); then
+      mapfile -t vpn_ifs < <(printf '%s\n' "${vpn_ifs[@]}" | LC_ALL=C sort -u)
+    fi
+  fi
+
+  if ((${#vpn_ifs[@]} == 0)); then
+    echo "No VPN interface detected."
+    echo "Tip: connect VPN, then run: ip -o link show | grep -E '<.*UP.*>'"
     return 2
   fi
 
@@ -2272,14 +2322,12 @@ cmd_vpn-fix() {
     fi
 
     for subnet in "${subnets[@]}"; do
-      # NAT only towards VPN-routed subnets
       if ((rollback)); then
         _ipt_delete_if_present nat POSTROUTING -o "$vpnif" -d "$subnet" -j MASQUERADE -m comment --comment "$TAG"
       else
         _ipt_append_if_missing nat POSTROUTING -o "$vpnif" -d "$subnet" -j MASQUERADE -m comment --comment "$TAG"
       fi
 
-      # Forward only towards VPN-routed subnets (and allow return traffic)
       for brif in "${br_ifs[@]}"; do
         if ((rollback)); then
           _ipt_delete_if_present filter FORWARD -i "$brif" -o "$vpnif" -d "$subnet" -j ACCEPT -m comment --comment "$TAG"
@@ -2313,7 +2361,6 @@ cmd_vpn-fix() {
     done
 
     if ((docker_has_v6 && vpn_has_v6)); then
-      # enable IPv6 forwarding
       if [[ -r /proc/sys/net/ipv6/conf/all/forwarding ]]; then
         local ip6f
         ip6f="$(cat /proc/sys/net/ipv6/conf/all/forwarding 2>/dev/null || echo 0)"
@@ -2355,7 +2402,6 @@ cmd_vpn-fix() {
             LC_ALL=C sort -u || true
         )
 
-        # If VPN has no explicit v6 routes, don't try to be clever.
         ((${#v6subnets[@]})) || {
           echo "IPv6: $vpnif has no routed IPv6 subnets; skipped."
           continue
@@ -2372,7 +2418,6 @@ cmd_vpn-fix() {
             fi
           done
 
-          # NAT66 optional: only if nat table exists
           if $SUDO ip6tables -t nat -L >/dev/null 2>&1; then
             if ((rollback)); then
               _ip6t_delete_if_present nat POSTROUTING -o "$vpnif" -d "$v6subnet" -j MASQUERADE -m comment --comment "$TAG"
