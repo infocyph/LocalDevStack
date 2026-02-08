@@ -2210,7 +2210,7 @@ cmd_vpn-fix() {
   while IFS= read -r ifc; do vpn_ifs+=("$ifc"); done < <(
     ip -br link 2>/dev/null |
       awk '$2 ~ /UP/ {print $1}' |
-      grep -E '^(tun|tap|wg|ppp|cscotun|utun)[0-9]*$' |
+      grep -E '^(tun|tap|wg|ppp|cscotun|utun|tailscale|zt|nordlynx|proton|vpn)[0-9]*$' |
       LC_ALL=C sort -u || true
   )
 
