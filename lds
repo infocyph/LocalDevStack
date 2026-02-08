@@ -220,8 +220,8 @@ tty_readline() {
     IFS= read -r __line || return 1
   elif [[ -r /dev/tty ]]; then
     # Non-interactive stdin (piped) but we still have a controlling terminal.
-    printf '%s' "$__prompt" > /dev/tty
-    IFS= read -r __line < /dev/tty || return 1
+    printf '%s' "$__prompt" >/dev/tty
+    IFS= read -r __line </dev/tty || return 1
   else
     return 1
   fi
@@ -240,7 +240,6 @@ ask_yes() {
   tty_readline ans "$(printf '%b%s (y/n): %b' "$BLUE" "$prompt" "$NC")" || return 1
   [[ "${ans,,}" == "y" ]]
 }
-
 
 # ── dotenv quoting: only quote when needed (spaces, tabs, #, quotes, leading/trailing whitespace) ──
 env_quote() {
@@ -495,7 +494,7 @@ setup_menu_print() {
     for key in "${SERVICE_ORDER[@]}"; do
       slug="${SERVICES[$key]}"
       printf "  %2d) %-12s  (%s)\n" "$i" "$key" "$slug"
-      i=$((i+1))
+      i=$((i + 1))
     done
     printf "\n  a) ALL\n"
     printf "  n) NONE / Back\n\n"
@@ -551,14 +550,14 @@ setup_choose_services() {
     local idx key
     while IFS= read -r idx; do
       [[ "$idx" =~ ^[0-9]+$ ]] || continue
-      (( idx >= 1 && idx <= ${#SERVICE_ORDER[@]} )) || continue
-      key="${SERVICE_ORDER[idx-1]}"
+      ((idx >= 1 && idx <= ${#SERVICE_ORDER[@]})) || continue
+      key="${SERVICE_ORDER[idx - 1]}"
       [[ -n "${seen[$key]:-}" ]] && continue
       seen[$key]=1
       out+=("$key")
     done <<<"$parsed"
 
-    if ((${#out[@]}==0)); then
+    if ((${#out[@]} == 0)); then
       printf "%bNo valid items selected.%b\n" "$YELLOW" "$NC"
       continue
     fi
@@ -757,7 +756,8 @@ detect_os_family() {
   fi
 
   local id like
-  id="unknown"; like="unknown"
+  id="unknown"
+  like="unknown"
 
   if [[ -r /etc/os-release ]]; then
     # shellcheck disable=SC1091
@@ -767,8 +767,14 @@ detect_os_family() {
   elif command -v uname >/dev/null 2>&1; then
     # fallback for macOS / other unix
     case "$(uname -s 2>/dev/null || true)" in
-    Darwin) id="macos"; like="darwin" ;;
-    Linux)  id="linux"; like="linux" ;;
+    Darwin)
+      id="macos"
+      like="darwin"
+      ;;
+    Linux)
+      id="linux"
+      like="linux"
+      ;;
     esac
   fi
 
@@ -804,7 +810,6 @@ ca_plan() {
     ;;
   esac
 }
-
 
 is_windows_shell() {
   [[ "${OSTYPE:-}" =~ (msys|cygwin) ]] || [[ -n "${WORKDIR_WIN:-}" ]]
@@ -1614,11 +1619,18 @@ cmd_doctor() {
   printf "%bOS%b: id=%s like=%s\n" "$CYAN" "$NC" "${os_id:-unknown}" "${os_like:-unknown}"
   ((is_win)) && printf "%bShell%b: Windows\n" "$CYAN" "$NC" || printf "%bShell%b: Unix\n" "$CYAN" "$NC"
 
-  _ok()   { printf "  %b✔%b %s\n" "$GREEN" "$NC" "$*"; }
+  _ok() { printf "  %b✔%b %s\n" "$GREEN" "$NC" "$*"; }
   _warn() { printf "  %b!%b %s\n" "$YELLOW" "$NC" "$*"; }
-  _bad()  { printf "  %b✘%b %s\n" "$RED" "$NC" "$*"; }
-  _has()  { command -v "$1" >/dev/null 2>&1; }
-  _first(){ local c; for c in "$@"; do _has "$c" && { echo "$c"; return 0; }; done; return 1; }
+  _bad() { printf "  %b✘%b %s\n" "$RED" "$NC" "$*"; }
+  _has() { command -v "$1" >/dev/null 2>&1; }
+  _first() {
+    local c
+    for c in "$@"; do _has "$c" && {
+      echo "$c"
+      return 0
+    }; done
+    return 1
+  }
 
   # ────────────────────────────────────────────────────────────────────────────
   # TTY sanity (prompt/menus)
@@ -1709,9 +1721,9 @@ cmd_doctor() {
   fi
 
   # Cert input (needed by your cert commands)
-  [[ -f "$DIR/configuration/rootCA/rootCA.pem" ]] \
-    && _ok "rootCA.pem: ok" \
-    || _warn "rootCA.pem: missing ($DIR/configuration/rootCA/rootCA.pem)"
+  [[ -f "$DIR/configuration/rootCA/rootCA.pem" ]] &&
+    _ok "rootCA.pem: ok" ||
+    _warn "rootCA.pem: missing ($DIR/configuration/rootCA/rootCA.pem)"
 
   # CRLF risk (bash scripts break)
   if [[ -f "$DIR/lds" ]]; then
@@ -1763,7 +1775,7 @@ cmd_doctor() {
   if df -Pk "$DIR" >/dev/null 2>&1; then
     local avail_kb
     avail_kb="$(df -Pk "$DIR" | awk 'NR==2{print $4}')"
-    if [[ -n "$avail_kb" ]] && (( avail_kb < 5*1024*1024 )); then
+    if [[ -n "$avail_kb" ]] && ((avail_kb < 5 * 1024 * 1024)); then
       _warn "disk: low (<5GiB free)"
     else
       _ok "disk: ok"
@@ -1792,8 +1804,10 @@ cmd_doctor() {
     line="$(grep -E '^(COMPOSE_PROFILES|PROFILES)=' "$ENV_DOCKER" 2>/dev/null | tail -n 1 || true)"
     [[ -n "$line" ]] || return 0
     line="${line#*=}"
-    line="${line%\"}"; line="${line#\"}"
-    line="${line%\'}"; line="${line#\'}"
+    line="${line%\"}"
+    line="${line#\"}"
+    line="${line%\'}"
+    line="${line#\'}"
     echo "$line" | tr ', ' '\n' | awk 'NF{print}'
   }
 
@@ -1816,7 +1830,7 @@ cmd_doctor() {
     fi
   done < <(doctor_list_enabled_profiles || true)
 
-  ((seen_any==0)) && _warn "profiles: none set (COMPOSE_PROFILES=...)"
+  ((seen_any == 0)) && _warn "profiles: none set (COMPOSE_PROFILES=...)"
   ((bad_any)) && _warn "profiles: sync COMPOSE_PROFILES with supported services"
 
   # ────────────────────────────────────────────────────────────────────────────
@@ -2135,24 +2149,40 @@ run_exec_shell() {
 cmd_vpn-fix() {
   set -euo pipefail
 
-  local dry_run=0
-  if [[ "${1:-}" == "--dry-run" ]]; then
+  local dry_run=0 rollback=0
+  case "${1:-}" in
+  --dry-run)
     dry_run=1
     shift || true
-  fi
+    ;;
+  --rollback)
+    rollback=1
+    shift || true
+    ;;
+  esac
 
   local SUDO=""
   if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
-    command -v sudo >/dev/null 2>&1 || { echo "Error: need root or sudo"; return 1; }
+    command -v sudo >/dev/null 2>&1 || {
+      echo "Error: need root or sudo"
+      return 1
+    }
     SUDO="sudo"
   fi
 
-  command -v ip >/dev/null 2>&1 || { echo "Error: ip not found"; return 1; }
-  command -v iptables >/dev/null 2>&1 || { echo "Error: iptables not found"; return 1; }
+  command -v ip >/dev/null 2>&1 || {
+    echo "Error: ip not found"
+    return 1
+  }
+  command -v iptables >/dev/null 2>&1 || {
+    echo "Error: iptables not found"
+    return 1
+  }
 
   _run() {
-    if (( dry_run )); then
-      printf '[dry-run] %q ' "$@"; echo
+    if ((dry_run)); then
+      printf '[dry-run] %q ' "$@"
+      echo
     else
       "$@"
     fi
@@ -2163,9 +2193,9 @@ cmd_vpn-fix() {
   # ---------------------------
   local br_ifs=()
   while IFS= read -r ifc; do br_ifs+=("$ifc"); done < <(
-    ip -br link 2>/dev/null \
-      | awk '$1 ~ /^(docker0|br-[0-9a-f]{12})$/ {print $1}' \
-      | LC_ALL=C sort -u || true
+    ip -br link 2>/dev/null |
+      awk '$1 ~ /^(docker0|br-[0-9a-f]{12})$/ {print $1}' |
+      LC_ALL=C sort -u || true
   )
 
   if ((${#br_ifs[@]} == 0)); then
@@ -2174,15 +2204,14 @@ cmd_vpn-fix() {
   fi
 
   # ---------------------------
-  # Detect VPN interfaces (common names, has address, is UP)
-  # You can extend the regex if your VPN uses a different name.
+  # Detect VPN interfaces
   # ---------------------------
   local vpn_ifs=()
   while IFS= read -r ifc; do vpn_ifs+=("$ifc"); done < <(
-    ip -br link 2>/dev/null \
-      | awk '$2 ~ /UP/ {print $1}' \
-      | grep -E '^(tun|tap|wg|ppp|cscotun|utun)[0-9]*$' \
-      | LC_ALL=C sort -u || true
+    ip -br link 2>/dev/null |
+      awk '$2 ~ /UP/ {print $1}' |
+      grep -E '^(tun|tap|wg|ppp|cscotun|utun)[0-9]*$' |
+      LC_ALL=C sort -u || true
   )
 
   if ((${#vpn_ifs[@]} == 0)); then
@@ -2192,28 +2221,7 @@ cmd_vpn-fix() {
   fi
 
   # ---------------------------
-  # Helpers: idempotent iptables / ip6tables rules
-  # ---------------------------
-  _ipt_ensure() {
-    local table="$1"; shift
-    local chain="$1"; shift
-    if _run $SUDO iptables -t "$table" -C "$chain" "$@" 2>/dev/null; then
-      return 0
-    fi
-    _run $SUDO iptables -t "$table" -I "$chain" 1 "$@"
-  }
-
-  _ip6t_ensure() {
-    local table="$1"; shift
-    local chain="$1"; shift
-    if _run $SUDO ip6tables -t "$table" -C "$chain" "$@" 2>/dev/null; then
-      return 0
-    fi
-    _run $SUDO ip6tables -t "$table" -I "$chain" 1 "$@"
-  }
-
-  # ---------------------------
-  # IPv4: enable forwarding + allow docker bridges to use VPN routes
+  # IPv4 forwarding
   # ---------------------------
   if [[ -r /proc/sys/net/ipv4/ip_forward ]]; then
     local ipf
@@ -2223,28 +2231,73 @@ cmd_vpn-fix() {
     fi
   fi
 
-  local vpnif brif
-  for vpnif in "${vpn_ifs[@]}"; do
-    # NAT for IPv4 (needed for docker bridge -> routed VPN subnets)
-    _ipt_ensure nat POSTROUTING -o "$vpnif" -j MASQUERADE
+  local TAG="lds:vpn-fix"
 
-    for brif in "${br_ifs[@]}"; do
-      _ipt_ensure filter FORWARD -i "$brif" -o "$vpnif" -j ACCEPT
-      _ipt_ensure filter FORWARD -i "$vpnif" -o "$brif" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+  _ipt_append_if_missing() {
+    local table="$1"
+    shift
+    local chain="$1"
+    shift
+    if _run $SUDO iptables -t "$table" -C "$chain" "$@" 2>/dev/null; then
+      return 0
+    fi
+    _run $SUDO iptables -t "$table" -A "$chain" "$@"
+  }
+
+  _ipt_delete_if_present() {
+    local table="$1"
+    shift
+    local chain="$1"
+    shift
+    if $SUDO iptables -t "$table" -C "$chain" "$@" >/dev/null 2>&1; then
+      _run $SUDO iptables -t "$table" -D "$chain" "$@"
+    fi
+  }
+
+  local vpnif brif subnet
+  for vpnif in "${vpn_ifs[@]}"; do
+    local -a subnets=()
+    while IFS= read -r subnet; do
+      [[ -n "$subnet" ]] && subnets+=("$subnet")
+    done < <(
+      ip -4 route show dev "$vpnif" 2>/dev/null |
+        awk '{print $1}' |
+        grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+$' |
+        LC_ALL=C sort -u || true
+    )
+
+    if ((${#subnets[@]} == 0)); then
+      echo "Warning: $vpnif has no IPv4 routed subnets; skipping scoped rules."
+      continue
+    fi
+
+    for subnet in "${subnets[@]}"; do
+      # NAT only towards VPN-routed subnets
+      if ((rollback)); then
+        _ipt_delete_if_present nat POSTROUTING -o "$vpnif" -d "$subnet" -j MASQUERADE -m comment --comment "$TAG"
+      else
+        _ipt_append_if_missing nat POSTROUTING -o "$vpnif" -d "$subnet" -j MASQUERADE -m comment --comment "$TAG"
+      fi
+
+      # Forward only towards VPN-routed subnets (and allow return traffic)
+      for brif in "${br_ifs[@]}"; do
+        if ((rollback)); then
+          _ipt_delete_if_present filter FORWARD -i "$brif" -o "$vpnif" -d "$subnet" -j ACCEPT -m comment --comment "$TAG"
+          _ipt_delete_if_present filter FORWARD -i "$vpnif" -o "$brif" -s "$subnet" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT -m comment --comment "$TAG"
+        else
+          _ipt_append_if_missing filter FORWARD -i "$brif" -o "$vpnif" -d "$subnet" -j ACCEPT -m comment --comment "$TAG"
+          _ipt_append_if_missing filter FORWARD -i "$vpnif" -o "$brif" -s "$subnet" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT -m comment --comment "$TAG"
+        fi
+      done
     done
   done
 
   # ---------------------------
-  # IPv6: only if ip6tables exists AND both VPN + docker bridges have IPv6
+  # IPv6 (best-effort, scoped; skip if not actually in use)
   # ---------------------------
-  local have_ip6tables=0
   if command -v ip6tables >/dev/null 2>&1; then
-    have_ip6tables=1
-  fi
+    local docker_has_v6=0 vpn_has_v6=0
 
-  if (( have_ip6tables )); then
-    # Any docker bridge with inet6?
-    local docker_has_v6=0
     for brif in "${br_ifs[@]}"; do
       if ip -o -6 addr show dev "$brif" 2>/dev/null | grep -q 'inet6 '; then
         docker_has_v6=1
@@ -2252,8 +2305,6 @@ cmd_vpn-fix() {
       fi
     done
 
-    # Any VPN iface with inet6?
-    local vpn_has_v6=0
     for vpnif in "${vpn_ifs[@]}"; do
       if ip -o -6 addr show dev "$vpnif" 2>/dev/null | grep -q 'inet6 '; then
         vpn_has_v6=1
@@ -2261,7 +2312,7 @@ cmd_vpn-fix() {
       fi
     done
 
-    if (( docker_has_v6 && vpn_has_v6 )); then
+    if ((docker_has_v6 && vpn_has_v6)); then
       # enable IPv6 forwarding
       if [[ -r /proc/sys/net/ipv6/conf/all/forwarding ]]; then
         local ip6f
@@ -2271,17 +2322,65 @@ cmd_vpn-fix() {
         fi
       fi
 
-      # forward rules
-      for vpnif in "${vpn_ifs[@]}"; do
-        for brif in "${br_ifs[@]}"; do
-          _ip6t_ensure filter FORWARD -i "$brif" -o "$vpnif" -j ACCEPT
-          _ip6t_ensure filter FORWARD -i "$vpnif" -o "$brif" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-        done
-
-        # NAT66 is OPTIONAL. We only add it if the nat table is available.
-        if $SUDO ip6tables -t nat -L >/dev/null 2>&1; then
-          _ip6t_ensure nat POSTROUTING -o "$vpnif" -j MASQUERADE
+      _ip6t_append_if_missing() {
+        local table="$1"
+        shift
+        local chain="$1"
+        shift
+        if _run $SUDO ip6tables -t "$table" -C "$chain" "$@" 2>/dev/null; then
+          return 0
         fi
+        _run $SUDO ip6tables -t "$table" -A "$chain" "$@"
+      }
+
+      _ip6t_delete_if_present() {
+        local table="$1"
+        shift
+        local chain="$1"
+        shift
+        if $SUDO ip6tables -t "$table" -C "$chain" "$@" >/dev/null 2>&1; then
+          _run $SUDO ip6tables -t "$table" -D "$chain" "$@"
+        fi
+      }
+
+      local v6subnet
+      for vpnif in "${vpn_ifs[@]}"; do
+        local -a v6subnets=()
+        while IFS= read -r v6subnet; do
+          [[ -n "$v6subnet" ]] && v6subnets+=("$v6subnet")
+        done < <(
+          ip -6 route show dev "$vpnif" 2>/dev/null |
+            awk '{print $1}' |
+            grep -E '^[0-9a-fA-F:]+/[0-9]+$' |
+            LC_ALL=C sort -u || true
+        )
+
+        # If VPN has no explicit v6 routes, don't try to be clever.
+        ((${#v6subnets[@]})) || {
+          echo "IPv6: $vpnif has no routed IPv6 subnets; skipped."
+          continue
+        }
+
+        for v6subnet in "${v6subnets[@]}"; do
+          for brif in "${br_ifs[@]}"; do
+            if ((rollback)); then
+              _ip6t_delete_if_present filter FORWARD -i "$brif" -o "$vpnif" -d "$v6subnet" -j ACCEPT -m comment --comment "$TAG"
+              _ip6t_delete_if_present filter FORWARD -i "$vpnif" -o "$brif" -s "$v6subnet" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT -m comment --comment "$TAG"
+            else
+              _ip6t_append_if_missing filter FORWARD -i "$brif" -o "$vpnif" -d "$v6subnet" -j ACCEPT -m comment --comment "$TAG"
+              _ip6t_append_if_missing filter FORWARD -i "$vpnif" -o "$brif" -s "$v6subnet" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT -m comment --comment "$TAG"
+            fi
+          done
+
+          # NAT66 optional: only if nat table exists
+          if $SUDO ip6tables -t nat -L >/dev/null 2>&1; then
+            if ((rollback)); then
+              _ip6t_delete_if_present nat POSTROUTING -o "$vpnif" -d "$v6subnet" -j MASQUERADE -m comment --comment "$TAG"
+            else
+              _ip6t_append_if_missing nat POSTROUTING -o "$vpnif" -d "$v6subnet" -j MASQUERADE -m comment --comment "$TAG"
+            fi
+          fi
+        done
       done
     else
       echo "IPv6: skipped (Docker bridges or VPN interface have no IPv6 addresses)."
@@ -2290,10 +2389,14 @@ cmd_vpn-fix() {
     echo "IPv6: skipped (ip6tables not installed)."
   fi
 
-  echo "OK: vpn-fix applied."
-  echo "VPN interfaces: ${vpn_ifs[*]}"
-  echo "Docker bridges: ${br_ifs[*]}"
-  (( dry_run )) && echo "Note: dry-run mode, nothing changed."
+  if ((rollback)); then
+    echo "OK: vpn-fix rolled back ($TAG)."
+  else
+    echo "OK: vpn-fix applied ($TAG)."
+    echo "VPN interfaces: ${vpn_ifs[*]}"
+    echo "Docker bridges: ${br_ifs[*]}"
+    ((dry_run)) && echo "Note: dry-run mode, nothing changed."
+  fi
 }
 
 cmd_run() {
