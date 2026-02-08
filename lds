@@ -2132,6 +2132,170 @@ run_exec_shell() {
   fi
 }
 
+cmd_vpn-fix() {
+  set -euo pipefail
+
+  local dry_run=0
+  if [[ "${1:-}" == "--dry-run" ]]; then
+    dry_run=1
+    shift || true
+  fi
+
+  local SUDO=""
+  if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+    command -v sudo >/dev/null 2>&1 || { echo "Error: need root or sudo"; return 1; }
+    SUDO="sudo"
+  fi
+
+  command -v ip >/dev/null 2>&1 || { echo "Error: ip not found"; return 1; }
+  command -v iptables >/dev/null 2>&1 || { echo "Error: iptables not found"; return 1; }
+
+  _run() {
+    if (( dry_run )); then
+      printf '[dry-run] %q ' "$@"; echo
+    else
+      "$@"
+    fi
+  }
+
+  # ---------------------------
+  # Detect docker bridges (docker0 + br-*)
+  # ---------------------------
+  local br_ifs=()
+  while IFS= read -r ifc; do br_ifs+=("$ifc"); done < <(
+    ip -br link 2>/dev/null \
+      | awk '$1 ~ /^(docker0|br-[0-9a-f]{12})$/ {print $1}' \
+      | LC_ALL=C sort -u || true
+  )
+
+  if ((${#br_ifs[@]} == 0)); then
+    echo "No docker bridge interfaces found (docker0 / br-*)."
+    return 3
+  fi
+
+  # ---------------------------
+  # Detect VPN interfaces (common names, has address, is UP)
+  # You can extend the regex if your VPN uses a different name.
+  # ---------------------------
+  local vpn_ifs=()
+  while IFS= read -r ifc; do vpn_ifs+=("$ifc"); done < <(
+    ip -br link 2>/dev/null \
+      | awk '$2 ~ /UP/ {print $1}' \
+      | grep -E '^(tun|tap|wg|ppp|cscotun|utun)[0-9]*$' \
+      | LC_ALL=C sort -u || true
+  )
+
+  if ((${#vpn_ifs[@]} == 0)); then
+    echo "No VPN interface detected (tun*/wg*/ppp*/cscotun*/utun*)."
+    echo "Tip: run: ip -br link  (If you are actually running VPN then open an issue)"
+    return 2
+  fi
+
+  # ---------------------------
+  # Helpers: idempotent iptables / ip6tables rules
+  # ---------------------------
+  _ipt_ensure() {
+    local table="$1"; shift
+    local chain="$1"; shift
+    if _run $SUDO iptables -t "$table" -C "$chain" "$@" 2>/dev/null; then
+      return 0
+    fi
+    _run $SUDO iptables -t "$table" -I "$chain" 1 "$@"
+  }
+
+  _ip6t_ensure() {
+    local table="$1"; shift
+    local chain="$1"; shift
+    if _run $SUDO ip6tables -t "$table" -C "$chain" "$@" 2>/dev/null; then
+      return 0
+    fi
+    _run $SUDO ip6tables -t "$table" -I "$chain" 1 "$@"
+  }
+
+  # ---------------------------
+  # IPv4: enable forwarding + allow docker bridges to use VPN routes
+  # ---------------------------
+  if [[ -r /proc/sys/net/ipv4/ip_forward ]]; then
+    local ipf
+    ipf="$(cat /proc/sys/net/ipv4/ip_forward 2>/dev/null || echo 0)"
+    if [[ "$ipf" != "1" ]]; then
+      _run $SUDO sysctl -w net.ipv4.ip_forward=1 >/dev/null
+    fi
+  fi
+
+  local vpnif brif
+  for vpnif in "${vpn_ifs[@]}"; do
+    # NAT for IPv4 (needed for docker bridge -> routed VPN subnets)
+    _ipt_ensure nat POSTROUTING -o "$vpnif" -j MASQUERADE
+
+    for brif in "${br_ifs[@]}"; do
+      _ipt_ensure filter FORWARD -i "$brif" -o "$vpnif" -j ACCEPT
+      _ipt_ensure filter FORWARD -i "$vpnif" -o "$brif" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+    done
+  done
+
+  # ---------------------------
+  # IPv6: only if ip6tables exists AND both VPN + docker bridges have IPv6
+  # ---------------------------
+  local have_ip6tables=0
+  if command -v ip6tables >/dev/null 2>&1; then
+    have_ip6tables=1
+  fi
+
+  if (( have_ip6tables )); then
+    # Any docker bridge with inet6?
+    local docker_has_v6=0
+    for brif in "${br_ifs[@]}"; do
+      if ip -o -6 addr show dev "$brif" 2>/dev/null | grep -q 'inet6 '; then
+        docker_has_v6=1
+        break
+      fi
+    done
+
+    # Any VPN iface with inet6?
+    local vpn_has_v6=0
+    for vpnif in "${vpn_ifs[@]}"; do
+      if ip -o -6 addr show dev "$vpnif" 2>/dev/null | grep -q 'inet6 '; then
+        vpn_has_v6=1
+        break
+      fi
+    done
+
+    if (( docker_has_v6 && vpn_has_v6 )); then
+      # enable IPv6 forwarding
+      if [[ -r /proc/sys/net/ipv6/conf/all/forwarding ]]; then
+        local ip6f
+        ip6f="$(cat /proc/sys/net/ipv6/conf/all/forwarding 2>/dev/null || echo 0)"
+        if [[ "$ip6f" != "1" ]]; then
+          _run $SUDO sysctl -w net.ipv6.conf.all.forwarding=1 >/dev/null
+        fi
+      fi
+
+      # forward rules
+      for vpnif in "${vpn_ifs[@]}"; do
+        for brif in "${br_ifs[@]}"; do
+          _ip6t_ensure filter FORWARD -i "$brif" -o "$vpnif" -j ACCEPT
+          _ip6t_ensure filter FORWARD -i "$vpnif" -o "$brif" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+        done
+
+        # NAT66 is OPTIONAL. We only add it if the nat table is available.
+        if $SUDO ip6tables -t nat -L >/dev/null 2>&1; then
+          _ip6t_ensure nat POSTROUTING -o "$vpnif" -j MASQUERADE
+        fi
+      done
+    else
+      echo "IPv6: skipped (Docker bridges or VPN interface have no IPv6 addresses)."
+    fi
+  else
+    echo "IPv6: skipped (ip6tables not installed)."
+  fi
+
+  echo "OK: vpn-fix applied."
+  echo "VPN interfaces: ${vpn_ifs[*]}"
+  echo "Docker bridges: ${br_ifs[*]}"
+  (( dry_run )) && echo "Note: dry-run mode, nothing changed."
+}
+
 cmd_run() {
   # Usage:
   #   lds run                          # build+start+exec for current directory
@@ -2359,8 +2523,8 @@ ${CYAN}Domains / hosts:${NC}
 
 ${CYAN}Setup:${NC}
   setup init                 Create required files (.env, docker/.env, php.ini, etc.)
-  setup permissions           Fix permissions for data/logs/config/bin (Linux/macOS; no-op on Windows)
-  setup profile|profiles      Configure service profiles (selection menu; writes defaults into docker/.env)
+  setup permissions          Fix permissions for data/logs/config/bin (Linux/macOS; no-op on Windows)
+  setup profile|profiles     Configure service profiles (selection menu; writes defaults into docker/.env)
 
 ${CYAN}Certificates:${NC}
   certificate install         Install local rootCA (Linux trust store / Windows CurrentUser\\Root)
@@ -2369,6 +2533,9 @@ ${CYAN}Certificates:${NC}
 
 ${CYAN}Doctor:${NC}
   doctor                     Host diagnostics (docker/compose, config validity, ports 80/443, disk, WSL on Windows)
+
+${CYAN}VPN:${NC}
+  vpn-fix                    Allow Docker bridge networks to use the active VPN routes (IPv4 + best-effort IPv6)
 
 ${CYAN}Notify:${NC}
   notify watch [container]    Stream notifications from SERVER_TOOLS (desktop popups)
@@ -2395,6 +2562,7 @@ ${CYAN}Examples:${NC}
   lds up
   lds http reload
   lds certificate install
+  lds vpn-fix
   lds run --publish 8025:8025
 EOF
 }
