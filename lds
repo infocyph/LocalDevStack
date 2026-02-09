@@ -2149,299 +2149,193 @@ run_exec_shell() {
 cmd_vpn-fix() {
   set -euo pipefail
 
-  local dry_run=0 rollback=0
-  case "${1:-}" in
-  --dry-run)
-    dry_run=1
-    shift || true
-    ;;
-  --rollback)
-    rollback=1
-    shift || true
-    ;;
-  esac
+  local dry_run=0 rollback=0 debug=0
+  while [[ "${1:-}" ]]; do
+    case "$1" in
+    --dry-run)  dry_run=1; shift ;;
+    --rollback) rollback=1; shift ;;
+    --debug)    debug=1; shift ;;
+    *) break ;;
+    esac
+  done
 
   local SUDO=""
   if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
-    command -v sudo >/dev/null 2>&1 || {
-      echo "Error: need root or sudo"
-      return 1
-    }
+    command -v sudo >/dev/null 2>&1 || { echo "Error: need root or sudo"; return 1; }
     SUDO="sudo"
   fi
 
-  command -v ip >/dev/null 2>&1 || {
-    echo "Error: ip not found"
-    return 1
-  }
-  command -v iptables >/dev/null 2>&1 || {
-    echo "Error: iptables not found"
-    return 1
-  }
+  command -v ip >/dev/null 2>&1 || { echo "Error: ip not found"; return 1; }
+  command -v iptables >/dev/null 2>&1 || { echo "Error: iptables not found"; return 1; }
+
+  local TAG="lds:vpn-fix"
+  local VPN_CHAIN="ciscovpn"
 
   _run() {
     if ((dry_run)); then
-      printf '[dry-run] %q ' "$@"
-      echo
+      printf '[dry-run] %q ' "$@"; echo
     else
       "$@"
     fi
   }
 
-  # ---------------------------
-  # Detect docker bridges (docker0 + br-*)
-  # ---------------------------
-  local br_ifs=()
-  while IFS= read -r ifc; do br_ifs+=("$ifc"); done < <(
-    ip -br link 2>/dev/null |
-      awk '$1 ~ /^(docker0|br-[0-9a-f]{12})$/ {print $1}' |
-      LC_ALL=C sort -u || true
-  )
-
-  if ((${#br_ifs[@]} == 0)); then
-    echo "No docker bridge interfaces found (docker0 / br-*)."
-    return 3
-  fi
-
-  # ---------------------------
-  # Find default-route interface (exclude it from VPN candidates)
-  # ---------------------------
-  local def_if=""
-  def_if="$(ip -4 route show default 2>/dev/null | awk '{for (i=1;i<=NF;i++) if ($i=="dev") {print $(i+1); exit}}' || true)"
-
-  # ---------------------------
-  # Detect VPN interfaces
-  #   - Do NOT rely on state column (UNKNOWN is common for tun)
-  #   - Instead, require flags contain UP: "<...UP...>"
-  # ---------------------------
-  local vpn_ifs=()
-
-  # A) Name-based (preferred)
-  while IFS= read -r ifc; do
-    [[ -n "$ifc" ]] || continue
-    [[ "$ifc" == "$def_if" ]] && continue
-    vpn_ifs+=("$ifc")
-  done < <(
-    ip -o link show 2>/dev/null |
-      awk -F': ' '
-        /<[^>]*UP[^>]*>/ {
-          # field after ": " begins with interface name (may include "@ifX")
-          split($2, a, " "); name=a[1]
-          sub(/@.*/, "", name)
-          print name
-        }' |
-      grep -E '^(tun|tap|wg|ppp|cscotun|utun|tailscale|zt|nordlynx|proton|vpn)[0-9]*$' |
-      LC_ALL=C sort -u || true
-  )
-
-  # B) Route-based fallback (only if A found nothing)
-  if ((${#vpn_ifs[@]} == 0)); then
-    local -a cand=()
-    while IFS= read -r ifc; do cand+=("$ifc"); done < <(
-      ip -4 route show 2>/dev/null |
-        awk '
-          $1 ~ /^(10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.|192\.168\.)/ {
-            for (i=1;i<=NF;i++) if ($i=="dev") {print $(i+1); break}
-          }' |
-        LC_ALL=C sort -u |
-        # exclude obvious non-vpn
-        grep -Ev '^(lo|docker0|br-[0-9a-f]{12}|veth|lxcbr0)$' || true
-    )
-
-    local ifc
-    for ifc in "${cand[@]:-}"; do
-      [[ -n "$ifc" ]] || continue
-      [[ "$ifc" == "$def_if" ]] && continue
-      # ensure flags contain UP (don’t care about state)
-      if ip -o link show "$ifc" 2>/dev/null | grep -q '<[^>]*UP[^>]*>'; then
-        vpn_ifs+=("$ifc")
-      fi
-    done
-
-    # de-dupe
-    if ((${#vpn_ifs[@]})); then
-      mapfile -t vpn_ifs < <(printf '%s\n' "${vpn_ifs[@]}" | LC_ALL=C sort -u)
+  _sysctl_set() {
+    local key="$1" val="$2"
+    if ((dry_run)); then
+      echo "[dry-run] sysctl -w $key=$val"
+      return 0
     fi
-  fi
+    $SUDO sysctl -w "$key=$val" >/dev/null 2>&1 || true
+  }
 
-  if ((${#vpn_ifs[@]} == 0)); then
-    echo "No VPN interface detected."
-    echo "Tip: connect VPN, then run: ip -o link show | grep -E '<.*UP.*>'"
+  # Ensure Cisco chain exists (otherwise bail clearly)
+  if ! $SUDO iptables -S "$VPN_CHAIN" >/dev/null 2>&1; then
+    echo "Error: iptables chain '$VPN_CHAIN' not found. (Cisco VPN not active / different chain name?)"
     return 2
   fi
 
   # ---------------------------
-  # IPv4 forwarding
+  # docker bridges: docker0 + br-*
   # ---------------------------
-  if [[ -r /proc/sys/net/ipv4/ip_forward ]]; then
-    local ipf
-    ipf="$(cat /proc/sys/net/ipv4/ip_forward 2>/dev/null || echo 0)"
-    if [[ "$ipf" != "1" ]]; then
-      _run $SUDO sysctl -w net.ipv4.ip_forward=1 >/dev/null
-    fi
+  local br_ifs=()
+  while IFS= read -r ifc; do br_ifs+=("$ifc"); done < <(
+    ip -o link show 2>/dev/null |
+      awk -F': ' '{n=$2; sub(/ .*/,"",n); sub(/@.*/,"",n); print n}' |
+      grep -E '^(docker0|br-[0-9a-f]{12})$' |
+      LC_ALL=C sort -u || true
+  )
+  ((${#br_ifs[@]})) || { echo "Error: no docker bridges found (docker0 / br-*)."; return 3; }
+
+  # bridge CIDRs
+  declare -A BR_CIDRS=()
+  local brif
+  for brif in "${br_ifs[@]}"; do
+    local cidrs
+    cidrs="$(ip -o -4 addr show dev "$brif" 2>/dev/null | awk '{print $4}' | xargs || true)"
+    [[ -n "$cidrs" ]] && BR_CIDRS["$brif"]="$cidrs"
+  done
+
+  # ---------------------------
+  # VPN iface detection (prefer cscotun*)
+  # ---------------------------
+  local vpnif=""
+  vpnif="$(ip -o link show 2>/dev/null | awk -F': ' '/cscotun[0-9]+/ {print $2}' | head -n1 | awk '{print $1}' | sed 's/@.*//' || true)"
+  if [[ -z "$vpnif" ]]; then
+    # fallback: any UP tun/wg/tap
+    vpnif="$(ip -o link show 2>/dev/null |
+      awk -F': ' '/<[^>]*UP[^>]*>/ { n=$2; sub(/ .*/,"",n); sub(/@.*/,"",n); print n }' |
+      grep -E '^(tun|tap|wg|ppp|cscotun|utun|tailscale|zt|nordlynx|proton|vpn)[0-9]*$' |
+      head -n1 || true)"
+  fi
+  [[ -n "$vpnif" ]] || { echo "Error: no VPN interface detected."; return 4; }
+
+  local vpn_ip_cidr vpn_ip
+  vpn_ip_cidr="$(ip -o -4 addr show dev "$vpnif" 2>/dev/null | awk '{print $4}' | head -n1 || true)"
+  vpn_ip="${vpn_ip_cidr%%/*}"
+  [[ -n "$vpn_ip" ]] || { echo "Error: VPN iface '$vpnif' has no IPv4 address."; return 5; }
+
+  # VPN-routed subnets (split tunnel routes)
+  local -a vpn_subnets=()
+  while IFS= read -r s; do [[ -n "$s" ]] && vpn_subnets+=("$s"); done < <(
+    ip -4 route show dev "$vpnif" 2>/dev/null |
+      awk '{print $1}' |
+      grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+$' |
+      LC_ALL=C sort -u || true
+  )
+  ((${#vpn_subnets[@]})) || { echo "Error: no IPv4 routes found via '$vpnif' (split-tunnel list empty)."; return 6; }
+
+  if ((debug)); then
+    echo "DEBUG: vpnif=$vpnif"
+    echo "DEBUG: vpn_ip=$vpn_ip"
+    echo "DEBUG: vpn_subnets=${vpn_subnets[*]}"
+    echo "DEBUG: br_ifs=${br_ifs[*]}"
+    for brif in "${br_ifs[@]}"; do
+      echo "DEBUG: br_cidrs[$brif]=${BR_CIDRS[$brif]:-}"
+    done
   fi
 
-  local TAG="lds:vpn-fix"
+  # sysctls that commonly break tunnel forwarding
+  [[ -r /proc/sys/net/ipv4/ip_forward ]] && _sysctl_set net.ipv4.ip_forward 1
+  _sysctl_set "net.ipv4.conf.${vpnif}.rp_filter" 0
+  for brif in "${br_ifs[@]}"; do _sysctl_set "net.ipv4.conf.${brif}.rp_filter" 0; done
 
-  _ipt_append_if_missing() {
-    local table="$1"
-    shift
-    local chain="$1"
-    shift
-    if _run $SUDO iptables -t "$table" -C "$chain" "$@" 2>/dev/null; then
-      return 0
-    fi
+  # helpers: insert/delete with idempotency
+  _ipt_ins() {
+    local table="$1"; shift
+    local chain="$1"; shift
+    local pos="$1"; shift
+    if $SUDO iptables -t "$table" -C "$chain" "$@" >/dev/null 2>&1; then return 0; fi
+    _run $SUDO iptables -t "$table" -I "$chain" "$pos" "$@"
+  }
+  _ipt_add() {
+    local table="$1"; shift
+    local chain="$1"; shift
+    if $SUDO iptables -t "$table" -C "$chain" "$@" >/dev/null 2>&1; then return 0; fi
     _run $SUDO iptables -t "$table" -A "$chain" "$@"
   }
 
-  _ipt_delete_if_present() {
-    local table="$1"
-    shift
-    local chain="$1"
-    shift
-    if $SUDO iptables -t "$table" -C "$chain" "$@" >/dev/null 2>&1; then
-      _run $SUDO iptables -t "$table" -D "$chain" "$@"
-    fi
-  }
-
-  local vpnif brif subnet
-  for vpnif in "${vpn_ifs[@]}"; do
-    local -a subnets=()
-    while IFS= read -r subnet; do
-      [[ -n "$subnet" ]] && subnets+=("$subnet")
-    done < <(
-      ip -4 route show dev "$vpnif" 2>/dev/null |
-        awk '{print $1}' |
-        grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+$' |
-        LC_ALL=C sort -u || true
-    )
-
-    if ((${#subnets[@]} == 0)); then
-      echo "Warning: $vpnif has no IPv4 routed subnets; skipping scoped rules."
-      continue
+  # rollback = remove our tagged rules (best-effort)
+  if ((rollback)); then
+    # filter/ciscovpn rules
+    if $SUDO iptables -S "$VPN_CHAIN" 2>/dev/null | grep -F -- "$TAG" >/dev/null 2>&1; then
+      while IFS= read -r line; do
+        _run $SUDO iptables ${line/-A /-D } || true
+      done < <($SUDO iptables -S "$VPN_CHAIN" | grep -F -- "$TAG" || true)
     fi
 
-    for subnet in "${subnets[@]}"; do
-      if ((rollback)); then
-        _ipt_delete_if_present nat POSTROUTING -o "$vpnif" -d "$subnet" -j MASQUERADE -m comment --comment "$TAG"
-      else
-        _ipt_append_if_missing nat POSTROUTING -o "$vpnif" -d "$subnet" -j MASQUERADE -m comment --comment "$TAG"
-      fi
+    # mangle clamp rules
+    if $SUDO iptables -t mangle -S FORWARD 2>/dev/null | grep -F -- "$TAG" >/dev/null 2>&1; then
+      while IFS= read -r line; do
+        _run $SUDO iptables -t mangle ${line/-A /-D } || true
+      done < <($SUDO iptables -t mangle -S FORWARD | grep -F -- "$TAG" || true)
+    fi
 
-      for brif in "${br_ifs[@]}"; do
-        if ((rollback)); then
-          _ipt_delete_if_present filter FORWARD -i "$brif" -o "$vpnif" -d "$subnet" -j ACCEPT -m comment --comment "$TAG"
-          _ipt_delete_if_present filter FORWARD -i "$vpnif" -o "$brif" -s "$subnet" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT -m comment --comment "$TAG"
-        else
-          _ipt_append_if_missing filter FORWARD -i "$brif" -o "$vpnif" -d "$subnet" -j ACCEPT -m comment --comment "$TAG"
-          _ipt_append_if_missing filter FORWARD -i "$vpnif" -o "$brif" -s "$subnet" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT -m comment --comment "$TAG"
-        fi
+    # nat SNAT rules
+    if $SUDO iptables -t nat -S POSTROUTING 2>/dev/null | grep -F -- "$TAG" >/dev/null 2>&1; then
+      while IFS= read -r line; do
+        _run $SUDO iptables -t nat ${line/-A /-D } || true
+      done < <($SUDO iptables -t nat -S POSTROUTING | grep -F -- "$TAG" || true)
+    fi
+
+    echo "OK: vpn-fix rolled back ($TAG)."
+    return 0
+  fi
+
+  # ---------------------------
+  # APPLY:
+  # 1) allow docker->vpn inside *ciscovpn* before its final DROP
+  # 2) SNAT docker CIDRs to vpn_ip for vpn subnets (whitelist-safe)
+  # 3) MSS clamp for SYN going into vpn
+  # ---------------------------
+
+  local subnet cidr
+  for subnet in "${vpn_subnets[@]}"; do
+    for brif in "${br_ifs[@]}"; do
+      for cidr in ${BR_CIDRS[$brif]:-}; do
+        [[ -n "$cidr" ]] || continue
+
+        # (A) Let docker -> vpn pass Cisco firewall chain
+        # IMPORTANT: insert at top (position 1) so it wins before "-o cscotun0 DROP"
+        _ipt_ins filter "$VPN_CHAIN" 1 -i "$brif" -o "$vpnif" -s "$cidr" -d "$subnet" -j ACCEPT -m comment --comment "$TAG"
+
+        # (B) Let vpn -> docker reply packets through
+        _ipt_ins filter "$VPN_CHAIN" 1 -i "$vpnif" -o "$brif" -s "$subnet" -d "$cidr" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT -m comment --comment "$TAG"
+
+        # (C) Clamp MSS on SYN into VPN (helps Cisco MTU 1300)
+        _ipt_add mangle FORWARD -i "$brif" -o "$vpnif" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu -m comment --comment "$TAG" || true
+
+        # (D) Whitelist-safe SNAT: force source to the VPN assigned IP
+        # Only when going to VPN subnets, not the whole internet.
+        _ipt_add nat POSTROUTING -s "$cidr" -o "$vpnif" -d "$subnet" -j SNAT --to-source "$vpn_ip" -m comment --comment "$TAG"
       done
     done
   done
 
-  # ---------------------------
-  # IPv6 (best-effort, scoped; skip if not actually in use)
-  # ---------------------------
-  if command -v ip6tables >/dev/null 2>&1; then
-    local docker_has_v6=0 vpn_has_v6=0
-
-    for brif in "${br_ifs[@]}"; do
-      if ip -o -6 addr show dev "$brif" 2>/dev/null | grep -q 'inet6 '; then
-        docker_has_v6=1
-        break
-      fi
-    done
-
-    for vpnif in "${vpn_ifs[@]}"; do
-      if ip -o -6 addr show dev "$vpnif" 2>/dev/null | grep -q 'inet6 '; then
-        vpn_has_v6=1
-        break
-      fi
-    done
-
-    if ((docker_has_v6 && vpn_has_v6)); then
-      if [[ -r /proc/sys/net/ipv6/conf/all/forwarding ]]; then
-        local ip6f
-        ip6f="$(cat /proc/sys/net/ipv6/conf/all/forwarding 2>/dev/null || echo 0)"
-        if [[ "$ip6f" != "1" ]]; then
-          _run $SUDO sysctl -w net.ipv6.conf.all.forwarding=1 >/dev/null
-        fi
-      fi
-
-      _ip6t_append_if_missing() {
-        local table="$1"
-        shift
-        local chain="$1"
-        shift
-        if _run $SUDO ip6tables -t "$table" -C "$chain" "$@" 2>/dev/null; then
-          return 0
-        fi
-        _run $SUDO ip6tables -t "$table" -A "$chain" "$@"
-      }
-
-      _ip6t_delete_if_present() {
-        local table="$1"
-        shift
-        local chain="$1"
-        shift
-        if $SUDO ip6tables -t "$table" -C "$chain" "$@" >/dev/null 2>&1; then
-          _run $SUDO ip6tables -t "$table" -D "$chain" "$@"
-        fi
-      }
-
-      local v6subnet
-      for vpnif in "${vpn_ifs[@]}"; do
-        local -a v6subnets=()
-        while IFS= read -r v6subnet; do
-          [[ -n "$v6subnet" ]] && v6subnets+=("$v6subnet")
-        done < <(
-          ip -6 route show dev "$vpnif" 2>/dev/null |
-            awk '{print $1}' |
-            grep -E '^[0-9a-fA-F:]+/[0-9]+$' |
-            LC_ALL=C sort -u || true
-        )
-
-        ((${#v6subnets[@]})) || {
-          echo "IPv6: $vpnif has no routed IPv6 subnets; skipped."
-          continue
-        }
-
-        for v6subnet in "${v6subnets[@]}"; do
-          for brif in "${br_ifs[@]}"; do
-            if ((rollback)); then
-              _ip6t_delete_if_present filter FORWARD -i "$brif" -o "$vpnif" -d "$v6subnet" -j ACCEPT -m comment --comment "$TAG"
-              _ip6t_delete_if_present filter FORWARD -i "$vpnif" -o "$brif" -s "$v6subnet" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT -m comment --comment "$TAG"
-            else
-              _ip6t_append_if_missing filter FORWARD -i "$brif" -o "$vpnif" -d "$v6subnet" -j ACCEPT -m comment --comment "$TAG"
-              _ip6t_append_if_missing filter FORWARD -i "$vpnif" -o "$brif" -s "$v6subnet" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT -m comment --comment "$TAG"
-            fi
-          done
-
-          if $SUDO ip6tables -t nat -L >/dev/null 2>&1; then
-            if ((rollback)); then
-              _ip6t_delete_if_present nat POSTROUTING -o "$vpnif" -d "$v6subnet" -j MASQUERADE -m comment --comment "$TAG"
-            else
-              _ip6t_append_if_missing nat POSTROUTING -o "$vpnif" -d "$v6subnet" -j MASQUERADE -m comment --comment "$TAG"
-            fi
-          fi
-        done
-      done
-    else
-      echo "IPv6: skipped (Docker bridges or VPN interface have no IPv6 addresses)."
-    fi
-  else
-    echo "IPv6: skipped (ip6tables not installed)."
-  fi
-
-  if ((rollback)); then
-    echo "OK: vpn-fix rolled back ($TAG)."
-  else
-    echo "OK: vpn-fix applied ($TAG)."
-    echo "VPN interfaces: ${vpn_ifs[*]}"
-    echo "Docker bridges: ${br_ifs[*]}"
-    ((dry_run)) && echo "Note: dry-run mode, nothing changed."
-  fi
+  echo "OK: vpn-fix applied ($TAG)."
+  echo "VPN interface: $vpnif ($vpn_ip)"
+  echo "VPN routes: ${#vpn_subnets[@]} subnets"
+  echo "Docker bridges: ${br_ifs[*]}"
+  ((dry_run)) && echo "Note: dry-run mode, nothing changed."
 }
 
 cmd_run() {
