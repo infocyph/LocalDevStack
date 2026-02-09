@@ -2233,7 +2233,7 @@ cmd_vpn-fix() {
   command -v iptables >/dev/null 2>&1 || { echo "Error: iptables not found"; return 1; }
 
   local TAG="lds:vpn-fix"
-  local VPN_CHAIN="ciscovpn"
+  local CISCO_CHAIN="ciscovpn"
 
   _run() {
     if ((dry_run)); then
@@ -2252,11 +2252,8 @@ cmd_vpn-fix() {
     $SUDO sysctl -w "$key=$val" >/dev/null 2>&1 || true
   }
 
-  # Ensure Cisco chain exists (otherwise bail clearly)
-  if ! $SUDO iptables -S "$VPN_CHAIN" >/dev/null 2>&1; then
-    echo "Error: iptables chain '$VPN_CHAIN' not found. (Cisco VPN not active / different chain name?)"
-    return 2
-  fi
+  _chain_exists() { $SUDO iptables -S "$1" >/dev/null 2>&1; }
+  _chain_exists_t() { $SUDO iptables -t "$1" -S "$2" >/dev/null 2>&1; }
 
   # ---------------------------
   # docker bridges: docker0 + br-*
@@ -2270,7 +2267,6 @@ cmd_vpn-fix() {
   )
   ((${#br_ifs[@]})) || { echo "Error: no docker bridges found (docker0 / br-*)."; return 3; }
 
-  # bridge CIDRs
   declare -A BR_CIDRS=()
   local brif
   for brif in "${br_ifs[@]}"; do
@@ -2280,15 +2276,14 @@ cmd_vpn-fix() {
   done
 
   # ---------------------------
-  # VPN iface detection (prefer cscotun*)
+  # VPN iface detection
   # ---------------------------
   local vpnif=""
   vpnif="$(ip -o link show 2>/dev/null | awk -F': ' '/cscotun[0-9]+/ {print $2}' | head -n1 | awk '{print $1}' | sed 's/@.*//' || true)"
   if [[ -z "$vpnif" ]]; then
-    # fallback: any UP tun/wg/tap
     vpnif="$(ip -o link show 2>/dev/null |
       awk -F': ' '/<[^>]*UP[^>]*>/ { n=$2; sub(/ .*/,"",n); sub(/@.*/,"",n); print n }' |
-      grep -E '^(tun|tap|wg|ppp|cscotun|utun|tailscale|zt|nordlynx|proton|vpn)[0-9]*$' |
+      grep -E '^(tun|tap|wg|ppp|utun|tailscale|zt|nordlynx|proton|vpn)[0-9A-Za-z._-]*$' |
       head -n1 || true)"
   fi
   [[ -n "$vpnif" ]] || { echo "Error: no VPN interface detected."; return 4; }
@@ -2308,11 +2303,26 @@ cmd_vpn-fix() {
   )
   ((${#vpn_subnets[@]})) || { echo "Error: no IPv4 routes found via '$vpnif' (split-tunnel list empty)."; return 6; }
 
+  # Cisco mode if chain exists AND interface looks like Cisco (cscotun*)
+  local mode="universal"
+  if [[ "$vpnif" =~ ^cscotun[0-9]+$ ]] && _chain_exists "$CISCO_CHAIN"; then
+    mode="cisco"
+  fi
+
+  # decide which "forward allow" chain to use for universal
+  # prefer DOCKER-USER if exists, else fallback to FORWARD
+  local FW_CHAIN="FORWARD"
+  if _chain_exists "DOCKER-USER"; then
+    FW_CHAIN="DOCKER-USER"
+  fi
+
   if ((debug)); then
+    echo "DEBUG: mode=$mode"
     echo "DEBUG: vpnif=$vpnif"
     echo "DEBUG: vpn_ip=$vpn_ip"
     echo "DEBUG: vpn_subnets=${vpn_subnets[*]}"
     echo "DEBUG: br_ifs=${br_ifs[*]}"
+    echo "DEBUG: fw_chain=$FW_CHAIN"
     for brif in "${br_ifs[@]}"; do
       echo "DEBUG: br_cidrs[$brif]=${BR_CIDRS[$brif]:-}"
     done
@@ -2323,7 +2333,7 @@ cmd_vpn-fix() {
   _sysctl_set "net.ipv4.conf.${vpnif}.rp_filter" 0
   for brif in "${br_ifs[@]}"; do _sysctl_set "net.ipv4.conf.${brif}.rp_filter" 0; done
 
-  # helpers: insert/delete with idempotency
+  # iptables helpers: insert/append idempotently
   _ipt_ins() {
     local table="$1"; shift
     local chain="$1"; shift
@@ -2338,64 +2348,93 @@ cmd_vpn-fix() {
     _run $SUDO iptables -t "$table" -A "$chain" "$@"
   }
 
-  # rollback = remove our tagged rules (best-effort)
+  # rollback = remove our tagged rules (best-effort) from all possible chains
   if ((rollback)); then
-    # filter/ciscovpn rules
-    if $SUDO iptables -S "$VPN_CHAIN" 2>/dev/null | grep -F -- "$TAG" >/dev/null 2>&1; then
+    local ch line
+
+    # filter: Cisco chain (if exists)
+    if _chain_exists "$CISCO_CHAIN"; then
       while IFS= read -r line; do
         _run $SUDO iptables ${line/-A /-D } || true
-      done < <($SUDO iptables -S "$VPN_CHAIN" | grep -F -- "$TAG" || true)
+      done < <($SUDO iptables -S "$CISCO_CHAIN" | grep -F -- "$TAG" || true)
     fi
+
+    # filter: DOCKER-USER (if exists)
+    if _chain_exists "DOCKER-USER"; then
+      while IFS= read -r line; do
+        _run $SUDO iptables ${line/-A /-D } || true
+      done < <($SUDO iptables -S DOCKER-USER | grep -F -- "$TAG" || true)
+    fi
+
+    # filter: FORWARD (fallback universal inserts can go here)
+    while IFS= read -r line; do
+      _run $SUDO iptables ${line/-A /-D } || true
+    done < <($SUDO iptables -S FORWARD | grep -F -- "$TAG" || true)
 
     # mangle clamp rules
-    if $SUDO iptables -t mangle -S FORWARD 2>/dev/null | grep -F -- "$TAG" >/dev/null 2>&1; then
-      while IFS= read -r line; do
-        _run $SUDO iptables -t mangle ${line/-A /-D } || true
-      done < <($SUDO iptables -t mangle -S FORWARD | grep -F -- "$TAG" || true)
-    fi
+    while IFS= read -r line; do
+      _run $SUDO iptables -t mangle ${line/-A /-D } || true
+    done < <($SUDO iptables -t mangle -S FORWARD | grep -F -- "$TAG" || true)
 
     # nat SNAT rules
-    if $SUDO iptables -t nat -S POSTROUTING 2>/dev/null | grep -F -- "$TAG" >/dev/null 2>&1; then
-      while IFS= read -r line; do
-        _run $SUDO iptables -t nat ${line/-A /-D } || true
-      done < <($SUDO iptables -t nat -S POSTROUTING | grep -F -- "$TAG" || true)
-    fi
+    while IFS= read -r line; do
+      _run $SUDO iptables -t nat ${line/-A /-D } || true
+    done < <($SUDO iptables -t nat -S POSTROUTING | grep -F -- "$TAG" || true)
 
     echo "OK: vpn-fix rolled back ($TAG)."
     return 0
   fi
 
   # ---------------------------
-  # APPLY:
-  # 1) allow docker->vpn inside *ciscovpn* before its final DROP
-  # 2) SNAT docker CIDRs to vpn_ip for vpn subnets (whitelist-safe)
-  # 3) MSS clamp for SYN going into vpn
+  # APPLY RULES
   # ---------------------------
-
   local subnet cidr
   for subnet in "${vpn_subnets[@]}"; do
     for brif in "${br_ifs[@]}"; do
       for cidr in ${BR_CIDRS[$brif]:-}; do
         [[ -n "$cidr" ]] || continue
 
-        # (A) Let docker -> vpn pass Cisco firewall chain
-        # IMPORTANT: insert at top (position 1) so it wins before "-o cscotun0 DROP"
-        _ipt_ins filter "$VPN_CHAIN" 1 -i "$brif" -o "$vpnif" -s "$cidr" -d "$subnet" -j ACCEPT -m comment --comment "$TAG"
-
-        # (B) Let vpn -> docker reply packets through
-        _ipt_ins filter "$VPN_CHAIN" 1 -i "$vpnif" -o "$brif" -s "$subnet" -d "$cidr" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT -m comment --comment "$TAG"
-
-        # (C) Clamp MSS on SYN into VPN (helps Cisco MTU 1300)
-        _ipt_add mangle FORWARD -i "$brif" -o "$vpnif" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu -m comment --comment "$TAG" || true
+        # (C) Clamp MSS on SYN into VPN (helps low MTU tunnels)
+        _ipt_add mangle FORWARD -i "$brif" -o "$vpnif" -p tcp --tcp-flags SYN,RST SYN \
+          -j TCPMSS --clamp-mss-to-pmtu -m comment --comment "$TAG" || true
 
         # (D) Whitelist-safe SNAT: force source to the VPN assigned IP
         # Only when going to VPN subnets, not the whole internet.
-        _ipt_add nat POSTROUTING -s "$cidr" -o "$vpnif" -d "$subnet" -j SNAT --to-source "$vpn_ip" -m comment --comment "$TAG"
+        _ipt_add nat POSTROUTING -s "$cidr" -o "$vpnif" -d "$subnet" \
+          -j SNAT --to-source "$vpn_ip" -m comment --comment "$TAG"
+
+        if [[ "$mode" == "cisco" ]]; then
+          # (A) Let docker -> vpn pass Cisco firewall chain
+          # IMPORTANT: insert at top so it wins before "-o cscotun0 DROP"
+          _ipt_ins filter "$CISCO_CHAIN" 1 \
+            -i "$brif" -o "$vpnif" -s "$cidr" -d "$subnet" \
+            -j ACCEPT -m comment --comment "$TAG"
+
+          # (B) Let vpn -> docker reply packets through (Cisco chain)
+          _ipt_ins filter "$CISCO_CHAIN" 1 \
+            -i "$vpnif" -o "$brif" -s "$subnet" -d "$cidr" \
+            -m conntrack --ctstate ESTABLISHED,RELATED \
+            -j ACCEPT -m comment --comment "$TAG"
+        else
+          # UNIVERSAL (non-Cisco):
+          # allow docker -> vpn subnets via VPN interface (in DOCKER-USER if available, else FORWARD)
+          # Insert at top for maximum precedence (esp. if FORWARD policy is DROP)
+          _ipt_ins filter "$FW_CHAIN" 1 \
+            -i "$brif" -o "$vpnif" -s "$cidr" -d "$subnet" \
+            -j ACCEPT -m comment --comment "$TAG"
+
+          # allow return traffic vpn -> docker for established flows
+          _ipt_ins filter "$FW_CHAIN" 1 \
+            -i "$vpnif" -o "$brif" -s "$subnet" -d "$cidr" \
+            -m conntrack --ctstate ESTABLISHED,RELATED \
+            -j ACCEPT -m comment --comment "$TAG"
+        fi
       done
     done
   done
 
   echo "OK: vpn-fix applied ($TAG)."
+  echo "Mode: $mode"
   echo "VPN interface: $vpnif ($vpn_ip)"
   echo "VPN routes: ${#vpn_subnets[@]} subnets"
   echo "Docker bridges: ${br_ifs[*]}"
@@ -2403,97 +2442,58 @@ cmd_vpn-fix() {
 }
 
 cmd_run() {
-  # Usage:
-  #   lds run                          # build+start+exec for current directory
-  #   lds run stop                     # stop container for current directory
-  #   lds run rm                       # remove container (and image tag) for current directory
-  #   lds run ps                       # list run containers
-  #   lds run logs                     # follow logs for current directory container
-  #   lds run open [--port P]          # open first published port (or P) in browser
-  #
-  # Flags:
-  #   --name NAME                         # container name override
-  #   --tag TAG                           # image tag override
-  #   --no-build                          # do not build
-  #   --no-keepalive                      # run image's default CMD/ENTRYPOINT
-  #   --sock                              # mount docker sock: /var/run/docker.sock
-  #   -p|--publish HOST:CONT              # publish port (repeatable)
-  #   --mount HOST[:CONT]                 # mount file/dir into container (repeatable)
-  #   --port CONT_PORT                    # for 'open': choose container port
-  #   --path /some/path                   # for 'open': default /
-  #   --https                             # for 'open': use https
   local action="shell" dir="$PWD" name="" tag="" nobuild=0 keepalive=1 sock=0
   local -a publish=() mounts=()
   local open_port="" open_path="/" open_proto="http"
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
-    stop | rm | ps | shell | logs | open)
-      action="$1"
-      shift
-      ;;
-    --name)
-      name="${2:-}"
-      shift 2
-      ;;
-    --tag)
-      tag="${2:-}"
-      shift 2
-      ;;
-    --no-build)
-      nobuild=1
-      shift
-      ;;
-    --no-keepalive)
-      keepalive=0
-      shift
-      ;;
-    --sock)
-      sock=1
-      shift
-      ;;
-    -p | --publish)
-      publish+=("${2:-}")
-      shift 2
-      ;;
-    --mount)
-      mounts+=("${2:-}")
-      shift 2
-      ;;
-    --port)
-      open_port="${2:-}"
-      shift 2
-      ;;
-    --path)
-      open_path="${2:-/}"
-      shift 2
-      ;;
-    --https)
-      open_proto="https"
-      shift
-      ;;
-    --http)
-      open_proto="http"
-      shift
-      ;;
+    stop|rm|ps|shell|logs|open) action="$1"; shift ;;
+    --name)         name="${2:-}"; shift 2 ;;
+    --tag)          tag="${2:-}"; shift 2 ;;
+    --no-build)     nobuild=1; shift ;;
+    --no-keepalive) keepalive=0; shift ;;
+    --sock)         sock=1; shift ;;
+    -p|--publish)   publish+=("${2:-}"); shift 2 ;;
+    --mount)        mounts+=("${2:-}"); shift 2 ;;
+    --port)         open_port="${2:-}"; shift 2 ;;
+    --path)         open_path="${2:-/}"; shift 2 ;;
+    --https)        open_proto="https"; shift ;;
+    --http)         open_proto="http"; shift ;;
     *) break ;;
     esac
   done
 
-  dir="$(cd "$dir" && pwd)"
-  IFS='|' read -r def_name def_tag _def_dir < <(run_plan "$dir")
+  # Host path (POSIX) for planning/labels
+  local dir_posix
+  dir_posix="$(cd "$dir" && pwd -P)"
+
+  # Docker path (may need Windows form for docker.exe)
+  local dir_docker="$dir_posix"
+
+  # Windows Git Bash/MSYS hardening:
+  # - stop MSYS rewriting container paths (/workspace -> D:/Program Files/Git/workspace)
+  # - but still feed docker.exe Windows-absolute host paths for build/run contexts
+  if is_windows_shell; then
+    export MSYS_NO_PATHCONV=1
+    export MSYS2_ARG_CONV_EXCL='*'
+    if command -v cygpath >/dev/null 2>&1; then
+      dir_docker="$(cygpath -w "$dir_posix")"
+    fi
+  fi
+
+  # Plan/name/tag should be based on the real project identity (POSIX dir)
+  IFS='|' read -r def_name def_tag _def_dir < <(run_plan "$dir_posix")
   name="${name:-$def_name}"
   tag="${tag:-$def_tag}"
 
-  # Helper to locate "the" container for a dir
   _find_for_dir() {
     local found
-    found="$(run_find_container "$dir" || true)"
+    found="$(run_find_container "$dir_posix" || true)"
     if [[ -n "$found" ]]; then
       printf '%s' "$found"
       return 0
     fi
-    # fallback to explicit name if present
     if docker inspect "$name" >/dev/null 2>&1; then
       printf '%s' "$name"
       return 0
@@ -2509,50 +2509,42 @@ cmd_run() {
     ;;
   stop)
     local existing
-    existing="$(_find_for_dir)" || die "no run container found for: $dir"
+    existing="$(_find_for_dir)" || die "no run container found for: $dir_posix"
     docker stop "$existing" >/dev/null
-    printf "%b[run]%b Stopped %s
-" "$GREEN" "$NC" "$existing"
+    printf "%b[run]%b Stopped %s\n" "$GREEN" "$NC" "$existing"
     return 0
     ;;
   logs)
     local existing
-    existing="$(_find_for_dir)" || die "no run container found for: $dir"
+    existing="$(_find_for_dir)" || die "no run container found for: $dir_posix"
     exec docker logs -f "$existing"
     ;;
   open)
     local existing line addr hp url
-    existing="$(_find_for_dir)" || die "no run container found for: $dir"
+    existing="$(_find_for_dir)" || die "no run container found for: $dir_posix"
 
-    # Normalize path
     [[ -n "$open_path" ]] || open_path="/"
     [[ "$open_path" == /* ]] || open_path="/$open_path"
 
     if [[ -n "$open_port" ]]; then
       line="$(docker port "$existing" "$open_port" 2>/dev/null | head -n 1 || true)"
-      # Some docker versions require proto, try tcp as fallback
       [[ -n "$line" ]] || line="$(docker port "$existing" "${open_port}/tcp" 2>/dev/null | head -n 1 || true)"
     else
       line="$(docker port "$existing" 2>/dev/null | head -n 1 || true)"
     fi
 
     if [[ -z "$line" ]]; then
-      printf "%b[run]%b No published ports found.
-" "$YELLOW" "$NC"
-      printf "%b[run]%b Tip: start with %blds run --publish 8025:8025%b then %blds run open%b
-" \
+      printf "%b[run]%b No published ports found.\n" "$YELLOW" "$NC"
+      printf "%b[run]%b Tip: start with %blds run --publish 8025:8025%b then %blds run open%b\n" \
         "$YELLOW" "$NC" "$BLUE" "$NC" "$BLUE" "$NC"
       return 1
     fi
 
-    # Example line: "8025/tcp -> 0.0.0.0:8025"
     addr="${line##*-> }"
     hp="${addr##*:}"
-
     url="${open_proto}://localhost:${hp}${open_path}"
     open_url "$url"
-    printf "%b[run]%b Opened: %s
-" "$GREEN" "$NC" "$url"
+    printf "%b[run]%b Opened: %s\n" "$GREEN" "$NC" "$url"
     return 0
     ;;
   rm)
@@ -2560,40 +2552,36 @@ cmd_run() {
     existing="$(_find_for_dir)" || true
     if [[ -n "${existing:-}" ]]; then
       img="$(docker inspect -f '{{.Config.Image}}' "$existing" 2>/dev/null || true)"
-      # Stop first, then remove (more predictable than rm -f).
       docker stop "$existing" >/dev/null 2>&1 || true
       docker rm "$existing" >/dev/null 2>&1 || true
-      printf "%b[run]%b Removed container %s
-" "$GREEN" "$NC" "$existing"
+      printf "%b[run]%b Removed container %s\n" "$GREEN" "$NC" "$existing"
       if [[ -n "${img:-}" ]]; then
         docker rmi -f "$img" >/dev/null 2>&1 || true
-        printf "%b[run]%b Removed image %s
-" "$GREEN" "$NC" "$img"
+        printf "%b[run]%b Removed image %s\n" "$GREEN" "$NC" "$img"
       fi
     else
-      printf "%b[run]%b No container found for %s
-" "$YELLOW" "$NC" "$dir"
+      printf "%b[run]%b No container found for %s\n" "$YELLOW" "$NC" "$dir_posix"
     fi
     return 0
     ;;
-  shell | *)
+  shell|*)
     if ((nobuild == 0)); then
-      run_build "$tag" "$dir"
+      # Build needs docker.exe-friendly path on Windows
+      run_build "$tag" "$dir_docker"
     else
-      printf "%b[run]%b Skipping build (--no-build)
-" "$YELLOW" "$NC"
+      printf "%b[run]%b Skipping build (--no-build)\n" "$YELLOW" "$NC"
     fi
 
     if docker inspect -f '{{.State.Running}}' "$name" 2>/dev/null | grep -q true; then
-      printf "%b[run]%b Container already running: %s
-" "$GREEN" "$NC" "$name"
+      printf "%b[run]%b Container already running: %s\n" "$GREEN" "$NC" "$name"
     else
-      # if a previous container with same name exists but stopped, remove it
       if docker inspect "$name" >/dev/null 2>&1; then
         docker rm -f "$name" >/dev/null 2>&1 || true
       fi
-      # Pass publishes, then "--", then mounts (parsed by run_start).
-      run_start "$name" "$tag" "$dir" "$keepalive" "$sock" \
+
+      # Keep mounts as user gave them (POSIX/relative); run_start should validate POSIX
+      # and convert host-side to Windows only at docker run time.
+      run_start "$name" "$tag" "$dir_docker" "$keepalive" "$sock" \
         "${publish[@]}" -- "${mounts[@]}"
     fi
 
