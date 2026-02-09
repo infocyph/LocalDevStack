@@ -772,8 +772,14 @@ detect_os_family() {
   elif command -v uname >/dev/null 2>&1; then
     # fallback for macOS / other unix
     case "$(uname -s 2>/dev/null || true)" in
-    Darwin) id="macos"; like="darwin" ;;
-    Linux)  id="linux";  like="linux" ;;
+    Darwin)
+      id="macos"
+      like="darwin"
+      ;;
+    Linux)
+      id="linux"
+      like="linux"
+      ;;
     esac
   fi
 
@@ -799,7 +805,7 @@ ca_plan() {
     printf "arch|/etc/ca-certificates/trust-source/anchors/${CA_BASENAME}.crt|trust\n"
     ;;
   *)
-  # best default: Debian-style location (works on many distros even if updater differs)
+    # best default: Debian-style location (works on many distros even if updater differs)
     printf "fallback|/usr/local/share/ca-certificates/${CA_BASENAME}.crt|\n"
     ;;
   esac
@@ -893,7 +899,7 @@ install_ca() {
   printf "%b✔ Copied%b → %s\n" "$GREEN" "$NC" "$dest"
 
   case "$family" in
-  debian|alpine)
+  debian | alpine)
     if command -v update-ca-certificates >/dev/null 2>&1; then
       printf "%bUpdating trust store%b (update-ca-certificates)…\n" "$CYAN" "$NC"
       if update-ca-certificates; then
@@ -1041,12 +1047,12 @@ uninstall_ca() {
     printf "%bScanning all known CA anchor paths…%b\n" "$CYAN" "$NC"
     local f
     for f in \
-    "/usr/local/share/ca-certificates/${CA_BASENAME}.crt" \
-    "/usr/local/share/ca-certificates/${CA_BASENAME}.pem" \
-    "/etc/pki/ca-trust/source/anchors/${CA_BASENAME}.crt" \
-    "/etc/pki/ca-trust/source/anchors/${CA_BASENAME}.pem" \
-    "/etc/ca-certificates/trust-source/anchors/${CA_BASENAME}.crt" \
-    "/etc/ca-certificates/trust-source/anchors/${CA_BASENAME}.pem"; do
+      "/usr/local/share/ca-certificates/${CA_BASENAME}.crt" \
+      "/usr/local/share/ca-certificates/${CA_BASENAME}.pem" \
+      "/etc/pki/ca-trust/source/anchors/${CA_BASENAME}.crt" \
+      "/etc/pki/ca-trust/source/anchors/${CA_BASENAME}.pem" \
+      "/etc/ca-certificates/trust-source/anchors/${CA_BASENAME}.crt" \
+      "/etc/ca-certificates/trust-source/anchors/${CA_BASENAME}.pem"; do
       [[ "$f" == "$dest" ]] && continue
       if [[ -e "$f" ]]; then
         rm -f "$f"
@@ -1057,7 +1063,7 @@ uninstall_ca() {
   fi
 
   case "$family" in
-  debian|alpine)
+  debian | alpine)
     if command -v update-ca-certificates >/dev/null 2>&1; then
       printf "%bUpdating trust store%b (update-ca-certificates)…\n" "$CYAN" "$NC"
       update-ca-certificates || printf "%bWARN%b: update-ca-certificates failed.\n" "$YELLOW" "$NC" >&2
@@ -2125,12 +2131,22 @@ run_start() {
     fi
   done
 
+  # Normalize project dir (POSIX absolute).
+  # On Windows Git Bash, /e/... is OK; docker.exe will receive converted path automatically.
+  local dir_posix
+  dir_posix="$(cd "$dir" 2>/dev/null && pwd -P)" || die "invalid dir: $dir"
+
+  # MSYS-safe container paths: use '//' prefix to prevent path conversion.
+  # Docker interprets //path as /path inside container.
+  local WDIR="//workspace"
+  local WDIR_MOUNT="${dir_posix}://workspace"
+
   local -a args=(docker run -d --name "$name"
     --label "com.infocyph.lds.run=1"
-    --label "com.infocyph.lds.dir=$dir"
+    --label "com.infocyph.lds.dir=$dir_posix"
     --label "com.infocyph.lds.tag=$tag"
-    -w /workspace
-    -v "$dir:/workspace"
+    -w "$WDIR"
+    -v "$WDIR_MOUNT"
   )
 
   # Mount extra directories/files (HOST[:CONT]).
@@ -2140,23 +2156,30 @@ run_start() {
     local spec host cont base
     for spec in "${mounts[@]}"; do
       [[ -n "$spec" ]] || continue
-      host="$spec"; cont=""
+      host="$spec"
+      cont=""
 
-      # Split on first ':' only when it looks like a Linux path mapping.
-      # (Avoid breaking Windows drive letters like C:\...)
-      if [[ "$spec" == /*:* ]]; then
-        host="${spec%%:*}"
-        cont="${spec#*:}"
-      elif [[ "$spec" == ./*:* || "$spec" == ../*:* ]]; then
-        host="${spec%%:*}"
-        cont="${spec#*:}"
+      # Split as HOST:CONT ONLY if suffix after last ':' looks like a container absolute path (/...)
+      # (safe for Windows drive letters like E:\... because tail won't start with '/')
+      if [[ "$spec" == *:* ]]; then
+        local tail="${spec##*:}"
+        if [[ "$tail" == /* ]]; then
+          host="${spec%:*}"
+          cont="$tail"
+        fi
       fi
 
-      # Resolve host to absolute
-      if [[ "$host" != /* && "$host" != ~* ]]; then
-        host="$dir/$host"
+      # Resolve host to absolute (POSIX) for checks
+      if [[ "$host" != /* && "$host" != ~* && ! "$host" =~ ^[A-Za-z]:[\\/].* ]]; then
+        host="${dir_posix%/}/$host"
       fi
-      host="$(cd "${host%/*}" 2>/dev/null && pwd)/${host##*/}" || {
+
+      # If user provided Windows path (E:\...), convert to POSIX for existence check
+      if [[ "$host" =~ ^[A-Za-z]:[\\/].* ]] && command -v cygpath >/dev/null 2>&1; then
+        host="$(cygpath -u "$host")"
+      fi
+
+      host="$(cd "${host%/*}" 2>/dev/null && pwd -P)/${host##*/}" || {
         printf "%b[run]%b Warning: cannot resolve mount path: %s\n" "$YELLOW" "$NC" "$spec" >&2
         continue
       }
@@ -2172,17 +2195,19 @@ run_start() {
       fi
       [[ "$cont" == /* ]] || cont="/mnt/${cont}"
 
-      args+=(-v "$host:$cont")
+      # Prevent MSYS conversion for container side by using '//' prefix
+      cont="//${cont#/}"
+
+      args+=(-v "${host}:${cont}")
     done
   fi
 
-  # Optional: allow containers to talk to Docker (DinD via host socket)
+  # Optional docker sock
   if [[ "${sock:-0}" == 1 ]]; then
-    [[ -S /var/run/docker.sock ]] || printf "%b[run]%b Warning: /var/run/docker.sock not found on host, mount may fail.\n" "$YELLOW" "$NC" >&2
     args+=(-v "/var/run/docker.sock:/var/run/docker.sock")
   fi
 
-  # Publish ports: pass multiple --publish/-p flags from cmd_run
+  # Publish ports
   local pub
   for pub in "${pubs[@]}"; do
     [[ -n "$pub" ]] || continue
@@ -2190,15 +2215,18 @@ run_start() {
   done
 
   if [[ "$keepalive" == 1 ]]; then
-    # keep container alive even if image CMD exits (good for "exec bash" workflow)
     args+=(--entrypoint sh "$tag" -c "trap : TERM INT; sleep infinity & wait")
   else
     args+=("$tag")
   fi
 
-  printf "%b[run]%b Starting container %b%s%b
-" "$CYAN" "$NC" "$BLUE" "$name" "$NC"
-  "${args[@]}" >/dev/null
+  printf "%b[run]%b Starting container %b%s%b\n" "$CYAN" "$NC" "$BLUE" "$name" "$NC"
+
+  # IMPORTANT: don't hide errors; if it fails, you need to see why
+  if ! "${args[@]}"; then
+    printf "%b[run]%b docker run failed.\n" "$RED" "$NC" >&2
+    return 1
+  fi
 }
 
 run_exec_shell() {
@@ -2217,18 +2245,54 @@ cmd_run() {
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
-    stop|rm|ps|shell|logs|open) action="$1"; shift ;;
-    --name)         name="${2:-}"; shift 2 ;;
-    --tag)          tag="${2:-}"; shift 2 ;;
-    --no-build)     nobuild=1; shift ;;
-    --no-keepalive) keepalive=0; shift ;;
-    --sock)         sock=1; shift ;;
-    -p|--publish)   publish+=("${2:-}"); shift 2 ;;
-    --mount)        mounts+=("${2:-}"); shift 2 ;;
-    --port)         open_port="${2:-}"; shift 2 ;;
-    --path)         open_path="${2:-/}"; shift 2 ;;
-    --https)        open_proto="https"; shift ;;
-    --http)         open_proto="http"; shift ;;
+    stop | rm | ps | shell | logs | open)
+      action="$1"
+      shift
+      ;;
+    --name)
+      name="${2:-}"
+      shift 2
+      ;;
+    --tag)
+      tag="${2:-}"
+      shift 2
+      ;;
+    --no-build)
+      nobuild=1
+      shift
+      ;;
+    --no-keepalive)
+      keepalive=0
+      shift
+      ;;
+    --sock)
+      sock=1
+      shift
+      ;;
+    -p | --publish)
+      publish+=("${2:-}")
+      shift 2
+      ;;
+    --mount)
+      mounts+=("${2:-}")
+      shift 2
+      ;;
+    --port)
+      open_port="${2:-}"
+      shift 2
+      ;;
+    --path)
+      open_path="${2:-/}"
+      shift 2
+      ;;
+    --https)
+      open_proto="https"
+      shift
+      ;;
+    --http)
+      open_proto="http"
+      shift
+      ;;
     *) break ;;
     esac
   done
@@ -2333,7 +2397,7 @@ cmd_run() {
     fi
     return 0
     ;;
-  shell|*)
+  shell | *)
     if ((nobuild == 0)); then
       # Build needs docker.exe-friendly path on Windows
       run_build "$tag" "$dir_docker"
@@ -2365,28 +2429,47 @@ cmd_vpn-fix() {
   local dry_run=0 rollback=0 debug=0
   while [[ "${1:-}" ]]; do
     case "$1" in
-    --dry-run)  dry_run=1; shift ;;
-    --rollback) rollback=1; shift ;;
-    --debug)    debug=1; shift ;;
+    --dry-run)
+      dry_run=1
+      shift
+      ;;
+    --rollback)
+      rollback=1
+      shift
+      ;;
+    --debug)
+      debug=1
+      shift
+      ;;
     *) break ;;
     esac
   done
 
   local SUDO=""
   if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
-    command -v sudo >/dev/null 2>&1 || { echo "Error: need root or sudo"; return 1; }
+    command -v sudo >/dev/null 2>&1 || {
+      echo "Error: need root or sudo"
+      return 1
+    }
     SUDO="sudo"
   fi
 
-  command -v ip >/dev/null 2>&1 || { echo "Error: ip not found"; return 1; }
-  command -v iptables >/dev/null 2>&1 || { echo "Error: iptables not found"; return 1; }
+  command -v ip >/dev/null 2>&1 || {
+    echo "Error: ip not found"
+    return 1
+  }
+  command -v iptables >/dev/null 2>&1 || {
+    echo "Error: iptables not found"
+    return 1
+  }
 
   local TAG="lds:vpn-fix"
   local CISCO_CHAIN="ciscovpn"
 
   _run() {
     if ((dry_run)); then
-      printf '[dry-run] %q ' "$@"; echo
+      printf '[dry-run] %q ' "$@"
+      echo
     else
       "$@"
     fi
@@ -2414,7 +2497,10 @@ cmd_vpn-fix() {
       grep -E '^(docker0|br-[0-9a-f]{12})$' |
       LC_ALL=C sort -u || true
   )
-  ((${#br_ifs[@]})) || { echo "Error: no docker bridges found (docker0 / br-*)."; return 3; }
+  ((${#br_ifs[@]})) || {
+    echo "Error: no docker bridges found (docker0 / br-*)."
+    return 3
+  }
 
   declare -A BR_CIDRS=()
   local brif
@@ -2435,12 +2521,18 @@ cmd_vpn-fix() {
       grep -E '^(tun|tap|wg|ppp|utun|tailscale|zt|nordlynx|proton|vpn)[0-9A-Za-z._-]*$' |
       head -n1 || true)"
   fi
-  [[ -n "$vpnif" ]] || { echo "Error: no VPN interface detected."; return 4; }
+  [[ -n "$vpnif" ]] || {
+    echo "Error: no VPN interface detected."
+    return 4
+  }
 
   local vpn_ip_cidr vpn_ip
   vpn_ip_cidr="$(ip -o -4 addr show dev "$vpnif" 2>/dev/null | awk '{print $4}' | head -n1 || true)"
   vpn_ip="${vpn_ip_cidr%%/*}"
-  [[ -n "$vpn_ip" ]] || { echo "Error: VPN iface '$vpnif' has no IPv4 address."; return 5; }
+  [[ -n "$vpn_ip" ]] || {
+    echo "Error: VPN iface '$vpnif' has no IPv4 address."
+    return 5
+  }
 
   # VPN-routed subnets (split tunnel routes)
   local -a vpn_subnets=()
@@ -2450,7 +2542,10 @@ cmd_vpn-fix() {
       grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+$' |
       LC_ALL=C sort -u || true
   )
-  ((${#vpn_subnets[@]})) || { echo "Error: no IPv4 routes found via '$vpnif' (split-tunnel list empty)."; return 6; }
+  ((${#vpn_subnets[@]})) || {
+    echo "Error: no IPv4 routes found via '$vpnif' (split-tunnel list empty)."
+    return 6
+  }
 
   # Cisco mode if chain exists AND interface looks like Cisco (cscotun*)
   local mode="universal"
@@ -2484,15 +2579,20 @@ cmd_vpn-fix() {
 
   # iptables helpers: insert/append idempotently
   _ipt_ins() {
-    local table="$1"; shift
-    local chain="$1"; shift
-    local pos="$1"; shift
+    local table="$1"
+    shift
+    local chain="$1"
+    shift
+    local pos="$1"
+    shift
     if $SUDO iptables -t "$table" -C "$chain" "$@" >/dev/null 2>&1; then return 0; fi
     _run $SUDO iptables -t "$table" -I "$chain" "$pos" "$@"
   }
   _ipt_add() {
-    local table="$1"; shift
-    local chain="$1"; shift
+    local table="$1"
+    shift
+    local chain="$1"
+    shift
     if $SUDO iptables -t "$table" -C "$chain" "$@" >/dev/null 2>&1; then return 0; fi
     _run $SUDO iptables -t "$table" -A "$chain" "$@"
   }
