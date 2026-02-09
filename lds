@@ -2108,6 +2108,23 @@ run_start() {
   local name="$1" tag="$2" dir="$3" keepalive="$4" sock="$5"
   shift 5 || true
 
+  # Remaining args are split by a "--" sentinel:
+  #   - before "--" : publish specs (HOST:CONT), repeatable
+  #   - after "--"  : mount specs (HOST[:CONT]), repeatable
+  local -a pubs=() mounts=()
+  local seen_delim=0 x
+  for x in "$@"; do
+    if [[ "$x" == "--" ]]; then
+      seen_delim=1
+      continue
+    fi
+    if ((seen_delim)); then
+      mounts+=("$x")
+    else
+      pubs+=("$x")
+    fi
+  done
+
   local -a args=(docker run -d --name "$name"
     --label "com.infocyph.lds.run=1"
     --label "com.infocyph.lds.dir=$dir"
@@ -2115,6 +2132,49 @@ run_start() {
     -w /workspace
     -v "$dir:/workspace"
   )
+
+  # Mount extra directories/files (HOST[:CONT]).
+  # - If container path missing, mounts under /mnt/<basename>.
+  # - HOST may be relative to the run directory.
+  if ((${#mounts[@]})); then
+    local spec host cont base
+    for spec in "${mounts[@]}"; do
+      [[ -n "$spec" ]] || continue
+      host="$spec"; cont=""
+
+      # Split on first ':' only when it looks like a Linux path mapping.
+      # (Avoid breaking Windows drive letters like C:\...)
+      if [[ "$spec" == /*:* ]]; then
+        host="${spec%%:*}"
+        cont="${spec#*:}"
+      elif [[ "$spec" == ./*:* || "$spec" == ../*:* ]]; then
+        host="${spec%%:*}"
+        cont="${spec#*:}"
+      fi
+
+      # Resolve host to absolute
+      if [[ "$host" != /* && "$host" != ~* ]]; then
+        host="$dir/$host"
+      fi
+      host="$(cd "${host%/*}" 2>/dev/null && pwd)/${host##*/}" || {
+        printf "%b[run]%b Warning: cannot resolve mount path: %s\n" "$YELLOW" "$NC" "$spec" >&2
+        continue
+      }
+
+      [[ -e "$host" ]] || {
+        printf "%b[run]%b Warning: mount path does not exist: %s\n" "$YELLOW" "$NC" "$host" >&2
+        continue
+      }
+
+      if [[ -z "$cont" ]]; then
+        base="${host##*/}"
+        cont="/mnt/${base}"
+      fi
+      [[ "$cont" == /* ]] || cont="/mnt/${cont}"
+
+      args+=(-v "$host:$cont")
+    done
+  fi
 
   # Optional: allow containers to talk to Docker (DinD via host socket)
   if [[ "${sock:-0}" == 1 ]]; then
@@ -2124,7 +2184,7 @@ run_start() {
 
   # Publish ports: pass multiple --publish/-p flags from cmd_run
   local pub
-  for pub in "$@"; do
+  for pub in "${pubs[@]}"; do
     [[ -n "$pub" ]] || continue
     args+=(-p "$pub")
   done
@@ -2352,18 +2412,18 @@ cmd_run() {
   #   lds run open [--port P]          # open first published port (or P) in browser
   #
   # Flags:
-  #   --dir PATH                          # run from another directory
   #   --name NAME                         # container name override
   #   --tag TAG                           # image tag override
   #   --no-build                          # do not build
   #   --no-keepalive                      # run image's default CMD/ENTRYPOINT
   #   --sock                              # mount docker sock: /var/run/docker.sock
   #   -p|--publish HOST:CONT              # publish port (repeatable)
+  #   --mount HOST[:CONT]                 # mount file/dir into container (repeatable)
   #   --port CONT_PORT                    # for 'open': choose container port
   #   --path /some/path                   # for 'open': default /
   #   --https                             # for 'open': use https
   local action="shell" dir="$PWD" name="" tag="" nobuild=0 keepalive=1 sock=0
-  local -a publish=()
+  local -a publish=() mounts=()
   local open_port="" open_path="/" open_proto="http"
 
   while [[ $# -gt 0 ]]; do
@@ -2371,10 +2431,6 @@ cmd_run() {
     stop | rm | ps | shell | logs | open)
       action="$1"
       shift
-      ;;
-    --dir)
-      dir="${2:-}"
-      shift 2
       ;;
     --name)
       name="${2:-}"
@@ -2398,6 +2454,10 @@ cmd_run() {
       ;;
     -p | --publish)
       publish+=("${2:-}")
+      shift 2
+      ;;
+    --mount)
+      mounts+=("${2:-}")
       shift 2
       ;;
     --port)
@@ -2500,7 +2560,9 @@ cmd_run() {
     existing="$(_find_for_dir)" || true
     if [[ -n "${existing:-}" ]]; then
       img="$(docker inspect -f '{{.Config.Image}}' "$existing" 2>/dev/null || true)"
-      docker rm -f "$existing" >/dev/null
+      # Stop first, then remove (more predictable than rm -f).
+      docker stop "$existing" >/dev/null 2>&1 || true
+      docker rm "$existing" >/dev/null 2>&1 || true
       printf "%b[run]%b Removed container %s
 " "$GREEN" "$NC" "$existing"
       if [[ -n "${img:-}" ]]; then
@@ -2530,7 +2592,9 @@ cmd_run() {
       if docker inspect "$name" >/dev/null 2>&1; then
         docker rm -f "$name" >/dev/null 2>&1 || true
       fi
-      run_start "$name" "$tag" "$dir" "$keepalive" "$sock" "${publish[@]}"
+      # Pass publishes, then "--", then mounts (parsed by run_start).
+      run_start "$name" "$tag" "$dir" "$keepalive" "$sock" \
+        "${publish[@]}" -- "${mounts[@]}"
     fi
 
     run_exec_shell "$name"
@@ -2592,7 +2656,8 @@ ${CYAN}Run (ad-hoc Dockerfile runner):${NC}
   run ps|logs|stop|rm          Manage the ad-hoc container for current directory
   run open [port]             Open published port URL (best-effort)
   run --publish|-p A:B         Publish ports (repeatable)
-  run --keepalive              Keep container running (exec later)
+  run --no-keepalive           Run image CMD/ENTRYPOINT (no infinite sleep)
+  run --mount HOST[:CONT]      Mount extra dir/file (repeatable)
   run --sock                   Mount /var/run/docker.sock into container (DinD style)
 
 ${CYAN}Shortcuts:${NC}
