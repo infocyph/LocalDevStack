@@ -2210,6 +2210,155 @@ run_exec_shell() {
   fi
 }
 
+cmd_run() {
+  local action="shell" dir="$PWD" name="" tag="" nobuild=0 keepalive=1 sock=0
+  local -a publish=() mounts=()
+  local open_port="" open_path="/" open_proto="http"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+    stop|rm|ps|shell|logs|open) action="$1"; shift ;;
+    --name)         name="${2:-}"; shift 2 ;;
+    --tag)          tag="${2:-}"; shift 2 ;;
+    --no-build)     nobuild=1; shift ;;
+    --no-keepalive) keepalive=0; shift ;;
+    --sock)         sock=1; shift ;;
+    -p|--publish)   publish+=("${2:-}"); shift 2 ;;
+    --mount)        mounts+=("${2:-}"); shift 2 ;;
+    --port)         open_port="${2:-}"; shift 2 ;;
+    --path)         open_path="${2:-/}"; shift 2 ;;
+    --https)        open_proto="https"; shift ;;
+    --http)         open_proto="http"; shift ;;
+    *) break ;;
+    esac
+  done
+
+  # Host path (POSIX) for planning/labels
+  local dir_posix
+  dir_posix="$(cd "$dir" && pwd -P)"
+
+  # Docker path (may need Windows form for docker.exe)
+  local dir_docker="$dir_posix"
+
+  # Windows Git Bash/MSYS hardening:
+  # - stop MSYS rewriting container paths (/workspace -> D:/Program Files/Git/workspace)
+  # - but still feed docker.exe Windows-absolute host paths for build/run contexts
+  if is_windows_shell; then
+    export MSYS_NO_PATHCONV=1
+    export MSYS2_ARG_CONV_EXCL='*'
+    if command -v cygpath >/dev/null 2>&1; then
+      dir_docker="$(cygpath -w "$dir_posix")"
+    fi
+  fi
+
+  # Plan/name/tag should be based on the real project identity (POSIX dir)
+  IFS='|' read -r def_name def_tag _def_dir < <(run_plan "$dir_posix")
+  name="${name:-$def_name}"
+  tag="${tag:-$def_tag}"
+
+  _find_for_dir() {
+    local found
+    found="$(run_find_container "$dir_posix" || true)"
+    if [[ -n "$found" ]]; then
+      printf '%s' "$found"
+      return 0
+    fi
+    if docker inspect "$name" >/dev/null 2>&1; then
+      printf '%s' "$name"
+      return 0
+    fi
+    return 1
+  }
+
+  case "$action" in
+  ps)
+    docker ps -a --filter "label=com.infocyph.lds.run=1" \
+      --format 'table {{.Names}}	{{.Image}}	{{.Status}}	{{.Labels}}'
+    return 0
+    ;;
+  stop)
+    local existing
+    existing="$(_find_for_dir)" || die "no run container found for: $dir_posix"
+    docker stop "$existing" >/dev/null
+    printf "%b[run]%b Stopped %s\n" "$GREEN" "$NC" "$existing"
+    return 0
+    ;;
+  logs)
+    local existing
+    existing="$(_find_for_dir)" || die "no run container found for: $dir_posix"
+    exec docker logs -f "$existing"
+    ;;
+  open)
+    local existing line addr hp url
+    existing="$(_find_for_dir)" || die "no run container found for: $dir_posix"
+
+    [[ -n "$open_path" ]] || open_path="/"
+    [[ "$open_path" == /* ]] || open_path="/$open_path"
+
+    if [[ -n "$open_port" ]]; then
+      line="$(docker port "$existing" "$open_port" 2>/dev/null | head -n 1 || true)"
+      [[ -n "$line" ]] || line="$(docker port "$existing" "${open_port}/tcp" 2>/dev/null | head -n 1 || true)"
+    else
+      line="$(docker port "$existing" 2>/dev/null | head -n 1 || true)"
+    fi
+
+    if [[ -z "$line" ]]; then
+      printf "%b[run]%b No published ports found.\n" "$YELLOW" "$NC"
+      printf "%b[run]%b Tip: start with %blds run --publish 8025:8025%b then %blds run open%b\n" \
+        "$YELLOW" "$NC" "$BLUE" "$NC" "$BLUE" "$NC"
+      return 1
+    fi
+
+    addr="${line##*-> }"
+    hp="${addr##*:}"
+    url="${open_proto}://localhost:${hp}${open_path}"
+    open_url "$url"
+    printf "%b[run]%b Opened: %s\n" "$GREEN" "$NC" "$url"
+    return 0
+    ;;
+  rm)
+    local existing img
+    existing="$(_find_for_dir)" || true
+    if [[ -n "${existing:-}" ]]; then
+      img="$(docker inspect -f '{{.Config.Image}}' "$existing" 2>/dev/null || true)"
+      docker stop "$existing" >/dev/null 2>&1 || true
+      docker rm "$existing" >/dev/null 2>&1 || true
+      printf "%b[run]%b Removed container %s\n" "$GREEN" "$NC" "$existing"
+      if [[ -n "${img:-}" ]]; then
+        docker rmi -f "$img" >/dev/null 2>&1 || true
+        printf "%b[run]%b Removed image %s\n" "$GREEN" "$NC" "$img"
+      fi
+    else
+      printf "%b[run]%b No container found for %s\n" "$YELLOW" "$NC" "$dir_posix"
+    fi
+    return 0
+    ;;
+  shell|*)
+    if ((nobuild == 0)); then
+      # Build needs docker.exe-friendly path on Windows
+      run_build "$tag" "$dir_docker"
+    else
+      printf "%b[run]%b Skipping build (--no-build)\n" "$YELLOW" "$NC"
+    fi
+
+    if docker inspect -f '{{.State.Running}}' "$name" 2>/dev/null | grep -q true; then
+      printf "%b[run]%b Container already running: %s\n" "$GREEN" "$NC" "$name"
+    else
+      if docker inspect "$name" >/dev/null 2>&1; then
+        docker rm -f "$name" >/dev/null 2>&1 || true
+      fi
+
+      # Keep mounts as user gave them (POSIX/relative); run_start should validate POSIX
+      # and convert host-side to Windows only at docker run time.
+      run_start "$name" "$tag" "$dir_docker" "$keepalive" "$sock" \
+        "${publish[@]}" -- "${mounts[@]}"
+    fi
+
+    run_exec_shell "$name"
+    ;;
+  esac
+}
+
 cmd_vpn-fix() {
   set -euo pipefail
 
@@ -2439,155 +2588,6 @@ cmd_vpn-fix() {
   echo "VPN routes: ${#vpn_subnets[@]} subnets"
   echo "Docker bridges: ${br_ifs[*]}"
   ((dry_run)) && echo "Note: dry-run mode, nothing changed."
-}
-
-cmd_run() {
-  local action="shell" dir="$PWD" name="" tag="" nobuild=0 keepalive=1 sock=0
-  local -a publish=() mounts=()
-  local open_port="" open_path="/" open_proto="http"
-
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-    stop|rm|ps|shell|logs|open) action="$1"; shift ;;
-    --name)         name="${2:-}"; shift 2 ;;
-    --tag)          tag="${2:-}"; shift 2 ;;
-    --no-build)     nobuild=1; shift ;;
-    --no-keepalive) keepalive=0; shift ;;
-    --sock)         sock=1; shift ;;
-    -p|--publish)   publish+=("${2:-}"); shift 2 ;;
-    --mount)        mounts+=("${2:-}"); shift 2 ;;
-    --port)         open_port="${2:-}"; shift 2 ;;
-    --path)         open_path="${2:-/}"; shift 2 ;;
-    --https)        open_proto="https"; shift ;;
-    --http)         open_proto="http"; shift ;;
-    *) break ;;
-    esac
-  done
-
-  # Host path (POSIX) for planning/labels
-  local dir_posix
-  dir_posix="$(cd "$dir" && pwd -P)"
-
-  # Docker path (may need Windows form for docker.exe)
-  local dir_docker="$dir_posix"
-
-  # Windows Git Bash/MSYS hardening:
-  # - stop MSYS rewriting container paths (/workspace -> D:/Program Files/Git/workspace)
-  # - but still feed docker.exe Windows-absolute host paths for build/run contexts
-  if is_windows_shell; then
-    export MSYS_NO_PATHCONV=1
-    export MSYS2_ARG_CONV_EXCL='*'
-    if command -v cygpath >/dev/null 2>&1; then
-      dir_docker="$(cygpath -w "$dir_posix")"
-    fi
-  fi
-
-  # Plan/name/tag should be based on the real project identity (POSIX dir)
-  IFS='|' read -r def_name def_tag _def_dir < <(run_plan "$dir_posix")
-  name="${name:-$def_name}"
-  tag="${tag:-$def_tag}"
-
-  _find_for_dir() {
-    local found
-    found="$(run_find_container "$dir_posix" || true)"
-    if [[ -n "$found" ]]; then
-      printf '%s' "$found"
-      return 0
-    fi
-    if docker inspect "$name" >/dev/null 2>&1; then
-      printf '%s' "$name"
-      return 0
-    fi
-    return 1
-  }
-
-  case "$action" in
-  ps)
-    docker ps -a --filter "label=com.infocyph.lds.run=1" \
-      --format 'table {{.Names}}	{{.Image}}	{{.Status}}	{{.Labels}}'
-    return 0
-    ;;
-  stop)
-    local existing
-    existing="$(_find_for_dir)" || die "no run container found for: $dir_posix"
-    docker stop "$existing" >/dev/null
-    printf "%b[run]%b Stopped %s\n" "$GREEN" "$NC" "$existing"
-    return 0
-    ;;
-  logs)
-    local existing
-    existing="$(_find_for_dir)" || die "no run container found for: $dir_posix"
-    exec docker logs -f "$existing"
-    ;;
-  open)
-    local existing line addr hp url
-    existing="$(_find_for_dir)" || die "no run container found for: $dir_posix"
-
-    [[ -n "$open_path" ]] || open_path="/"
-    [[ "$open_path" == /* ]] || open_path="/$open_path"
-
-    if [[ -n "$open_port" ]]; then
-      line="$(docker port "$existing" "$open_port" 2>/dev/null | head -n 1 || true)"
-      [[ -n "$line" ]] || line="$(docker port "$existing" "${open_port}/tcp" 2>/dev/null | head -n 1 || true)"
-    else
-      line="$(docker port "$existing" 2>/dev/null | head -n 1 || true)"
-    fi
-
-    if [[ -z "$line" ]]; then
-      printf "%b[run]%b No published ports found.\n" "$YELLOW" "$NC"
-      printf "%b[run]%b Tip: start with %blds run --publish 8025:8025%b then %blds run open%b\n" \
-        "$YELLOW" "$NC" "$BLUE" "$NC" "$BLUE" "$NC"
-      return 1
-    fi
-
-    addr="${line##*-> }"
-    hp="${addr##*:}"
-    url="${open_proto}://localhost:${hp}${open_path}"
-    open_url "$url"
-    printf "%b[run]%b Opened: %s\n" "$GREEN" "$NC" "$url"
-    return 0
-    ;;
-  rm)
-    local existing img
-    existing="$(_find_for_dir)" || true
-    if [[ -n "${existing:-}" ]]; then
-      img="$(docker inspect -f '{{.Config.Image}}' "$existing" 2>/dev/null || true)"
-      docker stop "$existing" >/dev/null 2>&1 || true
-      docker rm "$existing" >/dev/null 2>&1 || true
-      printf "%b[run]%b Removed container %s\n" "$GREEN" "$NC" "$existing"
-      if [[ -n "${img:-}" ]]; then
-        docker rmi -f "$img" >/dev/null 2>&1 || true
-        printf "%b[run]%b Removed image %s\n" "$GREEN" "$NC" "$img"
-      fi
-    else
-      printf "%b[run]%b No container found for %s\n" "$YELLOW" "$NC" "$dir_posix"
-    fi
-    return 0
-    ;;
-  shell|*)
-    if ((nobuild == 0)); then
-      # Build needs docker.exe-friendly path on Windows
-      run_build "$tag" "$dir_docker"
-    else
-      printf "%b[run]%b Skipping build (--no-build)\n" "$YELLOW" "$NC"
-    fi
-
-    if docker inspect -f '{{.State.Running}}' "$name" 2>/dev/null | grep -q true; then
-      printf "%b[run]%b Container already running: %s\n" "$GREEN" "$NC" "$name"
-    else
-      if docker inspect "$name" >/dev/null 2>&1; then
-        docker rm -f "$name" >/dev/null 2>&1 || true
-      fi
-
-      # Keep mounts as user gave them (POSIX/relative); run_start should validate POSIX
-      # and convert host-side to Windows only at docker run time.
-      run_start "$name" "$tag" "$dir_docker" "$keepalive" "$sock" \
-        "${publish[@]}" -- "${mounts[@]}"
-    fi
-
-    run_exec_shell "$name"
-    ;;
-  esac
 }
 
 cmd_help() {
