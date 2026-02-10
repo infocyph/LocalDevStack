@@ -10,8 +10,6 @@ services:
     hostname: redis
     image: redis/redis-stack-server:${REDIS_VERSION:-latest}
     profiles: [redis]
-    ports:
-      - "${REDIS_PORT:-6379}:6379"
     volumes:
       - ../../data/redis:/data
     environment:
@@ -66,8 +64,6 @@ services:
     hostname: mysql
     image: mysql:${MYSQL_VERSION:-latest}
     profiles: [mysql]
-    ports:
-      - "${MYSQL_PORT:-3306}:3306"
     environment:
       - TZ=${TZ:-}
       - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-12345}
@@ -92,8 +88,6 @@ services:
     hostname: mongodb
     image: mongo:${MONGODB_VERSION:-latest}
     profiles: [mongodb]
-    ports:
-      - "${MONGODB_PORT:-27017}:27017"
     environment:
       - TZ=${TZ:-}
       - MONGO_INITDB_ROOT_USERNAME=${MONGODB_ROOT_USERNAME:-root}
@@ -119,8 +113,6 @@ services:
     hostname: mariadb
     image: mariadb:${MARIADB_VERSION:-latest}
     profiles: [mariadb]
-    ports:
-      - "${MARIADB_PORT:-3306}:3306"
     environment:
       - TZ=${TZ:-}
       - MARIADB_ROOT_PASSWORD=${MARIADB_ROOT_PASSWORD:-12345}
@@ -143,10 +135,8 @@ services:
     <<: *db-service
     container_name: ELASTICSEARCH
     hostname: elasticsearch
-    image: elasticsearch:${ELASTICSEARCH_VERSION:-8.18.0}
+    image: elasticsearch:${ELASTICSEARCH_VERSION:-9.2.4}
     profiles: [elasticsearch]
-    ports:
-      - "${ELASTICSEARCH_PORT:-9200}:9200"
     environment:
       - TZ=${TZ:-}
       - "discovery.type=single-node"

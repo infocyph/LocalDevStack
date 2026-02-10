@@ -455,12 +455,12 @@ declare -A SERVICES=(
 declare -a SERVICE_ORDER=(POSTGRESQL MYSQL MARIADB ELASTICSEARCH MONGODB REDIS)
 
 declare -A PROFILE_ENV=(
-  [elasticsearch]="ELASTICSEARCH_VERSION=9.2.4 ELASTICSEARCH_PORT=9200"
-  [mysql]="MYSQL_VERSION=latest MYSQL_PORT=3306 MYSQL_ROOT_PASSWORD=12345 MYSQL_USER=infocyph MYSQL_PASSWORD=12345 MYSQL_DATABASE=localdb"
-  [mariadb]="MARIADB_VERSION=latest MARIADB_PORT=3306 MARIADB_ROOT_PASSWORD=12345 MARIADB_USER=infocyph MARIADB_PASSWORD=12345 MARIADB_DATABASE=localdb"
-  [mongodb]="MONGODB_VERSION=latest MONGODB_PORT=27017 MONGODB_ROOT_USERNAME=root MONGODB_ROOT_PASSWORD=12345"
-  [redis]="REDIS_VERSION=latest REDIS_PORT=6379"
-  [postgresql]="POSTGRES_VERSION=latest POSTGRES_PORT=5432 POSTGRES_USER=postgres POSTGRES_PASSWORD=postgres POSTGRES_DATABASE=postgres"
+  [elasticsearch]="ELASTICSEARCH_VERSION=9.2.4"
+  [mysql]="MYSQL_VERSION=latest MYSQL_ROOT_PASSWORD=12345 MYSQL_USER=infocyph MYSQL_PASSWORD=12345 MYSQL_DATABASE=localdb"
+  [mariadb]="MARIADB_VERSION=latest MARIADB_ROOT_PASSWORD=12345 MARIADB_USER=infocyph MARIADB_PASSWORD=12345 MARIADB_DATABASE=localdb"
+  [mongodb]="MONGODB_VERSION=latest MONGODB_ROOT_USERNAME=root MONGODB_ROOT_PASSWORD=12345"
+  [redis]="REDIS_VERSION=latest"
+  [postgresql]="POSTGRES_VERSION=latest POSTGRES_USER=postgres POSTGRES_PASSWORD=postgres POSTGRES_DATABASE=postgres"
 )
 
 declare -a PENDING_ENVS=()
@@ -747,6 +747,11 @@ env_init() {
 # ─────────────────────────────────────────────────────────────────────────────
 # Root CA helpers (cross-distro)
 # ─────────────────────────────────────────────────────────────────────────────
+
+# Unique identity (avoid conflicts with other mkcert/dev CAs)
+CA_BASENAME="localdevstack-rootca"
+CA_NICK="LocalDevStack Root CA"
+
 detect_os_family() {
   # Output: "id|like"
   # Must never fail under set -e
@@ -788,25 +793,20 @@ ca_plan() {
 
   case " $os_id $os_like " in
   *" debian "* | *" ubuntu "* | *" linuxmint "* | *" pop "* | *" raspbian "*)
-    printf 'debian|/usr/local/share/ca-certificates/rootCA.crt|update-ca-certificates
-'
+    printf "debian|/usr/local/share/ca-certificates/${CA_BASENAME}.crt|update-ca-certificates\n"
     ;;
   *" alpine "*)
-    printf 'alpine|/usr/local/share/ca-certificates/rootCA.crt|update-ca-certificates
-'
+    printf "alpine|/usr/local/share/ca-certificates/${CA_BASENAME}.crt|update-ca-certificates\n"
     ;;
   *" fedora "* | *" rhel "* | *" redhat "* | *" centos "* | *" rocky "* | *" alma "* | *" amzn "* | *" amazon "* | *" sles "* | *" suse "*)
-    printf 'rhel|/etc/pki/ca-trust/source/anchors/rootCA.crt|update-ca-trust
-'
+    printf "rhel|/etc/pki/ca-trust/source/anchors/${CA_BASENAME}.crt|update-ca-trust\n"
     ;;
   *" arch "* | *" manjaro "*)
-    printf 'arch|/etc/ca-certificates/trust-source/anchors/rootCA.crt|trust
-'
+    printf "arch|/etc/ca-certificates/trust-source/anchors/${CA_BASENAME}.crt|trust\n"
     ;;
   *)
     # best default: Debian-style location (works on many distros even if updater differs)
-    printf 'fallback|/usr/local/share/ca-certificates/rootCA.crt|
-'
+    printf "fallback|/usr/local/share/ca-certificates/${CA_BASENAME}.crt|\n"
     ;;
   esac
 }
@@ -818,6 +818,33 @@ is_windows_shell() {
 need_windows_tools() {
   command -v cygpath >/dev/null 2>&1 || die "Windows certificate install needs 'cygpath' (Git Bash)."
   command -v powershell.exe >/dev/null 2>&1 || die "Windows certificate install needs 'powershell.exe' on PATH."
+}
+
+# Import CA into the invoking user's NSS DB (Chrome/Chromium/Firefox on many Linux setups)
+install_ca_nss_user() {
+  local ca_file="$1"
+  command -v certutil >/dev/null 2>&1 || return 0
+
+  local user="${SUDO_USER:-}"
+  [[ -n "$user" && "$user" != "root" ]] || return 0
+
+  local home
+  home="$(getent passwd "$user" | cut -d: -f6)"
+  [[ -n "$home" && -d "$home" ]] || return 0
+
+  local nssdb="sql:${home}/.pki/nssdb"
+  sudo -u "$user" mkdir -p "${home}/.pki/nssdb" >/dev/null 2>&1 || true
+
+  if sudo -u "$user" certutil -d "$nssdb" -L 2>/dev/null | grep -Fq "$CA_NICK"; then
+    printf "%b✔ NSS already has CA%b (%s)\n" "$GREEN" "$NC" "$user"
+    return 0
+  fi
+
+  if sudo -u "$user" certutil -d "$nssdb" -A -n "$CA_NICK" -t "C,," -i "$ca_file" >/dev/null 2>&1; then
+    printf "%b✔ Imported CA into NSS%b (%s)\n" "$GREEN" "$NC" "$user"
+  else
+    printf "%bWARN%b: NSS import failed (certutil).\n" "$YELLOW" "$NC" >&2
+  fi
 }
 
 install_ca_windows() {
@@ -835,6 +862,7 @@ install_ca_windows() {
     \$ErrorActionPreference = 'Stop'
     \$path = '$win_ca'
     \$cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2(\$path)
+    \$cert.FriendlyName = '$CA_NICK'
 
     \$store = New-Object System.Security.Cryptography.X509Certificates.X509Store('Root','CurrentUser')
     \$store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
@@ -845,8 +873,91 @@ install_ca_windows() {
     \$store.Close()
   " >/dev/null 2>&1 || die "Windows certificate install failed (PowerShell import)."
 
-  printf "%bRoot CA installed on Windows%b (CurrentUser\\Root)\n" "$GREEN" "$NC"
+  printf "%bRoot CA installed on Windows%b (CurrentUser\\Root) as %s\n" "$GREEN" "$NC" "$CA_NICK"
   printf "%bNote:%b restart browsers if they still show trust errors.\n" "$YELLOW" "$NC"
+}
+
+install_ca() {
+  if is_windows_shell; then
+    install_ca_windows
+    return 0
+  fi
+
+  local src_ca="$DIR/configuration/rootCA/rootCA.pem"
+  [[ ${EUID:-$(id -u)} -eq 0 ]] || die "certificate install requires sudo"
+  [[ -r "$src_ca" ]] || die "certificate not found: $src_ca"
+
+  local family dest updater os_id os_like
+  IFS='|' read -r os_id os_like < <(detect_os_family)
+  IFS='|' read -r family dest updater < <(ca_plan)
+
+  printf "%bInstalling root CA…%b\n" "$CYAN" "$NC"
+  printf "%bDetected OS%b: id=%s like=%s → %s\n" "$CYAN" "$NC" "$os_id" "$os_like" "$family"
+
+  install -d -m 755 "$(dirname "$dest")"
+  install -m 644 "$src_ca" "$dest"
+  printf "%b✔ Copied%b → %s\n" "$GREEN" "$NC" "$dest"
+
+  case "$family" in
+  debian | alpine)
+    if command -v update-ca-certificates >/dev/null 2>&1; then
+      printf "%bUpdating trust store%b (update-ca-certificates)…\n" "$CYAN" "$NC"
+      if update-ca-certificates; then
+        printf "%b✔ Trust store updated%b\n" "$GREEN" "$NC"
+        printf "%bNote:%b If you see \"rehash: skipping ca-certificates.crt…\", that’s normal (it’s a bundle).\n" "$YELLOW" "$NC"
+      else
+        printf "%bWARN%b: update-ca-certificates failed. CA is installed but may not be active yet.\n" "$YELLOW" "$NC" >&2
+      fi
+    else
+      printf "%bWARN%b: update-ca-certificates not found. CA is installed but auto-update is unavailable.\n" "$YELLOW" "$NC" >&2
+    fi
+
+    # Optional p11-kit sync: best-effort only (can be missing helper on minimal installs)
+    if command -v trust >/dev/null 2>&1; then
+      printf "%bSyncing p11-kit%b (trust extract-compat)…\n" "$CYAN" "$NC"
+      if trust extract-compat >/dev/null 2>&1; then
+        printf "%b✔ p11-kit trust synced%b\n" "$GREEN" "$NC"
+      else
+        printf "%bWARN%b: trust extract-compat failed (helper missing on some installs). Skipping.\n" "$YELLOW" "$NC" >&2
+      fi
+    else
+      printf "%bINFO%b: 'trust' not found — skipping p11-kit sync.\n" "$YELLOW" "$NC"
+    fi
+    ;;
+  rhel)
+    if command -v update-ca-trust >/dev/null 2>&1; then
+      printf "%bUpdating trust store%b (update-ca-trust extract)…\n" "$CYAN" "$NC"
+      if update-ca-trust extract; then
+        printf "%b✔ Trust store updated%b\n" "$GREEN" "$NC"
+      else
+        printf "%bWARN%b: update-ca-trust extract failed. CA is installed but may not be active yet.\n" "$YELLOW" "$NC" >&2
+      fi
+    else
+      printf "%bWARN%b: update-ca-trust not found. CA is installed but auto-update is unavailable.\n" "$YELLOW" "$NC" >&2
+    fi
+    ;;
+  arch)
+    if command -v trust >/dev/null 2>&1; then
+      printf "%bUpdating trust store%b (trust extract-compat)…\n" "$CYAN" "$NC"
+      if trust extract-compat >/dev/null 2>&1; then
+        printf "%b✔ Trust store updated%b\n" "$GREEN" "$NC"
+      else
+        printf "%bWARN%b: trust extract-compat failed. CA is installed, but trust sync may be incomplete.\n" "$YELLOW" "$NC" >&2
+      fi
+    else
+      printf "%bWARN%b: 'trust' not found. CA is installed, but trust sync is unavailable.\n" "$YELLOW" "$NC" >&2
+    fi
+    ;;
+  *)
+    printf "%bINFO%b: Unknown distro; CA copied to %s.\n" "$YELLOW" "$NC" "$dest"
+    printf "%bINFO%b: You may need to update trust store manually for your OS.\n" "$YELLOW" "$NC"
+    ;;
+  esac
+
+  # Extra: ensure browsers that rely on NSS trust pick it up
+  install_ca_nss_user "$src_ca"
+
+  printf "%bRoot CA installed%b → %s (%s)\n" "$GREEN" "$NC" "$dest" "$CA_NICK"
 }
 
 uninstall_ca_windows() {
@@ -885,103 +996,20 @@ uninstall_ca_windows() {
   fi
 }
 
-install_ca() {
-  if is_windows_shell; then
-    install_ca_windows
-    return 0
+uninstall_ca_nss_user() {
+  command -v certutil >/dev/null 2>&1 || return 0
+  local user="${SUDO_USER:-}"
+  [[ -n "$user" && "$user" != "root" ]] || return 0
+
+  local home
+  home="$(getent passwd "$user" | cut -d: -f6)"
+  [[ -n "$home" && -d "$home" ]] || return 0
+
+  local nssdb="sql:${home}/.pki/nssdb"
+  if sudo -u "$user" certutil -d "$nssdb" -L 2>/dev/null | grep -Fq "$CA_NICK"; then
+    sudo -u "$user" certutil -d "$nssdb" -D -n "$CA_NICK" >/dev/null 2>&1 || true
+    printf "%b✔ Removed CA from NSS%b (%s)\n" "$GREEN" "$NC" "$user"
   fi
-
-  local src_ca="$DIR/configuration/rootCA/rootCA.pem"
-  [[ ${EUID:-$(id -u)} -eq 0 ]] || die "certificate install requires sudo"
-  [[ -r "$src_ca" ]] || die "certificate not found: $src_ca"
-
-  local family dest updater os_id os_like
-  IFS='|' read -r os_id os_like < <(detect_os_family)
-  IFS='|' read -r family dest updater < <(ca_plan)
-
-  printf "%bInstalling root CA…%b
-" "$CYAN" "$NC"
-  printf "%bDetected OS%b: id=%s like=%s → %s
-" "$CYAN" "$NC" "$os_id" "$os_like" "$family"
-
-  install -d -m 755 "$(dirname "$dest")"
-  install -m 644 "$src_ca" "$dest"
-  printf "%b✔ Copied%b → %s
-" "$GREEN" "$NC" "$dest"
-
-  case "$family" in
-  debian | alpine)
-    if command -v update-ca-certificates >/dev/null 2>&1; then
-      printf "%bUpdating trust store%b (update-ca-certificates)…\n" "$CYAN" "$NC"
-      if update-ca-certificates; then
-        printf "%b✔ Trust store updated%b
-" "$GREEN" "$NC"
-        printf "%bNote:%b If you see \"rehash: skipping ca-certificates.crt…\", that’s normal (it’s a bundle).
-" "$YELLOW" "$NC"
-      else
-        printf "%bWARN%b: update-ca-certificates failed. CA is installed but may not be active yet.
-" "$YELLOW" "$NC" >&2
-      fi
-    else
-      printf "%bWARN%b: update-ca-certificates not found. CA is installed but auto-update is unavailable.
-" "$YELLOW" "$NC" >&2
-    fi
-
-    # Optional p11-kit sync: best-effort only (can be missing helper on minimal installs)
-    if command -v trust >/dev/null 2>&1; then
-      printf "%bSyncing p11-kit%b (trust extract-compat)…\n" "$CYAN" "$NC"
-      if trust extract-compat >/dev/null 2>&1; then
-        printf "%b✔ p11-kit trust synced%b
-" "$GREEN" "$NC"
-      else
-        printf "%bWARN%b: trust extract-compat failed (helper missing on some installs). Skipping.
-" "$YELLOW" "$NC" >&2
-      fi
-    else
-      printf "%bINFO%b: 'trust' not found — skipping p11-kit sync.
-" "$YELLOW" "$NC"
-    fi
-    ;;
-  rhel)
-    if command -v update-ca-trust >/dev/null 2>&1; then
-      printf "%bUpdating trust store%b (update-ca-trust extract)…\n" "$CYAN" "$NC"
-      if update-ca-trust extract; then
-        printf "%b✔ Trust store updated%b
-" "$GREEN" "$NC"
-      else
-        printf "%bWARN%b: update-ca-trust extract failed. CA is installed but may not be active yet.
-" "$YELLOW" "$NC" >&2
-      fi
-    else
-      printf "%bWARN%b: update-ca-trust not found. CA is installed but auto-update is unavailable.
-" "$YELLOW" "$NC" >&2
-    fi
-    ;;
-  arch)
-    if command -v trust >/dev/null 2>&1; then
-      printf "%bUpdating trust store%b (trust extract-compat)…\n" "$CYAN" "$NC"
-      if trust extract-compat >/dev/null 2>&1; then
-        printf "%b✔ Trust store updated%b
-" "$GREEN" "$NC"
-      else
-        printf "%bWARN%b: trust extract-compat failed. CA is installed, but trust sync may be incomplete.
-" "$YELLOW" "$NC" >&2
-      fi
-    else
-      printf "%bWARN%b: 'trust' not found. CA is installed, but trust sync is unavailable.
-" "$YELLOW" "$NC" >&2
-    fi
-    ;;
-  *)
-    printf "%bINFO%b: Unknown distro; CA copied to %s.
-" "$YELLOW" "$NC" "$dest"
-    printf "%bINFO%b: You may need to update trust store manually for your OS.
-" "$YELLOW" "$NC"
-    ;;
-  esac
-
-  printf "%bRoot CA installed%b → %s
-" "$GREEN" "$NC" "$dest"
 }
 
 uninstall_ca() {
@@ -1002,86 +1030,69 @@ uninstall_ca() {
   IFS='|' read -r os_id os_like < <(detect_os_family)
   IFS='|' read -r family dest updater < <(ca_plan)
 
-  printf "%bUninstalling root CA…%b
-" "$CYAN" "$NC"
-  printf "%bDetected OS%b: id=%s like=%s → %s
-" "$CYAN" "$NC" "$os_id" "$os_like" "$family"
+  printf "%bUninstalling root CA…%b\n" "$CYAN" "$NC"
+  printf "%bDetected OS%b: id=%s like=%s → %s\n" "$CYAN" "$NC" "$os_id" "$os_like" "$family"
 
-  # Always remove the planned destination first
   local removed=0
+
   if [[ -e "$dest" ]]; then
     rm -f "$dest"
     removed=$((removed + 1))
-    printf "%b✔ Removed%b → %s
-" "$GREEN" "$NC" "$dest"
+    printf "%b✔ Removed%b → %s\n" "$GREEN" "$NC" "$dest"
   else
-    printf "%bINFO%b: CA file not found at %s (nothing to remove)
-" "$YELLOW" "$NC" "$dest"
+    printf "%bINFO%b: CA file not found at %s (nothing to remove)\n" "$YELLOW" "$NC" "$dest"
   fi
 
-  # Optional: remove from all common anchor locations (for people who switched distros/paths)
   if ((all)); then
-    printf "%bScanning all known CA anchor paths…%b
-" "$CYAN" "$NC"
+    printf "%bScanning all known CA anchor paths…%b\n" "$CYAN" "$NC"
     local f
     for f in \
-      /usr/local/share/ca-certificates/rootCA.crt \
-      /usr/local/share/ca-certificates/rootCA.pem \
-      /etc/pki/ca-trust/source/anchors/rootCA.crt \
-      /etc/pki/ca-trust/source/anchors/rootCA.pem \
-      /etc/ca-certificates/trust-source/anchors/rootCA.crt \
-      /etc/ca-certificates/trust-source/anchors/rootCA.pem; do
+      "/usr/local/share/ca-certificates/${CA_BASENAME}.crt" \
+      "/usr/local/share/ca-certificates/${CA_BASENAME}.pem" \
+      "/etc/pki/ca-trust/source/anchors/${CA_BASENAME}.crt" \
+      "/etc/pki/ca-trust/source/anchors/${CA_BASENAME}.pem" \
+      "/etc/ca-certificates/trust-source/anchors/${CA_BASENAME}.crt" \
+      "/etc/ca-certificates/trust-source/anchors/${CA_BASENAME}.pem"; do
       [[ "$f" == "$dest" ]] && continue
       if [[ -e "$f" ]]; then
         rm -f "$f"
         removed=$((removed + 1))
-        printf "%b✔ Removed%b → %s
-" "$GREEN" "$NC" "$f"
+        printf "%b✔ Removed%b → %s\n" "$GREEN" "$NC" "$f"
       fi
     done
   fi
 
-  # Refresh trust store (best-effort, do not fail uninstall)
   case "$family" in
   debian | alpine)
     if command -v update-ca-certificates >/dev/null 2>&1; then
       printf "%bUpdating trust store%b (update-ca-certificates)…\n" "$CYAN" "$NC"
-      update-ca-certificates || printf "%bWARN%b: update-ca-certificates failed.
-" "$YELLOW" "$NC" >&2
+      update-ca-certificates || printf "%bWARN%b: update-ca-certificates failed.\n" "$YELLOW" "$NC" >&2
     else
-      printf "%bWARN%b: update-ca-certificates not found; trust store not refreshed.
-" "$YELLOW" "$NC" >&2
+      printf "%bWARN%b: update-ca-certificates not found; trust store not refreshed.\n" "$YELLOW" "$NC" >&2
     fi
 
-    # Optional p11-kit sync: best-effort only
     if command -v trust >/dev/null 2>&1; then
       printf "%bSyncing p11-kit%b (trust extract-compat)…\n" "$CYAN" "$NC"
-      trust extract-compat >/dev/null 2>&1 || printf "%bWARN%b: trust extract-compat failed. Skipping.
-" "$YELLOW" "$NC" >&2
+      trust extract-compat >/dev/null 2>&1 || printf "%bWARN%b: trust extract-compat failed. Skipping.\n" "$YELLOW" "$NC" >&2
     fi
     ;;
   rhel)
     if command -v update-ca-trust >/dev/null 2>&1; then
       printf "%bUpdating trust store%b (update-ca-trust extract)…\n" "$CYAN" "$NC"
-      update-ca-trust extract || printf "%bWARN%b: update-ca-trust extract failed.
-" "$YELLOW" "$NC" >&2
+      update-ca-trust extract || printf "%bWARN%b: update-ca-trust extract failed.\n" "$YELLOW" "$NC" >&2
     else
-      printf "%bWARN%b: update-ca-trust not found; trust store not refreshed.
-" "$YELLOW" "$NC" >&2
+      printf "%bWARN%b: update-ca-trust not found; trust store not refreshed.\n" "$YELLOW" "$NC" >&2
     fi
     ;;
   arch)
     if command -v trust >/dev/null 2>&1; then
       printf "%bUpdating trust store%b (trust extract-compat)…\n" "$CYAN" "$NC"
-      trust extract-compat >/dev/null 2>&1 || printf "%bWARN%b: trust extract-compat failed.
-" "$YELLOW" "$NC" >&2
+      trust extract-compat >/dev/null 2>&1 || printf "%bWARN%b: trust extract-compat failed.\n" "$YELLOW" "$NC" >&2
     else
-      printf "%bWARN%b: 'trust' not found; trust store not refreshed.
-" "$YELLOW" "$NC" >&2
+      printf "%bWARN%b: 'trust' not found; trust store not refreshed.\n" "$YELLOW" "$NC" >&2
     fi
     ;;
   *)
-    # If unknown family, try what exists
     if command -v update-ca-certificates >/dev/null 2>&1; then
       printf "%bUpdating trust store%b (update-ca-certificates)…\n" "$CYAN" "$NC"
       update-ca-certificates || true
@@ -1094,17 +1105,16 @@ uninstall_ca() {
       printf "%bSyncing p11-kit%b (trust extract-compat)…\n" "$CYAN" "$NC"
       trust extract-compat >/dev/null 2>&1 || true
     fi
-    printf "%bINFO%b: Unknown distro; removed CA file(s) if present. Refresh trust store manually if needed.
-" "$YELLOW" "$NC"
+    printf "%bINFO%b: Unknown distro; removed CA file(s) if present. Refresh trust store manually if needed.\n" "$YELLOW" "$NC"
     ;;
   esac
 
+  uninstall_ca_nss_user
+
   if ((removed)); then
-    printf "%bRoot CA uninstalled%b (removed %d file(s))
-" "$GREEN" "$NC" "$removed"
+    printf "%bRoot CA uninstalled%b (removed %d file(s))\n" "$GREEN" "$NC" "$removed"
   else
-    printf "%bRoot CA already absent%b (no files removed)
-" "$YELLOW" "$NC"
+    printf "%bRoot CA already absent%b (no files removed)\n" "$YELLOW" "$NC"
   fi
 }
 
@@ -2104,37 +2114,119 @@ run_start() {
   local name="$1" tag="$2" dir="$3" keepalive="$4" sock="$5"
   shift 5 || true
 
+  # Remaining args are split by a "--" sentinel:
+  #   - before "--" : publish specs (HOST:CONT), repeatable
+  #   - after "--"  : mount specs (HOST[:CONT]), repeatable
+  local -a pubs=() mounts=()
+  local seen_delim=0 x
+  for x in "$@"; do
+    if [[ "$x" == "--" ]]; then
+      seen_delim=1
+      continue
+    fi
+    if ((seen_delim)); then
+      mounts+=("$x")
+    else
+      pubs+=("$x")
+    fi
+  done
+
+  # Normalize project dir (POSIX absolute).
+  # On Windows Git Bash, /e/... is OK; docker.exe will receive converted path automatically.
+  local dir_posix
+  dir_posix="$(cd "$dir" 2>/dev/null && pwd -P)" || die "invalid dir: $dir"
+
+  # MSYS-safe container paths: use '//' prefix to prevent path conversion.
+  # Docker interprets //path as /path inside container.
+  local WDIR="//workspace"
+  local WDIR_MOUNT="${dir_posix}://workspace"
+
   local -a args=(docker run -d --name "$name"
     --label "com.infocyph.lds.run=1"
-    --label "com.infocyph.lds.dir=$dir"
+    --label "com.infocyph.lds.dir=$dir_posix"
     --label "com.infocyph.lds.tag=$tag"
-    -w /workspace
-    -v "$dir:/workspace"
+    -w "$WDIR"
+    -v "$WDIR_MOUNT"
   )
 
-  # Optional: allow containers to talk to Docker (DinD via host socket)
+  # Mount extra directories/files (HOST[:CONT]).
+  # - If container path missing, mounts under /mnt/<basename>.
+  # - HOST may be relative to the run directory.
+  if ((${#mounts[@]})); then
+    local spec host cont base
+    for spec in "${mounts[@]}"; do
+      [[ -n "$spec" ]] || continue
+      host="$spec"
+      cont=""
+
+      # Split as HOST:CONT ONLY if suffix after last ':' looks like a container absolute path (/...)
+      # (safe for Windows drive letters like E:\... because tail won't start with '/')
+      if [[ "$spec" == *:* ]]; then
+        local tail="${spec##*:}"
+        if [[ "$tail" == /* ]]; then
+          host="${spec%:*}"
+          cont="$tail"
+        fi
+      fi
+
+      # Resolve host to absolute (POSIX) for checks
+      if [[ "$host" != /* && "$host" != ~* && ! "$host" =~ ^[A-Za-z]:[\\/].* ]]; then
+        host="${dir_posix%/}/$host"
+      fi
+
+      # If user provided Windows path (E:\...), convert to POSIX for existence check
+      if [[ "$host" =~ ^[A-Za-z]:[\\/].* ]] && command -v cygpath >/dev/null 2>&1; then
+        host="$(cygpath -u "$host")"
+      fi
+
+      host="$(cd "${host%/*}" 2>/dev/null && pwd -P)/${host##*/}" || {
+        printf "%b[run]%b Warning: cannot resolve mount path: %s\n" "$YELLOW" "$NC" "$spec" >&2
+        continue
+      }
+
+      [[ -e "$host" ]] || {
+        printf "%b[run]%b Warning: mount path does not exist: %s\n" "$YELLOW" "$NC" "$host" >&2
+        continue
+      }
+
+      if [[ -z "$cont" ]]; then
+        base="${host##*/}"
+        cont="/mnt/${base}"
+      fi
+      [[ "$cont" == /* ]] || cont="/mnt/${cont}"
+
+      # Prevent MSYS conversion for container side by using '//' prefix
+      cont="//${cont#/}"
+
+      args+=(-v "${host}:${cont}")
+    done
+  fi
+
+  # Optional docker sock
   if [[ "${sock:-0}" == 1 ]]; then
-    [[ -S /var/run/docker.sock ]] || printf "%b[run]%b Warning: /var/run/docker.sock not found on host, mount may fail.\n" "$YELLOW" "$NC" >&2
     args+=(-v "/var/run/docker.sock:/var/run/docker.sock")
   fi
 
-  # Publish ports: pass multiple --publish/-p flags from cmd_run
+  # Publish ports
   local pub
-  for pub in "$@"; do
+  for pub in "${pubs[@]}"; do
     [[ -n "$pub" ]] || continue
     args+=(-p "$pub")
   done
 
   if [[ "$keepalive" == 1 ]]; then
-    # keep container alive even if image CMD exits (good for "exec bash" workflow)
     args+=(--entrypoint sh "$tag" -c "trap : TERM INT; sleep infinity & wait")
   else
     args+=("$tag")
   fi
 
-  printf "%b[run]%b Starting container %b%s%b
-" "$CYAN" "$NC" "$BLUE" "$name" "$NC"
-  "${args[@]}" >/dev/null
+  printf "%b[run]%b Starting container %b%s%b\n" "$CYAN" "$NC" "$BLUE" "$name" "$NC"
+
+  # IMPORTANT: don't hide errors; if it fails, you need to see why
+  if ! "${args[@]}"; then
+    printf "%b[run]%b docker run failed.\n" "$RED" "$NC" >&2
+    return 1
+  fi
 }
 
 run_exec_shell() {
@@ -2146,281 +2238,9 @@ run_exec_shell() {
   fi
 }
 
-cmd_vpn-fix() {
-  set -euo pipefail
-
-  local dry_run=0 rollback=0
-  case "${1:-}" in
-  --dry-run)
-    dry_run=1
-    shift || true
-    ;;
-  --rollback)
-    rollback=1
-    shift || true
-    ;;
-  esac
-
-  local SUDO=""
-  if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
-    command -v sudo >/dev/null 2>&1 || {
-      echo "Error: need root or sudo"
-      return 1
-    }
-    SUDO="sudo"
-  fi
-
-  command -v ip >/dev/null 2>&1 || {
-    echo "Error: ip not found"
-    return 1
-  }
-  command -v iptables >/dev/null 2>&1 || {
-    echo "Error: iptables not found"
-    return 1
-  }
-
-  _run() {
-    if ((dry_run)); then
-      printf '[dry-run] %q ' "$@"
-      echo
-    else
-      "$@"
-    fi
-  }
-
-  # ---------------------------
-  # Detect docker bridges (docker0 + br-*)
-  # ---------------------------
-  local br_ifs=()
-  while IFS= read -r ifc; do br_ifs+=("$ifc"); done < <(
-    ip -br link 2>/dev/null |
-      awk '$1 ~ /^(docker0|br-[0-9a-f]{12})$/ {print $1}' |
-      LC_ALL=C sort -u || true
-  )
-
-  if ((${#br_ifs[@]} == 0)); then
-    echo "No docker bridge interfaces found (docker0 / br-*)."
-    return 3
-  fi
-
-  # ---------------------------
-  # Detect VPN interfaces
-  # ---------------------------
-  local vpn_ifs=()
-  while IFS= read -r ifc; do vpn_ifs+=("$ifc"); done < <(
-    ip -br link 2>/dev/null |
-      awk '$2 ~ /UP/ {print $1}' |
-      grep -E '^(tun|tap|wg|ppp|cscotun|utun|tailscale|zt|nordlynx|proton|vpn)[0-9]*$' |
-      LC_ALL=C sort -u || true
-  )
-
-  if ((${#vpn_ifs[@]} == 0)); then
-    echo "No VPN interface detected (tun*/wg*/ppp*/cscotun*/utun*)."
-    echo "Tip: run: ip -br link  (If you are actually running VPN then open an issue)"
-    return 2
-  fi
-
-  # ---------------------------
-  # IPv4 forwarding
-  # ---------------------------
-  if [[ -r /proc/sys/net/ipv4/ip_forward ]]; then
-    local ipf
-    ipf="$(cat /proc/sys/net/ipv4/ip_forward 2>/dev/null || echo 0)"
-    if [[ "$ipf" != "1" ]]; then
-      _run $SUDO sysctl -w net.ipv4.ip_forward=1 >/dev/null
-    fi
-  fi
-
-  local TAG="lds:vpn-fix"
-
-  _ipt_append_if_missing() {
-    local table="$1"
-    shift
-    local chain="$1"
-    shift
-    if _run $SUDO iptables -t "$table" -C "$chain" "$@" 2>/dev/null; then
-      return 0
-    fi
-    _run $SUDO iptables -t "$table" -A "$chain" "$@"
-  }
-
-  _ipt_delete_if_present() {
-    local table="$1"
-    shift
-    local chain="$1"
-    shift
-    if $SUDO iptables -t "$table" -C "$chain" "$@" >/dev/null 2>&1; then
-      _run $SUDO iptables -t "$table" -D "$chain" "$@"
-    fi
-  }
-
-  local vpnif brif subnet
-  for vpnif in "${vpn_ifs[@]}"; do
-    local -a subnets=()
-    while IFS= read -r subnet; do
-      [[ -n "$subnet" ]] && subnets+=("$subnet")
-    done < <(
-      ip -4 route show dev "$vpnif" 2>/dev/null |
-        awk '{print $1}' |
-        grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+$' |
-        LC_ALL=C sort -u || true
-    )
-
-    if ((${#subnets[@]} == 0)); then
-      echo "Warning: $vpnif has no IPv4 routed subnets; skipping scoped rules."
-      continue
-    fi
-
-    for subnet in "${subnets[@]}"; do
-      # NAT only towards VPN-routed subnets
-      if ((rollback)); then
-        _ipt_delete_if_present nat POSTROUTING -o "$vpnif" -d "$subnet" -j MASQUERADE -m comment --comment "$TAG"
-      else
-        _ipt_append_if_missing nat POSTROUTING -o "$vpnif" -d "$subnet" -j MASQUERADE -m comment --comment "$TAG"
-      fi
-
-      # Forward only towards VPN-routed subnets (and allow return traffic)
-      for brif in "${br_ifs[@]}"; do
-        if ((rollback)); then
-          _ipt_delete_if_present filter FORWARD -i "$brif" -o "$vpnif" -d "$subnet" -j ACCEPT -m comment --comment "$TAG"
-          _ipt_delete_if_present filter FORWARD -i "$vpnif" -o "$brif" -s "$subnet" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT -m comment --comment "$TAG"
-        else
-          _ipt_append_if_missing filter FORWARD -i "$brif" -o "$vpnif" -d "$subnet" -j ACCEPT -m comment --comment "$TAG"
-          _ipt_append_if_missing filter FORWARD -i "$vpnif" -o "$brif" -s "$subnet" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT -m comment --comment "$TAG"
-        fi
-      done
-    done
-  done
-
-  # ---------------------------
-  # IPv6 (best-effort, scoped; skip if not actually in use)
-  # ---------------------------
-  if command -v ip6tables >/dev/null 2>&1; then
-    local docker_has_v6=0 vpn_has_v6=0
-
-    for brif in "${br_ifs[@]}"; do
-      if ip -o -6 addr show dev "$brif" 2>/dev/null | grep -q 'inet6 '; then
-        docker_has_v6=1
-        break
-      fi
-    done
-
-    for vpnif in "${vpn_ifs[@]}"; do
-      if ip -o -6 addr show dev "$vpnif" 2>/dev/null | grep -q 'inet6 '; then
-        vpn_has_v6=1
-        break
-      fi
-    done
-
-    if ((docker_has_v6 && vpn_has_v6)); then
-      # enable IPv6 forwarding
-      if [[ -r /proc/sys/net/ipv6/conf/all/forwarding ]]; then
-        local ip6f
-        ip6f="$(cat /proc/sys/net/ipv6/conf/all/forwarding 2>/dev/null || echo 0)"
-        if [[ "$ip6f" != "1" ]]; then
-          _run $SUDO sysctl -w net.ipv6.conf.all.forwarding=1 >/dev/null
-        fi
-      fi
-
-      _ip6t_append_if_missing() {
-        local table="$1"
-        shift
-        local chain="$1"
-        shift
-        if _run $SUDO ip6tables -t "$table" -C "$chain" "$@" 2>/dev/null; then
-          return 0
-        fi
-        _run $SUDO ip6tables -t "$table" -A "$chain" "$@"
-      }
-
-      _ip6t_delete_if_present() {
-        local table="$1"
-        shift
-        local chain="$1"
-        shift
-        if $SUDO ip6tables -t "$table" -C "$chain" "$@" >/dev/null 2>&1; then
-          _run $SUDO ip6tables -t "$table" -D "$chain" "$@"
-        fi
-      }
-
-      local v6subnet
-      for vpnif in "${vpn_ifs[@]}"; do
-        local -a v6subnets=()
-        while IFS= read -r v6subnet; do
-          [[ -n "$v6subnet" ]] && v6subnets+=("$v6subnet")
-        done < <(
-          ip -6 route show dev "$vpnif" 2>/dev/null |
-            awk '{print $1}' |
-            grep -E '^[0-9a-fA-F:]+/[0-9]+$' |
-            LC_ALL=C sort -u || true
-        )
-
-        # If VPN has no explicit v6 routes, don't try to be clever.
-        ((${#v6subnets[@]})) || {
-          echo "IPv6: $vpnif has no routed IPv6 subnets; skipped."
-          continue
-        }
-
-        for v6subnet in "${v6subnets[@]}"; do
-          for brif in "${br_ifs[@]}"; do
-            if ((rollback)); then
-              _ip6t_delete_if_present filter FORWARD -i "$brif" -o "$vpnif" -d "$v6subnet" -j ACCEPT -m comment --comment "$TAG"
-              _ip6t_delete_if_present filter FORWARD -i "$vpnif" -o "$brif" -s "$v6subnet" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT -m comment --comment "$TAG"
-            else
-              _ip6t_append_if_missing filter FORWARD -i "$brif" -o "$vpnif" -d "$v6subnet" -j ACCEPT -m comment --comment "$TAG"
-              _ip6t_append_if_missing filter FORWARD -i "$vpnif" -o "$brif" -s "$v6subnet" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT -m comment --comment "$TAG"
-            fi
-          done
-
-          # NAT66 optional: only if nat table exists
-          if $SUDO ip6tables -t nat -L >/dev/null 2>&1; then
-            if ((rollback)); then
-              _ip6t_delete_if_present nat POSTROUTING -o "$vpnif" -d "$v6subnet" -j MASQUERADE -m comment --comment "$TAG"
-            else
-              _ip6t_append_if_missing nat POSTROUTING -o "$vpnif" -d "$v6subnet" -j MASQUERADE -m comment --comment "$TAG"
-            fi
-          fi
-        done
-      done
-    else
-      echo "IPv6: skipped (Docker bridges or VPN interface have no IPv6 addresses)."
-    fi
-  else
-    echo "IPv6: skipped (ip6tables not installed)."
-  fi
-
-  if ((rollback)); then
-    echo "OK: vpn-fix rolled back ($TAG)."
-  else
-    echo "OK: vpn-fix applied ($TAG)."
-    echo "VPN interfaces: ${vpn_ifs[*]}"
-    echo "Docker bridges: ${br_ifs[*]}"
-    ((dry_run)) && echo "Note: dry-run mode, nothing changed."
-  fi
-}
-
 cmd_run() {
-  # Usage:
-  #   lds run                          # build+start+exec for current directory
-  #   lds run stop                     # stop container for current directory
-  #   lds run rm                       # remove container (and image tag) for current directory
-  #   lds run ps                       # list run containers
-  #   lds run logs                     # follow logs for current directory container
-  #   lds run open [--port P]          # open first published port (or P) in browser
-  #
-  # Flags:
-  #   --dir PATH                          # run from another directory
-  #   --name NAME                         # container name override
-  #   --tag TAG                           # image tag override
-  #   --no-build                          # do not build
-  #   --no-keepalive                      # run image's default CMD/ENTRYPOINT
-  #   --sock                              # mount docker sock: /var/run/docker.sock
-  #   -p|--publish HOST:CONT              # publish port (repeatable)
-  #   --port CONT_PORT                    # for 'open': choose container port
-  #   --path /some/path                   # for 'open': default /
-  #   --https                             # for 'open': use https
   local action="shell" dir="$PWD" name="" tag="" nobuild=0 keepalive=1 sock=0
-  local -a publish=()
+  local -a publish=() mounts=()
   local open_port="" open_path="/" open_proto="http"
 
   while [[ $# -gt 0 ]]; do
@@ -2428,10 +2248,6 @@ cmd_run() {
     stop | rm | ps | shell | logs | open)
       action="$1"
       shift
-      ;;
-    --dir)
-      dir="${2:-}"
-      shift 2
       ;;
     --name)
       name="${2:-}"
@@ -2457,6 +2273,10 @@ cmd_run() {
       publish+=("${2:-}")
       shift 2
       ;;
+    --mount)
+      mounts+=("${2:-}")
+      shift 2
+      ;;
     --port)
       open_port="${2:-}"
       shift 2
@@ -2477,20 +2297,36 @@ cmd_run() {
     esac
   done
 
-  dir="$(cd "$dir" && pwd)"
-  IFS='|' read -r def_name def_tag _def_dir < <(run_plan "$dir")
+  # Host path (POSIX) for planning/labels
+  local dir_posix
+  dir_posix="$(cd "$dir" && pwd -P)"
+
+  # Docker path (may need Windows form for docker.exe)
+  local dir_docker="$dir_posix"
+
+  # Windows Git Bash/MSYS hardening:
+  # - stop MSYS rewriting container paths (/workspace -> D:/Program Files/Git/workspace)
+  # - but still feed docker.exe Windows-absolute host paths for build/run contexts
+  if is_windows_shell; then
+    export MSYS_NO_PATHCONV=1
+    export MSYS2_ARG_CONV_EXCL='*'
+    if command -v cygpath >/dev/null 2>&1; then
+      dir_docker="$(cygpath -w "$dir_posix")"
+    fi
+  fi
+
+  # Plan/name/tag should be based on the real project identity (POSIX dir)
+  IFS='|' read -r def_name def_tag _def_dir < <(run_plan "$dir_posix")
   name="${name:-$def_name}"
   tag="${tag:-$def_tag}"
 
-  # Helper to locate "the" container for a dir
   _find_for_dir() {
     local found
-    found="$(run_find_container "$dir" || true)"
+    found="$(run_find_container "$dir_posix" || true)"
     if [[ -n "$found" ]]; then
       printf '%s' "$found"
       return 0
     fi
-    # fallback to explicit name if present
     if docker inspect "$name" >/dev/null 2>&1; then
       printf '%s' "$name"
       return 0
@@ -2506,50 +2342,42 @@ cmd_run() {
     ;;
   stop)
     local existing
-    existing="$(_find_for_dir)" || die "no run container found for: $dir"
+    existing="$(_find_for_dir)" || die "no run container found for: $dir_posix"
     docker stop "$existing" >/dev/null
-    printf "%b[run]%b Stopped %s
-" "$GREEN" "$NC" "$existing"
+    printf "%b[run]%b Stopped %s\n" "$GREEN" "$NC" "$existing"
     return 0
     ;;
   logs)
     local existing
-    existing="$(_find_for_dir)" || die "no run container found for: $dir"
+    existing="$(_find_for_dir)" || die "no run container found for: $dir_posix"
     exec docker logs -f "$existing"
     ;;
   open)
     local existing line addr hp url
-    existing="$(_find_for_dir)" || die "no run container found for: $dir"
+    existing="$(_find_for_dir)" || die "no run container found for: $dir_posix"
 
-    # Normalize path
     [[ -n "$open_path" ]] || open_path="/"
     [[ "$open_path" == /* ]] || open_path="/$open_path"
 
     if [[ -n "$open_port" ]]; then
       line="$(docker port "$existing" "$open_port" 2>/dev/null | head -n 1 || true)"
-      # Some docker versions require proto, try tcp as fallback
       [[ -n "$line" ]] || line="$(docker port "$existing" "${open_port}/tcp" 2>/dev/null | head -n 1 || true)"
     else
       line="$(docker port "$existing" 2>/dev/null | head -n 1 || true)"
     fi
 
     if [[ -z "$line" ]]; then
-      printf "%b[run]%b No published ports found.
-" "$YELLOW" "$NC"
-      printf "%b[run]%b Tip: start with %blds run --publish 8025:8025%b then %blds run open%b
-" \
+      printf "%b[run]%b No published ports found.\n" "$YELLOW" "$NC"
+      printf "%b[run]%b Tip: start with %blds run --publish 8025:8025%b then %blds run open%b\n" \
         "$YELLOW" "$NC" "$BLUE" "$NC" "$BLUE" "$NC"
       return 1
     fi
 
-    # Example line: "8025/tcp -> 0.0.0.0:8025"
     addr="${line##*-> }"
     hp="${addr##*:}"
-
     url="${open_proto}://localhost:${hp}${open_path}"
     open_url "$url"
-    printf "%b[run]%b Opened: %s
-" "$GREEN" "$NC" "$url"
+    printf "%b[run]%b Opened: %s\n" "$GREEN" "$NC" "$url"
     return 0
     ;;
   rm)
@@ -2557,42 +2385,309 @@ cmd_run() {
     existing="$(_find_for_dir)" || true
     if [[ -n "${existing:-}" ]]; then
       img="$(docker inspect -f '{{.Config.Image}}' "$existing" 2>/dev/null || true)"
-      docker rm -f "$existing" >/dev/null
-      printf "%b[run]%b Removed container %s
-" "$GREEN" "$NC" "$existing"
+      docker stop "$existing" >/dev/null 2>&1 || true
+      docker rm "$existing" >/dev/null 2>&1 || true
+      printf "%b[run]%b Removed container %s\n" "$GREEN" "$NC" "$existing"
       if [[ -n "${img:-}" ]]; then
         docker rmi -f "$img" >/dev/null 2>&1 || true
-        printf "%b[run]%b Removed image %s
-" "$GREEN" "$NC" "$img"
+        printf "%b[run]%b Removed image %s\n" "$GREEN" "$NC" "$img"
       fi
     else
-      printf "%b[run]%b No container found for %s
-" "$YELLOW" "$NC" "$dir"
+      printf "%b[run]%b No container found for %s\n" "$YELLOW" "$NC" "$dir_posix"
     fi
     return 0
     ;;
   shell | *)
     if ((nobuild == 0)); then
-      run_build "$tag" "$dir"
+      # Build needs docker.exe-friendly path on Windows
+      run_build "$tag" "$dir_docker"
     else
-      printf "%b[run]%b Skipping build (--no-build)
-" "$YELLOW" "$NC"
+      printf "%b[run]%b Skipping build (--no-build)\n" "$YELLOW" "$NC"
     fi
 
     if docker inspect -f '{{.State.Running}}' "$name" 2>/dev/null | grep -q true; then
-      printf "%b[run]%b Container already running: %s
-" "$GREEN" "$NC" "$name"
+      printf "%b[run]%b Container already running: %s\n" "$GREEN" "$NC" "$name"
     else
-      # if a previous container with same name exists but stopped, remove it
       if docker inspect "$name" >/dev/null 2>&1; then
         docker rm -f "$name" >/dev/null 2>&1 || true
       fi
-      run_start "$name" "$tag" "$dir" "$keepalive" "$sock" "${publish[@]}"
+
+      # Keep mounts as user gave them (POSIX/relative); run_start should validate POSIX
+      # and convert host-side to Windows only at docker run time.
+      run_start "$name" "$tag" "$dir_docker" "$keepalive" "$sock" \
+        "${publish[@]}" -- "${mounts[@]}"
     fi
 
     run_exec_shell "$name"
     ;;
   esac
+}
+
+cmd_vpn-fix() {
+  set -euo pipefail
+
+  local dry_run=0 rollback=0 debug=0
+  while [[ "${1:-}" ]]; do
+    case "$1" in
+    --dry-run)
+      dry_run=1
+      shift
+      ;;
+    --rollback)
+      rollback=1
+      shift
+      ;;
+    --debug)
+      debug=1
+      shift
+      ;;
+    *) break ;;
+    esac
+  done
+
+  local SUDO=""
+  if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+    command -v sudo >/dev/null 2>&1 || {
+      echo "Error: need root or sudo"
+      return 1
+    }
+    SUDO="sudo"
+  fi
+
+  command -v ip >/dev/null 2>&1 || {
+    echo "Error: ip not found"
+    return 1
+  }
+  command -v iptables >/dev/null 2>&1 || {
+    echo "Error: iptables not found"
+    return 1
+  }
+
+  local TAG="lds:vpn-fix"
+  local CISCO_CHAIN="ciscovpn"
+
+  _run() {
+    if ((dry_run)); then
+      printf '[dry-run] %q ' "$@"
+      echo
+    else
+      "$@"
+    fi
+  }
+
+  _sysctl_set() {
+    local key="$1" val="$2"
+    if ((dry_run)); then
+      echo "[dry-run] sysctl -w $key=$val"
+      return 0
+    fi
+    $SUDO sysctl -w "$key=$val" >/dev/null 2>&1 || true
+  }
+
+  _chain_exists() { $SUDO iptables -S "$1" >/dev/null 2>&1; }
+  _chain_exists_t() { $SUDO iptables -t "$1" -S "$2" >/dev/null 2>&1; }
+
+  # ---------------------------
+  # docker bridges: docker0 + br-*
+  # ---------------------------
+  local br_ifs=()
+  while IFS= read -r ifc; do br_ifs+=("$ifc"); done < <(
+    ip -o link show 2>/dev/null |
+      awk -F': ' '{n=$2; sub(/ .*/,"",n); sub(/@.*/,"",n); print n}' |
+      grep -E '^(docker0|br-[0-9a-f]{12})$' |
+      LC_ALL=C sort -u || true
+  )
+  ((${#br_ifs[@]})) || {
+    echo "Error: no docker bridges found (docker0 / br-*)."
+    return 3
+  }
+
+  declare -A BR_CIDRS=()
+  local brif
+  for brif in "${br_ifs[@]}"; do
+    local cidrs
+    cidrs="$(ip -o -4 addr show dev "$brif" 2>/dev/null | awk '{print $4}' | xargs || true)"
+    [[ -n "$cidrs" ]] && BR_CIDRS["$brif"]="$cidrs"
+  done
+
+  # ---------------------------
+  # VPN iface detection
+  # ---------------------------
+  local vpnif=""
+  vpnif="$(ip -o link show 2>/dev/null | awk -F': ' '/cscotun[0-9]+/ {print $2}' | head -n1 | awk '{print $1}' | sed 's/@.*//' || true)"
+  if [[ -z "$vpnif" ]]; then
+    vpnif="$(ip -o link show 2>/dev/null |
+      awk -F': ' '/<[^>]*UP[^>]*>/ { n=$2; sub(/ .*/,"",n); sub(/@.*/,"",n); print n }' |
+      grep -E '^(tun|tap|wg|ppp|utun|tailscale|zt|nordlynx|proton|vpn)[0-9A-Za-z._-]*$' |
+      head -n1 || true)"
+  fi
+  [[ -n "$vpnif" ]] || {
+    echo "Error: no VPN interface detected."
+    return 4
+  }
+
+  local vpn_ip_cidr vpn_ip
+  vpn_ip_cidr="$(ip -o -4 addr show dev "$vpnif" 2>/dev/null | awk '{print $4}' | head -n1 || true)"
+  vpn_ip="${vpn_ip_cidr%%/*}"
+  [[ -n "$vpn_ip" ]] || {
+    echo "Error: VPN iface '$vpnif' has no IPv4 address."
+    return 5
+  }
+
+  # VPN-routed subnets (split tunnel routes)
+  local -a vpn_subnets=()
+  while IFS= read -r s; do [[ -n "$s" ]] && vpn_subnets+=("$s"); done < <(
+    ip -4 route show dev "$vpnif" 2>/dev/null |
+      awk '{print $1}' |
+      grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+$' |
+      LC_ALL=C sort -u || true
+  )
+  ((${#vpn_subnets[@]})) || {
+    echo "Error: no IPv4 routes found via '$vpnif' (split-tunnel list empty)."
+    return 6
+  }
+
+  # Cisco mode if chain exists AND interface looks like Cisco (cscotun*)
+  local mode="universal"
+  if [[ "$vpnif" =~ ^cscotun[0-9]+$ ]] && _chain_exists "$CISCO_CHAIN"; then
+    mode="cisco"
+  fi
+
+  # decide which "forward allow" chain to use for universal
+  # prefer DOCKER-USER if exists, else fallback to FORWARD
+  local FW_CHAIN="FORWARD"
+  if _chain_exists "DOCKER-USER"; then
+    FW_CHAIN="DOCKER-USER"
+  fi
+
+  if ((debug)); then
+    echo "DEBUG: mode=$mode"
+    echo "DEBUG: vpnif=$vpnif"
+    echo "DEBUG: vpn_ip=$vpn_ip"
+    echo "DEBUG: vpn_subnets=${vpn_subnets[*]}"
+    echo "DEBUG: br_ifs=${br_ifs[*]}"
+    echo "DEBUG: fw_chain=$FW_CHAIN"
+    for brif in "${br_ifs[@]}"; do
+      echo "DEBUG: br_cidrs[$brif]=${BR_CIDRS[$brif]:-}"
+    done
+  fi
+
+  # sysctls that commonly break tunnel forwarding
+  [[ -r /proc/sys/net/ipv4/ip_forward ]] && _sysctl_set net.ipv4.ip_forward 1
+  _sysctl_set "net.ipv4.conf.${vpnif}.rp_filter" 0
+  for brif in "${br_ifs[@]}"; do _sysctl_set "net.ipv4.conf.${brif}.rp_filter" 0; done
+
+  # iptables helpers: insert/append idempotently
+  _ipt_ins() {
+    local table="$1"
+    shift
+    local chain="$1"
+    shift
+    local pos="$1"
+    shift
+    if $SUDO iptables -t "$table" -C "$chain" "$@" >/dev/null 2>&1; then return 0; fi
+    _run $SUDO iptables -t "$table" -I "$chain" "$pos" "$@"
+  }
+  _ipt_add() {
+    local table="$1"
+    shift
+    local chain="$1"
+    shift
+    if $SUDO iptables -t "$table" -C "$chain" "$@" >/dev/null 2>&1; then return 0; fi
+    _run $SUDO iptables -t "$table" -A "$chain" "$@"
+  }
+
+  # rollback = remove our tagged rules (best-effort) from all possible chains
+  if ((rollback)); then
+    local ch line
+
+    # filter: Cisco chain (if exists)
+    if _chain_exists "$CISCO_CHAIN"; then
+      while IFS= read -r line; do
+        _run $SUDO iptables ${line/-A /-D } || true
+      done < <($SUDO iptables -S "$CISCO_CHAIN" | grep -F -- "$TAG" || true)
+    fi
+
+    # filter: DOCKER-USER (if exists)
+    if _chain_exists "DOCKER-USER"; then
+      while IFS= read -r line; do
+        _run $SUDO iptables ${line/-A /-D } || true
+      done < <($SUDO iptables -S DOCKER-USER | grep -F -- "$TAG" || true)
+    fi
+
+    # filter: FORWARD (fallback universal inserts can go here)
+    while IFS= read -r line; do
+      _run $SUDO iptables ${line/-A /-D } || true
+    done < <($SUDO iptables -S FORWARD | grep -F -- "$TAG" || true)
+
+    # mangle clamp rules
+    while IFS= read -r line; do
+      _run $SUDO iptables -t mangle ${line/-A /-D } || true
+    done < <($SUDO iptables -t mangle -S FORWARD | grep -F -- "$TAG" || true)
+
+    # nat SNAT rules
+    while IFS= read -r line; do
+      _run $SUDO iptables -t nat ${line/-A /-D } || true
+    done < <($SUDO iptables -t nat -S POSTROUTING | grep -F -- "$TAG" || true)
+
+    echo "OK: vpn-fix rolled back ($TAG)."
+    return 0
+  fi
+
+  # ---------------------------
+  # APPLY RULES
+  # ---------------------------
+  local subnet cidr
+  for subnet in "${vpn_subnets[@]}"; do
+    for brif in "${br_ifs[@]}"; do
+      for cidr in ${BR_CIDRS[$brif]:-}; do
+        [[ -n "$cidr" ]] || continue
+
+        # (C) Clamp MSS on SYN into VPN (helps low MTU tunnels)
+        _ipt_add mangle FORWARD -i "$brif" -o "$vpnif" -p tcp --tcp-flags SYN,RST SYN \
+          -j TCPMSS --clamp-mss-to-pmtu -m comment --comment "$TAG" || true
+
+        # (D) Whitelist-safe SNAT: force source to the VPN assigned IP
+        # Only when going to VPN subnets, not the whole internet.
+        _ipt_add nat POSTROUTING -s "$cidr" -o "$vpnif" -d "$subnet" \
+          -j SNAT --to-source "$vpn_ip" -m comment --comment "$TAG"
+
+        if [[ "$mode" == "cisco" ]]; then
+          # (A) Let docker -> vpn pass Cisco firewall chain
+          # IMPORTANT: insert at top so it wins before "-o cscotun0 DROP"
+          _ipt_ins filter "$CISCO_CHAIN" 1 \
+            -i "$brif" -o "$vpnif" -s "$cidr" -d "$subnet" \
+            -j ACCEPT -m comment --comment "$TAG"
+
+          # (B) Let vpn -> docker reply packets through (Cisco chain)
+          _ipt_ins filter "$CISCO_CHAIN" 1 \
+            -i "$vpnif" -o "$brif" -s "$subnet" -d "$cidr" \
+            -m conntrack --ctstate ESTABLISHED,RELATED \
+            -j ACCEPT -m comment --comment "$TAG"
+        else
+          # UNIVERSAL (non-Cisco):
+          # allow docker -> vpn subnets via VPN interface (in DOCKER-USER if available, else FORWARD)
+          # Insert at top for maximum precedence (esp. if FORWARD policy is DROP)
+          _ipt_ins filter "$FW_CHAIN" 1 \
+            -i "$brif" -o "$vpnif" -s "$cidr" -d "$subnet" \
+            -j ACCEPT -m comment --comment "$TAG"
+
+          # allow return traffic vpn -> docker for established flows
+          _ipt_ins filter "$FW_CHAIN" 1 \
+            -i "$vpnif" -o "$brif" -s "$subnet" -d "$cidr" \
+            -m conntrack --ctstate ESTABLISHED,RELATED \
+            -j ACCEPT -m comment --comment "$TAG"
+        fi
+      done
+    done
+  done
+
+  echo "OK: vpn-fix applied ($TAG)."
+  echo "Mode: $mode"
+  echo "VPN interface: $vpnif ($vpn_ip)"
+  echo "VPN routes: ${#vpn_subnets[@]} subnets"
+  echo "Docker bridges: ${br_ifs[*]}"
+  ((dry_run)) && echo "Note: dry-run mode, nothing changed."
 }
 
 cmd_help() {
@@ -2649,7 +2744,8 @@ ${CYAN}Run (ad-hoc Dockerfile runner):${NC}
   run ps|logs|stop|rm          Manage the ad-hoc container for current directory
   run open [port]             Open published port URL (best-effort)
   run --publish|-p A:B         Publish ports (repeatable)
-  run --keepalive              Keep container running (exec later)
+  run --no-keepalive           Run image CMD/ENTRYPOINT (no infinite sleep)
+  run --mount HOST[:CONT]      Mount extra dir/file (repeatable)
   run --sock                   Mount /var/run/docker.sock into container (DinD style)
 
 ${CYAN}Shortcuts:${NC}
