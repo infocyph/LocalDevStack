@@ -63,7 +63,7 @@ services:
     <<: *db-client-service
     container_name: KIBANA
     hostname: kibana
-    image: kibana:${ELASTICSEARCH_VERSION:-8.18.0}
+    image: kibana:${ELASTICSEARCH_VERSION:-9.2.4}
     profiles: [elasticsearch]
     depends_on:
       - elasticsearch
