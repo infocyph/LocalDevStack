@@ -13,8 +13,6 @@ services:
     profiles: [redis]
     depends_on:
       - redis
-    ports:
-      - "${REDIS_INSIGHT_PORT:-5540}:5540"
     environment:
       - RI_REDIS_HOST=redis
     volumes:
@@ -31,8 +29,6 @@ services:
     hostname: cloud-beaver
     image: dbeaver/cloudbeaver:latest
     profiles: [mysql, mariadb, postgresql]
-    ports:
-      - "${DBEAVER_PORT:-8080}:8978"
     environment:
       - TZ=${TZ:-}
     volumes:
@@ -51,8 +47,6 @@ services:
     profiles: [mongodb]
     depends_on:
       - mongodb
-    ports:
-      - "${MONGO_EXPRESS_PORT:-8081}:8081"
     environment:
       - TZ=${TZ:-}
       - ME_CONFIG_BASICAUTH=false
@@ -73,8 +67,6 @@ services:
     profiles: [elasticsearch]
     depends_on:
       - elasticsearch
-    ports:
-      - "${KIBANA_PORT:-5601}:5601"
     environment:
       - TZ=${TZ:-}
       - "ELASTICSEARCH_HOSTS=http://elasticsearch:9200"
