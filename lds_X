@@ -1,24 +1,49 @@
 #!/usr/bin/env bash
 # Force bash even if invoked via sh
 if [ -z "${BASH_VERSION:-}" ]; then exec /usr/bin/env bash "$0" "$@"; fi
+
 # shellcheck disable=SC1090,SC2155
 
 set -euo pipefail
 
-__lds_realpath() {
-  if command -v readlink >/dev/null 2>&1 && readlink -f / >/dev/null 2>&1; then
-    readlink -f -- "$1"
-  elif command -v greadlink >/dev/null 2>&1; then
-    greadlink -f -- "$1"
-  else
-    python3 - <<'PY' "$1"
-import os,sys
-print(os.path.realpath(sys.argv[1]))
-PY
+###############################################################################
+# 0. PATHS & CONSTANTS
+###############################################################################
+# Resolve script directory portably (Linux/macOS/WSL)
+_realpath() {
+  local p="$1"
+
+  if command -v realpath >/dev/null 2>&1; then
+    realpath "$p"
+    return 0
   fi
+
+  # GNU readlink
+  if readlink -f / >/dev/null 2>&1; then
+    readlink -f "$p"
+    return 0
+  fi
+
+  # macOS with coreutils
+  if command -v greadlink >/dev/null 2>&1; then
+    greadlink -f "$p"
+    return 0
+  fi
+
+  # python fallback
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -c 'import os,sys;print(os.path.realpath(sys.argv[1]))' "$p"
+    return 0
+  fi
+
+  # last resort: absolute physical dir + basename
+  local d b
+  d="$(cd -P -- "$(dirname -- "$p")" 2>/dev/null && pwd -P)" || return 1
+  b="$(basename -- "$p")"
+  printf '%s/%s\n' "$d" "$b"
 }
 
-DIR="$(dirname -- "$(__lds_realpath "$0")")"
+DIR="$(dirname -- "$(_realpath "$0")")"
 CFG="$DIR/docker"
 ENV_MAIN="$DIR/.env"
 ENV_DOCKER="$CFG/.env"
@@ -30,31 +55,17 @@ if [[ "${1:-}" == "--__win_workdir" ]]; then
   shift 2
 fi
 
+COLOR() { printf '\033[%sm' "$1"; }
+RED=$(COLOR '0;31') GREEN=$(COLOR '0;32') CYAN=$(COLOR '0;36')
+YELLOW=$(COLOR '1;33') BLUE=$(COLOR '0;34') MAGENTA=$(COLOR '0;35')
+NC=$(COLOR '0')
+
+# Default behavior: QUIET
 VERBOSE=0
 
-source "$DIR/lib/bootstrap.sh"
-source "$DIR/lib/docker.sh"
-source "$DIR/lib/docker_exec.sh"
-source "$DIR/lib/env.sh"
-source "$DIR/lib/http.sh"
-source "$DIR/lib/perms.sh"
-source "$DIR/lib/profiles.sh"
-source "$DIR/lib/domains.sh"
-source "$DIR/lib/launch.sh"
-source "$DIR/lib/cert.sh"
-source "$DIR/lib/runtime.sh"
-source "$DIR/lib/diag.sh"
-source "$DIR/lib/doctor.sh"
-source "$DIR/lib/secrets.sh"
-source "$DIR/lib/bundle.sh"
-source "$DIR/lib/help.sh"
-source "$DIR/lib/notify.sh"
-source "$DIR/lib/net.sh"
-source "$DIR/lib/open.sh"
-source "$DIR/lib/validate.sh"
-
-trap 'on_error $? $LINENO' ERR
-
+#───────────────────────────────────────────────────────────────────────────────
+# 0. GLOBAL ERROR HANDLER
+#───────────────────────────────────────────────────────────────────────────────
 command_not_found_handle() {
   local unknown="$1"
   [[ $unknown == cmd_* ]] && unknown=${unknown#cmd_}
@@ -64,45 +75,323 @@ command_not_found_handle() {
 }
 
 trap 'on_error $? $LINENO "$BASH_COMMAND"' ERR
+on_error() {
+  printf "\n%bError:%b '%s' failed at line %d (exit %d)\n\n" \
+    "$RED" "$NC" "$3" "$2" "$1"
+  exit "$1"
+}
 
 ###############################################################################
 # 1. COMMON HELPERS
 ###############################################################################
+die() {
+  printf "%bError:%b %s\n" "$RED" "$NC" "$*"
+  exit 1
+}
 
+need() {
+  local group found cmd
+  for group in "$@"; do
+    IFS='|,' read -ra alts <<<"$group"
+    found=0
+    for cmd in "${alts[@]}"; do
+      command -v "$cmd" &>/dev/null && {
+        found=1
+        break
+      }
+    done
+    ((found)) && continue
+    local miss=${alts[*]}
+    miss=${miss// / or }
+    die "Missing command(s): $miss"
+  done
+}
 
+ensure_files_exist() {
+  local rel abs dir
+  for rel in "$@"; do
+    abs="${DIR}${rel}"
+    dir="${abs%/*}"
+
+    if [[ ! -d $dir ]]; then
+      if mkdir -p "$dir" 2>/dev/null; then
+        printf "%b- Created directory %s%b\n" "$YELLOW" "$dir" "$NC"
+      else
+        printf "%b- Warning:%b cannot create directory %s (permissions?)\n" \
+          "$YELLOW" "$NC" "$dir"
+        continue
+      fi
+    elif [[ ! -w $dir ]]; then
+      printf "%b- Warning:%b directory not writable: %s\n" "$YELLOW" "$NC" "$dir"
+    fi
+
+    if [[ -e $abs ]]; then
+      [[ -w $abs ]] || printf "%b- Warning:%b file not writable: %s\n" "$YELLOW" "$NC" "$abs"
+    else
+      if : >"$abs" 2>/dev/null; then
+        printf "%b- Created file %s%b\n" "$YELLOW" "$abs" "$NC"
+      else
+        printf "%b- Error:%b cannot create file %s (permissions?)\n" "$RED" "$NC" "$abs"
+      fi
+    fi
+  done
+}
 
 # ── compose extras (docker/extras/*.y{a,}ml) ────────────────────────────────
 __EXTRAS_LOADED=0
 declare -a __EXTRA_FILES=()
 
+load_extras() {
+  ((__EXTRAS_LOADED)) && return 0
+  __EXTRAS_LOADED=1
 
+  [[ -d "$EXTRAS_DIR" ]] || return 0
+
+  # Stable ordering: later -f overrides earlier.
+  mapfile -t __EXTRA_FILES < <(
+    find "$EXTRAS_DIR" -maxdepth 1 -type f \( -name '*.yaml' -o -name '*.yml' \) 2>/dev/null | sort
+  )
+}
+
+docker_compose() {
+  load_extras
+
+  local -a files=()
+  if ((${#__EXTRA_FILES[@]})); then
+    local f
+    for f in "${__EXTRA_FILES[@]}"; do
+      files+=(-f "$f")
+    done
+  fi
+
+  # Prefer Docker Compose v2 ("docker compose"), fallback to v1 ("docker-compose")
+  local -a dc=(docker compose)
+  if ! docker compose version >/dev/null 2>&1; then
+    dc=(docker-compose)
+  fi
+
+  "${dc[@]}" \
+    --project-directory "$DIR" \
+    -f "$COMPOSE_FILE" \
+    "${files[@]}" \
+    --env-file "$ENV_DOCKER" \
+    "$@"
+}
 
 # ── docker compose wrappers (QUIET by default) ────────────────────────────────
+dc_up() {
+  if ((VERBOSE)); then
+    docker_compose up "$@"
+  else
+    docker_compose up --quiet-pull "$@"
+  fi
+}
 
+dc_pull() {
+  if ((VERBOSE)); then
+    docker_compose pull "$@"
+  else
+    docker_compose pull -q "$@"
+  fi
+}
 
+dc_build() {
+  if ((VERBOSE)); then
+    docker_compose build "$@"
+  else
+    docker_compose build --quiet "$@"
+  fi
+}
 
 # helper for our own minimal logging (still shows in quiet mode)
+logv() { ((VERBOSE)) && printf "%b[%s]%b %s\n" "$CYAN" "${1:-info}" "$NC" "${2:-}" >&2 || true; }
+logq() { printf "%b[%s]%b %s\n" "$CYAN" "${1:-info}" "$NC" "${2:-}" >&2; }
 
 # Unified prompt helper (used by env_init + profiles)
+tty_readline() {
+  # Robust prompt/read across Linux/macOS/WSL/Windows Git Bash.
+  # Prefer stdin when it is a TTY (normal interactive use). If stdin is not a TTY,
+  # fall back to /dev/tty when available.
+  local __var_name="$1" __prompt="$2" __line
 
+  if [[ -t 0 ]]; then
+    # Interactive: show prompt on stderr (so it is never swallowed) and read stdin.
+    printf '%s' "$__prompt" >&2
+    IFS= read -r __line || return 1
+  elif [[ -r /dev/tty ]]; then
+    # Non-interactive stdin (piped) but we still have a controlling terminal.
+    printf '%s' "$__prompt" >/dev/tty
+    IFS= read -r __line </dev/tty || return 1
+  else
+    return 1
+  fi
 
+  printf -v "$__var_name" '%s' "$__line"
+}
+
+read_default() {
+  local prompt=$1 default=$2 input
+  tty_readline input "$(printf '%b%s [default: %s]:%b ' "$CYAN" "$prompt" "$default" "$NC")" || return 1
+  printf '%s' "${input:-$default}"
+}
+
+ask_yes() {
+  local prompt="$1" ans
+  tty_readline ans "$(printf '%b%s (y/n): %b' "$BLUE" "$prompt" "$NC")" || return 1
+  [[ "${ans,,}" == "y" ]]
+}
 
 # ── dotenv quoting: only quote when needed (spaces, tabs, #, quotes, leading/trailing whitespace) ──
+env_quote() {
+  # Wrap in double-quotes and escape backslash + double-quote + newlines
+  local s=${1-}
+  s=${s//\\/\\\\}
+  s=${s//\"/\\\"}
+  s=${s//$'\n'/\\n}
+  printf '"%s"' "$s"
+}
 
+env_quote_if_needed() {
+  local v=${1-}
+
+  # Already quoted (single or double) => keep as-is
+  if [[ "$v" =~ ^\".*\"$ || "$v" =~ ^\'.*\'$ ]]; then
+    printf '%s' "$v"
+    return 0
+  fi
+
+  # Leading/trailing whitespace or any internal whitespace or # or quotes => quote
+  if [[ "$v" =~ ^[[:space:]] || "$v" =~ [[:space:]]$ || "$v" == *$'\t'* || "$v" == *" "* || "$v" == *"#"* || "$v" == *"\""* ]]; then
+    env_quote "$v"
+    return 0
+  fi
+
+  printf '%s' "$v"
+}
 
 # Escape replacement for sed (delimiter '|')
+sed_escape_repl() {
+  local s=${1-}
+  s=${s//\\/\\\\}
+  s=${s//&/\\&}
+  s=${s//|/\\|}
+  printf '%s' "$s"
+}
 
+update_env() {
+  local file=$1 var=$2 val=${3-}
+  mkdir -p "$(dirname "$file")"
+  [[ -f "$file" ]] || {
+    printf "%bFile '%s' not found. Creating one.%b\n" "$YELLOW" "$file" "$NC"
+    : >"$file"
+  }
 
+  # Apply quoting only when needed (spaces etc.)
+  val="$(env_quote_if_needed "$val")"
+
+  # Sed-safe replacement
+  local val_sed
+  val_sed="$(sed_escape_repl "$val")"
+
+  var=$(echo "$var" | sed 's/[]\/$*.^|[]/\\&/g')
+  if grep -qE "^[# ]*$var=" "$file" 2>/dev/null; then
+    sed -Ei "s|^[# ]*($var)=.*|\1=$val_sed|" "$file"
+  else
+    printf "%s=%s\n" "$var" "$val" >>"$file"
+  fi
+}
+
+http_reload() {
+  printf "%bReloading HTTP...%b" "$MAGENTA" "$NC"
+  docker ps -qf name=NGINX &>/dev/null && docker exec NGINX nginx -s reload &>/dev/null || true
+  docker ps -qf name=APACHE &>/dev/null && docker exec APACHE apachectl graceful &>/dev/null || true
+  printf "\r%bHTTP reloaded!   %b\n" "$GREEN" "$NC"
+}
 
 ###############################################################################
 # 2. PERMISSIONS FIX-UP
 ###############################################################################
+add_to_windows_path() {
+  [[ "$OSTYPE" =~ (msys|cygwin) ]] || return 0
+  command -v cygpath >/dev/null 2>&1 || return 0
 
+  # Only add if lds.bat exists where we think it is
+  [[ -f "$DIR/lds.bat" ]] || return 0
+
+  local win_repo
+  win_repo="$(cygpath -w "$DIR")"
+
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "
+    \$t = '$win_repo'
+    \$cur = [Environment]::GetEnvironmentVariable('Path','User')
+    if ([string]::IsNullOrWhiteSpace(\$cur)) { \$cur = '' }
+
+    # Normalize (trim + case-insensitive compare) to avoid duplicates
+    \$parts = \$cur -split ';' | ForEach-Object { \$_.Trim() } | Where-Object { \$_ }
+    \$exists = \$false
+    foreach (\$p in \$parts) { if (\$p.ToLowerInvariant() -eq \$t.ToLowerInvariant()) { \$exists = \$true; break } }
+
+    if (-not \$exists) {
+      \$new = (\$parts + \$t) -join ';'
+      [Environment]::SetEnvironmentVariable('Path', \$new, 'User')
+    }
+  " >/dev/null 2>&1 || true
+}
+
+fix_perms() {
+  if [[ "$OSTYPE" =~ (msys|cygwin) ]]; then
+    add_to_windows_path
+    printf "%bWindows PATH configured.%b\n" "$GREEN" "$NC"
+    return 0
+  fi
+
+  ((EUID == 0)) || die "Please run with sudo."
+
+  chmod 755 "$DIR"
+  chmod 2775 "$DIR/configuration"
+  find "$DIR/configuration" -type f ! -perm 664 -exec chmod 664 {} +
+
+  chmod 755 "$DIR/docker"
+  find "$DIR/docker" -type f ! -perm 644 -exec chmod 644 {} +
+
+  chmod 2777 "$DIR/data"
+  mkdir -p "$DIR/data/cloudbeaver" "$DIR/data/mysql" "$DIR/data/postgresql" "$DIR/data/mongo" \
+    "$DIR/data/mariadb" "$DIR/data/elasticsearch" "$DIR/data/redis" "$DIR/data/mailpit" \
+    "$DIR/data/redis-insight" "$DIR/data/kibana"
+  find "$DIR/data" -mindepth 1 -maxdepth 1 -type d -exec chmod 2777 {} +
+  find "$DIR/data" -type f -exec chmod 666 {} +
+
+  chmod -R 777 "$DIR/logs"
+  chown -R "$USER:docker" "$DIR/logs"
+
+  chmod 755 "$DIR/bin"
+  find "$DIR/bin" -type f -exec chmod +x {} +
+  chmod +x "$DIR/lds"
+
+  ln -fs "$DIR/lds" /usr/local/bin/lds
+  printf "%bPermissions assigned.%b\n" "$GREEN" "$NC"
+}
 
 ###############################################################################
 # 3. DOMAIN & PROFILE UTILITIES
 ###############################################################################
+mkhost() { docker exec SERVER_TOOLS mkhost "$@"; }
+delhost() { docker exec SERVER_TOOLS delhost "$@"; }
 
+setup_domain() {
+  mkhost --RESET
+  docker exec -it SERVER_TOOLS mkhost
+  local php_prof svr_prof node_prof
+  php_prof=$(mkhost --ACTIVE_PHP_PROFILE || true)
+  svr_prof=$(mkhost --APACHE_ACTIVE || true)
+  node_prof=$(mkhost --ACTIVE_NODE_PROFILE || true)
+  [[ -n $php_prof ]] && modify_profiles add "$php_prof"
+  [[ -n $svr_prof ]] && modify_profiles add "$svr_prof"
+  [[ -n $node_prof ]] && modify_profiles add "$node_prof"
+  mkhost --RESET
+  dc_up -d
+  http_reload
+}
 
 cmd_delhost() {
   local domain="${1:-}"
@@ -114,6 +403,41 @@ cmd_delhost() {
   http_reload
 }
 
+modify_profiles() {
+  local action=$1
+  shift
+  local file=$ENV_DOCKER var=COMPOSE_PROFILES
+  local -a existing updated
+
+  if [[ -r $file ]]; then
+    local line value
+    line=$(grep -E "^${var}=" "$file" | tail -n1 || true)
+    value=${line#*=}
+    IFS=',' read -r -a existing <<<"$value"
+  fi
+
+  case $action in
+  add)
+    local p
+    for p; do
+      [[ -n $p && ! " ${existing[*]} " =~ " $p " ]] && updated+=("$p")
+    done
+    updated+=("${existing[@]}")
+    ;;
+  remove)
+    local old
+    for old in "${existing[@]}"; do
+      [[ ! " $* " =~ " $old " ]] && updated+=("$old")
+    done
+    ;;
+  *) die "modify_profiles: invalid action '$action'" ;;
+  esac
+
+  update_env "$file" "$var" "$(
+    IFS=,
+    echo "${updated[*]}"
+  )"
+}
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Profiles
@@ -142,31 +466,283 @@ declare -A PROFILE_ENV=(
 declare -a PENDING_ENVS=()
 declare -a PENDING_PROFILES=()
 
+queue_env() { PENDING_ENVS+=("$1"); }
+queue_profile() { PENDING_PROFILES+=("$1"); }
 
+flush_envs() {
+  local env_file="$ENV_DOCKER" kv key val
+  for kv in "${PENDING_ENVS[@]}"; do
+    IFS='=' read -r key val <<<"$kv"
+    update_env "$env_file" "$key" "$val"
+  done
+}
 
+flush_profiles() {
+  local profile
+  for profile in "${PENDING_PROFILES[@]}"; do
+    modify_profiles add "$profile"
+  done
+}
 
 # ── setup menu (selection-first) ──────────────────────────────────────────────
 
+setup_menu_print() {
+  # Print menu to stderr to avoid stdout buffering in some Windows wrappers.
+  {
+    printf "\n%bSetup profiles%b (will replace previous configuration, if exists):\n\n" "$CYAN" "$NC"
+    local i=1 key slug
+    for key in "${SERVICE_ORDER[@]}"; do
+      slug="${SERVICES[$key]}"
+      printf "  %2d) %-12s  (%s)\n" "$i" "$key" "$slug"
+      i=$((i + 1))
+    done
+    printf "\n  a) ALL\n"
+    printf "  n) NONE / Back\n\n"
+  } >&2
+}
 
 # Parse user selection into indices or ALL/NONE (prints one token per line)
+setup_menu_parse() {
+  local input="${1//[[:space:]]/}"
+  [[ -n "$input" ]] || return 1
+  input="${input//;/,}"
+
+  echo "$input" | tr ',' '\n' | awk '
+    BEGIN { ok=1 }
+    /^[0-9]+-[0-9]+$/ {
+      split($0,a,"-")
+      if (a[1] > a[2]) { t=a[1]; a[1]=a[2]; a[2]=t }
+      for (i=a[1]; i<=a[2]; i++) print i
+      next
+    }
+    /^[0-9]+$/ { print $0; next }
+    /^[aA]$/ { print "ALL"; next }
+    /^[nN]$/ { print "NONE"; next }
+    { ok=0 }
+    END { if (!ok) exit 2 }
+  '
+}
 
 # Outputs: newline-separated service KEYS from SERVICE_ORDER (e.g. MYSQL, REDIS)
+setup_choose_services() {
+  local ans parsed
+  while :; do
+    setup_menu_print
+    tty_readline ans "Select (e.g. 1,3,5 or 2-4 or a): " || return 1
 
+    if ! parsed="$(setup_menu_parse "$ans" 2>/dev/null)"; then
+      printf "%bInvalid selection.%b Try again.\n" "$YELLOW" "$NC"
+      continue
+    fi
 
+    if grep -qx "NONE" <<<"$parsed"; then
+      return 1
+    fi
+
+    if grep -qx "ALL" <<<"$parsed"; then
+      printf "%s\n" "${SERVICE_ORDER[@]}"
+      return 0
+    fi
+
+    # Indices -> keys (de-dupe, preserve order)
+    local -A seen=()
+    local out=()
+    local idx key
+    while IFS= read -r idx; do
+      [[ "$idx" =~ ^[0-9]+$ ]] || continue
+      ((idx >= 1 && idx <= ${#SERVICE_ORDER[@]})) || continue
+      key="${SERVICE_ORDER[idx - 1]}"
+      [[ -n "${seen[$key]:-}" ]] && continue
+      seen[$key]=1
+      out+=("$key")
+    done <<<"$parsed"
+
+    if ((${#out[@]} == 0)); then
+      printf "%bNo valid items selected.%b\n" "$YELLOW" "$NC"
+      continue
+    fi
+
+    printf "%s\n" "${out[@]}"
+    return 0
+  done
+}
+
+setup_service() {
+  local service="$1"
+  local profile="${SERVICES[$service]:-}"
+  [[ -n "$profile" ]] || die "Unknown service: $service"
+
+  printf "\n%b→ %s%b\n" "$YELLOW" "$service" "$NC"
+  queue_profile "$profile"
+
+  printf "%bEnter value(s) for %s:%b\n" "$BLUE" "$service" "$NC"
+  local pair key def val
+  for pair in ${PROFILE_ENV[$profile]}; do
+    IFS='=' read -r key def <<<"$pair"
+    val=$(read_default "$key" "$def")
+    queue_env "$key=$val"
+  done
+}
+
+process_all() {
+  local selected
+  if ! selected="$(setup_choose_services)"; then
+    printf "\n%bSetup cancelled.%b\n" "$YELLOW" "$NC"
+    return 0
+  fi
+
+  printf "\n%bWill configure:%b\n" "$CYAN" "$NC"
+  while IFS= read -r svc; do
+    printf "  - %s (%s)\n" "$svc" "${SERVICES[$svc]}"
+  done <<<"$selected"
+  echo
+
+  local svc
+  while IFS= read -r svc; do
+    setup_service "$svc"
+  done <<<"$selected"
+
+  flush_envs
+  flush_profiles
+  printf "\n%b✅ Selected services configured!%b\n" "$GREEN" "$NC"
+}
 
 ###############################################################################
 # 4a. LAUNCH PHP CONTAINER INSIDE DOCROOT
 ###############################################################################
+launch_php() {
+  local domain=$1 suffix
+  local nconf="$DIR/configuration/nginx/$domain.conf"
+  local aconf="$DIR/configuration/apache/$domain.conf"
+  [[ -f $nconf ]] || die "No Nginx config for $domain"
+
+  local docroot php
+  if grep -q fastcgi_pass "$nconf"; then
+    php=$(grep -Eo 'fastcgi_pass ([^:]+):9000' "$nconf" | awk '{print $2}' | sed 's/:9000$//')
+    docroot=$(grep -m1 -Eo 'root [^;]+' "$nconf" | awk '{print $2}')
+  else
+    [[ -f $aconf ]] || die "No Apache config for $domain"
+    docroot=$(grep -m1 -Eo 'DocumentRoot [^ ]+' "$aconf" | awk '{print $2}')
+    php=$(grep -Eo 'proxy:fcgi://([^:]+):9000' "$aconf" | sed 's/.*:\/\/\([^:]*\):.*/\1/')
+  fi
+
+  [[ $php ]] || die "Could not detect PHP container for $domain"
+  [[ $docroot ]] || docroot=/app
+  for suffix in public dist public_html; do
+    [[ $docroot == */$suffix ]] && {
+      docroot=${docroot%/*}
+      break
+    }
+  done
+
+  php=$(echo "$php" | tr ' \n' '\n' | awk 'NF && !seen[$0]++' | paste -sd' ' -)
+  docker exec -it "$php" bash --login -c "cd '$docroot' && exec bash"
+}
 
 ###############################################################################
 # 4b. LAUNCH NODE CONTAINER (always /app)
 ###############################################################################
+launch_node() {
+  local domain="${1:-}"
+  [[ -n "$domain" ]] || die "Usage: lds core <domain>"
 
+  local nconf="$DIR/configuration/nginx/$domain.conf"
+  [[ -f "$nconf" ]] || die "No Nginx config for $domain"
+
+  # Expect: proxy_pass http://node_<token>:<port>;
+  local upstream host token ctr
+  upstream="$(
+    grep -m1 -Eo 'proxy_pass[[:space:]]+http://[^;]+' "$nconf" 2>/dev/null |
+      awk '{print $2}' |
+      sed 's|^http://||'
+  )"
+
+  [[ -n "${upstream:-}" ]] || die "Could not detect node upstream for $domain"
+  host="${upstream%%:*}" # node_resume_sparkle_localhost
+
+  [[ -n "${host:-}" ]] || die "Could not parse upstream host for $domain"
+
+  # Standard mapping: node_<token> -> NODE_<TOKEN>
+  ctr=""
+  if docker inspect "$host" >/dev/null 2>&1; then
+    ctr="$host"
+  elif [[ "$host" == node_* ]]; then
+    token="${host#node_}"
+    ctr="NODE_${token^^}"
+    docker inspect "$ctr" >/dev/null 2>&1 || ctr=""
+  fi
+
+  [[ -n "${ctr:-}" ]] || die "Node container not found for upstream '$host' (domain: $domain)"
+  docker inspect -f '{{.State.Running}}' "$ctr" 2>/dev/null | grep -qx true || die "Container not running: $ctr"
+
+  docker exec -it "$ctr" sh -lc '
+    cd /app 2>/dev/null || cd / || true
+    if command -v bash >/dev/null 2>&1; then exec bash --login; fi
+    exec sh
+  '
+}
+
+conf_node_container() {
+  local f="$1"
+
+  # Nginx node vhost: proxy_pass http://node_<token>:<port>;
+  local host token ctr
+
+  host="$(
+    grep -m1 -Eo 'proxy_pass[[:space:]]+http://[^;]+' "$f" 2>/dev/null |
+      awk '{print $2}' |
+      sed 's|^http://||' |
+      awk -F: '{print $1}'
+  )"
+
+  [[ -n "${host:-}" ]] || return 0
+  [[ "$host" == node_* ]] || return 0
+
+  token="${host#node_}"
+  ctr="NODE_${token^^}"
+
+  docker inspect "$ctr" >/dev/null 2>&1 || return 0
+  printf '%s' "$ctr"
+}
 
 ###############################################################################
 # 5. ENV + CERT
 ###############################################################################
+detect_timezone() {
+  if command -v timedatectl &>/dev/null; then
+    timedatectl show -p Timezone --value
+  elif [[ -n ${TZ-} ]]; then
+    printf '%s' "$TZ"
+  elif [[ -r /etc/timezone ]]; then
+    </etc/timezone
+  elif command -v powershell.exe &>/dev/null; then
+    powershell.exe -NoProfile -Command "[System.TimeZoneInfo]::Local.Id" 2>/dev/null | tr -d '\r'
+  else
+    date +%Z
+  fi
+}
 
+env_init() {
+  local env_file="$ENV_DOCKER"
+  printf "%bBootstrapping environment defaults…%b\n" "$YELLOW" "$NC"
+
+  local default_tz tz
+  default_tz="$(detect_timezone)"
+  tz="$(read_default "Timezone (TZ)" "$default_tz")"
+
+  local default_git_name default_git_email git_name git_email
+  default_git_name="$(git config --global --get user.name 2>/dev/null || true)"
+  default_git_email="$(git config --global --get user.email 2>/dev/null || true)"
+  git_name="$(read_default "Git user.name (GIT_USER_NAME)" "$default_git_name")"
+  git_email="$(read_default "Git user.email (GIT_USER_EMAIL)" "$default_git_email")"
+
+  # update_env now quotes automatically when needed
+  update_env "$env_file" "TZ" "$tz"
+  update_env "$env_file" "GIT_USER_NAME" "$git_name"
+  update_env "$env_file" "GIT_USER_EMAIL" "$git_email"
+
+  printf "%bConfiguration saved!%b\n" "$GREEN" "$NC"
+}
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Root CA helpers (cross-distro)
@@ -176,20 +752,371 @@ declare -a PENDING_PROFILES=()
 CA_BASENAME="localdevstack-rootca"
 CA_NICK="LocalDevStack Root CA"
 
+detect_os_family() {
+  # Output: "id|like"
+  # Must never fail under set -e
+  if [[ "${OSTYPE:-}" =~ (msys|cygwin|win32) ]]; then
+    echo "windows|windows"
+    return 0
+  fi
+
+  local id like
+  id="unknown"
+  like="unknown"
+
+  if [[ -r /etc/os-release ]]; then
+    # shellcheck disable=SC1091
+    . /etc/os-release || true
+    id="${ID:-unknown}"
+    like="${ID_LIKE:-unknown}"
+  elif command -v uname >/dev/null 2>&1; then
+    # fallback for macOS / other unix
+    case "$(uname -s 2>/dev/null || true)" in
+    Darwin)
+      id="macos"
+      like="darwin"
+      ;;
+    Linux)
+      id="linux"
+      like="linux"
+      ;;
+    esac
+  fi
+
+  echo "$id|$like"
+}
 
 # Decide destination path + update mechanism. Echo: family|dest|updater
+ca_plan() {
+  local os_id os_like
+  IFS='|' read -r os_id os_like < <(detect_os_family)
+
+  case " $os_id $os_like " in
+  *" debian "* | *" ubuntu "* | *" linuxmint "* | *" pop "* | *" raspbian "*)
+    printf "debian|/usr/local/share/ca-certificates/${CA_BASENAME}.crt|update-ca-certificates\n"
+    ;;
+  *" alpine "*)
+    printf "alpine|/usr/local/share/ca-certificates/${CA_BASENAME}.crt|update-ca-certificates\n"
+    ;;
+  *" fedora "* | *" rhel "* | *" redhat "* | *" centos "* | *" rocky "* | *" alma "* | *" amzn "* | *" amazon "* | *" sles "* | *" suse "*)
+    printf "rhel|/etc/pki/ca-trust/source/anchors/${CA_BASENAME}.crt|update-ca-trust\n"
+    ;;
+  *" arch "* | *" manjaro "*)
+    printf "arch|/etc/ca-certificates/trust-source/anchors/${CA_BASENAME}.crt|trust\n"
+    ;;
+  *)
+    # best default: Debian-style location (works on many distros even if updater differs)
+    printf "fallback|/usr/local/share/ca-certificates/${CA_BASENAME}.crt|\n"
+    ;;
+  esac
+}
 
 is_windows_shell() {
   [[ "${OSTYPE:-}" =~ (msys|cygwin) ]] || [[ -n "${WORKDIR_WIN:-}" ]]
 }
 
+need_windows_tools() {
+  command -v cygpath >/dev/null 2>&1 || die "Windows certificate install needs 'cygpath' (Git Bash)."
+  command -v powershell.exe >/dev/null 2>&1 || die "Windows certificate install needs 'powershell.exe' on PATH."
+}
 
 # Import CA into the invoking user's NSS DB (Chrome/Chromium/Firefox on many Linux setups)
+install_ca_nss_user() {
+  local ca_file="$1"
+  command -v certutil >/dev/null 2>&1 || return 0
 
+  local user="${SUDO_USER:-}"
+  [[ -n "$user" && "$user" != "root" ]] || return 0
 
+  local home
+  home="$(getent passwd "$user" | cut -d: -f6)"
+  [[ -n "$home" && -d "$home" ]] || return 0
 
+  local nssdb="sql:${home}/.pki/nssdb"
+  sudo -u "$user" mkdir -p "${home}/.pki/nssdb" >/dev/null 2>&1 || true
 
+  if sudo -u "$user" certutil -d "$nssdb" -L 2>/dev/null | grep -Fq "$CA_NICK"; then
+    printf "%b✔ NSS already has CA%b (%s)\n" "$GREEN" "$NC" "$user"
+    return 0
+  fi
 
+  if sudo -u "$user" certutil -d "$nssdb" -A -n "$CA_NICK" -t "C,," -i "$ca_file" >/dev/null 2>&1; then
+    printf "%b✔ Imported CA into NSS%b (%s)\n" "$GREEN" "$NC" "$user"
+  else
+    printf "%bWARN%b: NSS import failed (certutil).\n" "$YELLOW" "$NC" >&2
+  fi
+}
+
+install_ca_windows() {
+  need_windows_tools
+
+  local src_ca="$DIR/configuration/rootCA/rootCA.pem"
+  [[ -r "$src_ca" ]] || die "certificate not found: $src_ca"
+
+  local win_ca
+  win_ca="$(cygpath -w "$src_ca")"
+
+  printf "%bInstalling root CA into Windows trust store (CurrentUser\\Root)…%b\n" "$CYAN" "$NC"
+
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "
+    \$ErrorActionPreference = 'Stop'
+    \$path = '$win_ca'
+    \$cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2(\$path)
+    \$cert.FriendlyName = '$CA_NICK'
+
+    \$store = New-Object System.Security.Cryptography.X509Certificates.X509Store('Root','CurrentUser')
+    \$store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+
+    \$exists = \$store.Certificates | Where-Object { \$_.Thumbprint -eq \$cert.Thumbprint }
+    if (-not \$exists) { \$store.Add(\$cert) }
+
+    \$store.Close()
+  " >/dev/null 2>&1 || die "Windows certificate install failed (PowerShell import)."
+
+  printf "%bRoot CA installed on Windows%b (CurrentUser\\Root) as %s\n" "$GREEN" "$NC" "$CA_NICK"
+  printf "%bNote:%b restart browsers if they still show trust errors.\n" "$YELLOW" "$NC"
+}
+
+install_ca() {
+  if is_windows_shell; then
+    install_ca_windows
+    return 0
+  fi
+
+  local src_ca="$DIR/configuration/rootCA/rootCA.pem"
+  [[ ${EUID:-$(id -u)} -eq 0 ]] || die "certificate install requires sudo"
+  [[ -r "$src_ca" ]] || die "certificate not found: $src_ca"
+
+  local family dest updater os_id os_like
+  IFS='|' read -r os_id os_like < <(detect_os_family)
+  IFS='|' read -r family dest updater < <(ca_plan)
+
+  printf "%bInstalling root CA…%b\n" "$CYAN" "$NC"
+  printf "%bDetected OS%b: id=%s like=%s → %s\n" "$CYAN" "$NC" "$os_id" "$os_like" "$family"
+
+  install -d -m 755 "$(dirname "$dest")"
+  install -m 644 "$src_ca" "$dest"
+  printf "%b✔ Copied%b → %s\n" "$GREEN" "$NC" "$dest"
+
+  case "$family" in
+  debian | alpine)
+    if command -v update-ca-certificates >/dev/null 2>&1; then
+      printf "%bUpdating trust store%b (update-ca-certificates)…\n" "$CYAN" "$NC"
+      if update-ca-certificates; then
+        printf "%b✔ Trust store updated%b\n" "$GREEN" "$NC"
+        printf "%bNote:%b If you see \"rehash: skipping ca-certificates.crt…\", that’s normal (it’s a bundle).\n" "$YELLOW" "$NC"
+      else
+        printf "%bWARN%b: update-ca-certificates failed. CA is installed but may not be active yet.\n" "$YELLOW" "$NC" >&2
+      fi
+    else
+      printf "%bWARN%b: update-ca-certificates not found. CA is installed but auto-update is unavailable.\n" "$YELLOW" "$NC" >&2
+    fi
+
+    # Optional p11-kit sync: best-effort only (can be missing helper on minimal installs)
+    if command -v trust >/dev/null 2>&1; then
+      printf "%bSyncing p11-kit%b (trust extract-compat)…\n" "$CYAN" "$NC"
+      if trust extract-compat >/dev/null 2>&1; then
+        printf "%b✔ p11-kit trust synced%b\n" "$GREEN" "$NC"
+      else
+        printf "%bWARN%b: trust extract-compat failed (helper missing on some installs). Skipping.\n" "$YELLOW" "$NC" >&2
+      fi
+    else
+      printf "%bINFO%b: 'trust' not found — skipping p11-kit sync.\n" "$YELLOW" "$NC"
+    fi
+    ;;
+  rhel)
+    if command -v update-ca-trust >/dev/null 2>&1; then
+      printf "%bUpdating trust store%b (update-ca-trust extract)…\n" "$CYAN" "$NC"
+      if update-ca-trust extract; then
+        printf "%b✔ Trust store updated%b\n" "$GREEN" "$NC"
+      else
+        printf "%bWARN%b: update-ca-trust extract failed. CA is installed but may not be active yet.\n" "$YELLOW" "$NC" >&2
+      fi
+    else
+      printf "%bWARN%b: update-ca-trust not found. CA is installed but auto-update is unavailable.\n" "$YELLOW" "$NC" >&2
+    fi
+    ;;
+  arch)
+    if command -v trust >/dev/null 2>&1; then
+      printf "%bUpdating trust store%b (trust extract-compat)…\n" "$CYAN" "$NC"
+      if trust extract-compat >/dev/null 2>&1; then
+        printf "%b✔ Trust store updated%b\n" "$GREEN" "$NC"
+      else
+        printf "%bWARN%b: trust extract-compat failed. CA is installed, but trust sync may be incomplete.\n" "$YELLOW" "$NC" >&2
+      fi
+    else
+      printf "%bWARN%b: 'trust' not found. CA is installed, but trust sync is unavailable.\n" "$YELLOW" "$NC" >&2
+    fi
+    ;;
+  *)
+    printf "%bINFO%b: Unknown distro; CA copied to %s.\n" "$YELLOW" "$NC" "$dest"
+    printf "%bINFO%b: You may need to update trust store manually for your OS.\n" "$YELLOW" "$NC"
+    ;;
+  esac
+
+  # Extra: ensure browsers that rely on NSS trust pick it up
+  install_ca_nss_user "$src_ca"
+
+  printf "%bRoot CA installed%b → %s (%s)\n" "$GREEN" "$NC" "$dest" "$CA_NICK"
+}
+
+uninstall_ca_windows() {
+  need_windows_tools
+
+  local src_ca="$DIR/configuration/rootCA/rootCA.pem"
+  [[ -r "$src_ca" ]] || die "certificate not found: $src_ca"
+
+  local win_ca
+  win_ca="$(cygpath -w "$src_ca")"
+
+  printf "%bUninstalling root CA from Windows trust store (CurrentUser\\Root)…%b\n" "$CYAN" "$NC"
+
+  local removed
+  removed="$(powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "
+    \$ErrorActionPreference = 'Stop'
+    \$path = '$win_ca'
+    \$cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2(\$path)
+    \$thumb = \$cert.Thumbprint
+
+    \$store = New-Object System.Security.Cryptography.X509Certificates.X509Store('Root','CurrentUser')
+    \$store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+
+    \$matches = @(\$store.Certificates | Where-Object { \$_.Thumbprint -eq \$thumb })
+    foreach (\$c in \$matches) { \$store.Remove(\$c) }
+
+    \$store.Close()
+    [string]\$matches.Count
+  " 2>/dev/null || true)"
+
+  removed="${removed//[$'\r\n\t ']/}"
+  if [[ "${removed:-0}" =~ ^[0-9]+$ ]] && ((removed > 0)); then
+    printf "%bRoot CA uninstalled on Windows%b (removed %s cert)\n" "$GREEN" "$NC" "$removed"
+  else
+    printf "%bRoot CA already absent on Windows%b (no matching cert)\n" "$YELLOW" "$NC"
+  fi
+}
+
+uninstall_ca_nss_user() {
+  command -v certutil >/dev/null 2>&1 || return 0
+  local user="${SUDO_USER:-}"
+  [[ -n "$user" && "$user" != "root" ]] || return 0
+
+  local home
+  home="$(getent passwd "$user" | cut -d: -f6)"
+  [[ -n "$home" && -d "$home" ]] || return 0
+
+  local nssdb="sql:${home}/.pki/nssdb"
+  if sudo -u "$user" certutil -d "$nssdb" -L 2>/dev/null | grep -Fq "$CA_NICK"; then
+    sudo -u "$user" certutil -d "$nssdb" -D -n "$CA_NICK" >/dev/null 2>&1 || true
+    printf "%b✔ Removed CA from NSS%b (%s)\n" "$GREEN" "$NC" "$user"
+  fi
+}
+
+uninstall_ca() {
+  if is_windows_shell; then
+    uninstall_ca_windows
+    return 0
+  fi
+
+  [[ ${EUID:-$(id -u)} -eq 0 ]] || die "certificate uninstall requires sudo"
+
+  local all=0
+  if [[ "${1:-}" == "--all" ]]; then
+    all=1
+    shift
+  fi
+
+  local family dest updater os_id os_like
+  IFS='|' read -r os_id os_like < <(detect_os_family)
+  IFS='|' read -r family dest updater < <(ca_plan)
+
+  printf "%bUninstalling root CA…%b\n" "$CYAN" "$NC"
+  printf "%bDetected OS%b: id=%s like=%s → %s\n" "$CYAN" "$NC" "$os_id" "$os_like" "$family"
+
+  local removed=0
+
+  if [[ -e "$dest" ]]; then
+    rm -f "$dest"
+    removed=$((removed + 1))
+    printf "%b✔ Removed%b → %s\n" "$GREEN" "$NC" "$dest"
+  else
+    printf "%bINFO%b: CA file not found at %s (nothing to remove)\n" "$YELLOW" "$NC" "$dest"
+  fi
+
+  if ((all)); then
+    printf "%bScanning all known CA anchor paths…%b\n" "$CYAN" "$NC"
+    local f
+    for f in \
+      "/usr/local/share/ca-certificates/${CA_BASENAME}.crt" \
+      "/usr/local/share/ca-certificates/${CA_BASENAME}.pem" \
+      "/etc/pki/ca-trust/source/anchors/${CA_BASENAME}.crt" \
+      "/etc/pki/ca-trust/source/anchors/${CA_BASENAME}.pem" \
+      "/etc/ca-certificates/trust-source/anchors/${CA_BASENAME}.crt" \
+      "/etc/ca-certificates/trust-source/anchors/${CA_BASENAME}.pem"; do
+      [[ "$f" == "$dest" ]] && continue
+      if [[ -e "$f" ]]; then
+        rm -f "$f"
+        removed=$((removed + 1))
+        printf "%b✔ Removed%b → %s\n" "$GREEN" "$NC" "$f"
+      fi
+    done
+  fi
+
+  case "$family" in
+  debian | alpine)
+    if command -v update-ca-certificates >/dev/null 2>&1; then
+      printf "%bUpdating trust store%b (update-ca-certificates)…\n" "$CYAN" "$NC"
+      update-ca-certificates || printf "%bWARN%b: update-ca-certificates failed.\n" "$YELLOW" "$NC" >&2
+    else
+      printf "%bWARN%b: update-ca-certificates not found; trust store not refreshed.\n" "$YELLOW" "$NC" >&2
+    fi
+
+    if command -v trust >/dev/null 2>&1; then
+      printf "%bSyncing p11-kit%b (trust extract-compat)…\n" "$CYAN" "$NC"
+      trust extract-compat >/dev/null 2>&1 || printf "%bWARN%b: trust extract-compat failed. Skipping.\n" "$YELLOW" "$NC" >&2
+    fi
+    ;;
+  rhel)
+    if command -v update-ca-trust >/dev/null 2>&1; then
+      printf "%bUpdating trust store%b (update-ca-trust extract)…\n" "$CYAN" "$NC"
+      update-ca-trust extract || printf "%bWARN%b: update-ca-trust extract failed.\n" "$YELLOW" "$NC" >&2
+    else
+      printf "%bWARN%b: update-ca-trust not found; trust store not refreshed.\n" "$YELLOW" "$NC" >&2
+    fi
+    ;;
+  arch)
+    if command -v trust >/dev/null 2>&1; then
+      printf "%bUpdating trust store%b (trust extract-compat)…\n" "$CYAN" "$NC"
+      trust extract-compat >/dev/null 2>&1 || printf "%bWARN%b: trust extract-compat failed.\n" "$YELLOW" "$NC" >&2
+    else
+      printf "%bWARN%b: 'trust' not found; trust store not refreshed.\n" "$YELLOW" "$NC" >&2
+    fi
+    ;;
+  *)
+    if command -v update-ca-certificates >/dev/null 2>&1; then
+      printf "%bUpdating trust store%b (update-ca-certificates)…\n" "$CYAN" "$NC"
+      update-ca-certificates || true
+    fi
+    if command -v update-ca-trust >/dev/null 2>&1; then
+      printf "%bUpdating trust store%b (update-ca-trust extract)…\n" "$CYAN" "$NC"
+      update-ca-trust extract || true
+    fi
+    if command -v trust >/dev/null 2>&1; then
+      printf "%bSyncing p11-kit%b (trust extract-compat)…\n" "$CYAN" "$NC"
+      trust extract-compat >/dev/null 2>&1 || true
+    fi
+    printf "%bINFO%b: Unknown distro; removed CA file(s) if present. Refresh trust store manually if needed.\n" "$YELLOW" "$NC"
+    ;;
+  esac
+
+  uninstall_ca_nss_user
+
+  if ((removed)); then
+    printf "%bRoot CA uninstalled%b (removed %d file(s))\n" "$GREEN" "$NC" "$removed"
+  else
+    printf "%bRoot CA already absent%b (no files removed)\n" "$YELLOW" "$NC"
+  fi
+}
 
 add_required_env() {
   update_env "$ENV_DOCKER" WORKING_DIR "$DIR"
@@ -592,6 +1519,77 @@ cmd_core() {
   return 0
 }
 
+core_pick_domain() {
+  local -a domains=()
+  local f d
+
+  shopt -s nullglob
+  for f in "$DIR/configuration/nginx/"*.conf; do
+    d="$(basename -- "$f" .conf)"
+    [[ -n "$d" ]] && domains+=("$d")
+  done
+  shopt -u nullglob
+
+  ((${#domains[@]} > 0)) || die "No domains found in $DIR/configuration/nginx"
+
+  # stable ordering
+  IFS=$'\n' domains=($(printf '%s\n' "${domains[@]}" | LC_ALL=C sort -u))
+
+  # If there's only one domain, just use it.
+  if ((${#domains[@]} == 1)); then
+    printf '%s' "${domains[0]}"
+    return 0
+  fi
+
+  # Must be interactive to pick.
+  if [[ ! -t 0 ]]; then
+    printf "%b[core]%b No domain provided. Available domains:\n" "$YELLOW" "$NC" >&2
+    local i=1
+    for d in "${domains[@]}"; do
+      printf "  %2d) %s\n" "$i" "$d" >&2
+      ((i++))
+    done
+    die "No TTY to prompt. Use: lds core <domain>"
+  fi
+
+  printf "%bSelect domain:%b\n" "$CYAN" "$NC" >&2
+  local i=1
+  for d in "${domains[@]}"; do
+    printf "  %2d) %s\n" "$i" "$d" >&2
+    ((i++))
+  done
+  printf "  %2d) %s\n" 0 "Cancel" >&2
+
+  local ans idx
+  while true; do
+    printf "%bDomain #%b " "$GREEN" "$NC" >&2
+    tty_readline ans "" || return 130
+    ans="${ans//[[:space:]]/}"
+    [[ -n "$ans" ]] || continue
+
+    if [[ "$ans" == "0" ]]; then
+      return 130
+    fi
+
+    if [[ "$ans" =~ ^[0-9]+$ ]]; then
+      idx=$((ans - 1))
+      if ((idx >= 0 && idx < ${#domains[@]})); then
+        printf '%s' "${domains[$idx]}"
+        return 0
+      fi
+    else
+      # allow typing domain directly
+      for d in "${domains[@]}"; do
+        if [[ "$d" == "$ans" ]]; then
+          printf '%s' "$d"
+          return 0
+        fi
+      done
+    fi
+
+    printf "%bInvalid selection.%b\n" "$YELLOW" "$NC" >&2
+  done
+}
 
 cmd_setup() {
   add_required_env
@@ -1775,20 +2773,27 @@ main() {
   need docker
   ((EUID == 0)) || ensure_files_exist "/docker/.env" "/configuration/php/php.ini" "/.env"
 
-  # If no command, show help (same behavior as before: non-zero exit)
   [[ $# -gt 0 ]] || {
     cmd_help
     exit 1
   }
 
-  # Global flags (apply to any command)
   while [[ $# -gt 0 ]]; do
     case "$1" in
-    -v|--verbose) VERBOSE=1; shift ;;
-    -q|--quiet)   VERBOSE=0; shift ;;
-    --)           shift; break ;;
-    -*)           die "Unknown global option: $1" ;;
-    *)            break ;;
+    -v | --verbose)
+      VERBOSE=1
+      shift
+      ;;
+    -q | --quiet)
+      VERBOSE=0
+      shift
+      ;;
+    --)
+      shift
+      break
+      ;;
+    -*) die "Unknown global option: $1" ;;
+    *) break ;;
     esac
   done
 
@@ -1797,31 +2802,14 @@ main() {
     exit 1
   }
 
-  local cmd="${1,,}"
-  shift || true
-
-  # Fast shortcuts (kept for backwards compatibility)
-  case "$cmd" in
-    php|composer|node|npm|npx) exec "$DIR/bin/$cmd" "$@" ;;
-    pg|pg_restore|pg-restore|pgrestore|pg_dump|pgdump|pg-dump|psql) exec "$DIR/bin/pg" "$@" ;;
-    maria|mariadb|mariadbdump|mariadb-dump|mariadb_dump) exec "$DIR/bin/maria" "$@" ;;
-    my|mysql|mysqldump|mysql-dump|mysql_dump) exec "$DIR/bin/my" "$@" ;;
-    redis|redis-cli) exec "$DIR/bin/redis-cli" "$@" ;;
+  case "${1,,}" in
+  php | composer | node | npm | npx) exec "$DIR/bin/$1" "${@:2}" ;;
+  pg | pg_restore | pg-restore | pgrestore | pg_dump | pgdump | pg-dump | psql) exec "$DIR/bin/pg" "${@:2}" ;;
+  maria | mariadb | mariadbdump | mariadb-dump | mariadb_dump) exec "$DIR/bin/maria" "${@:2}" ;;
+  my | mysql | mysqldump | mysql-dump | mysql_dump) exec "$DIR/bin/my" "${@:2}" ;;
+  redis | redis-cli) exec "$DIR/bin/redis-cli" "${@:2}" ;;
+  *) cmd_"${1,,}" "${@:2}" ;;
   esac
-
-  # Prefer modular bin commands if present
-  if [[ -x "$DIR/bin/lds-$cmd" ]]; then
-    exec "$DIR/bin/lds-$cmd" "$@"
-  fi
-
-  # Fallback to monolith cmd_* functions (until fully migrated)
-  if declare -F "cmd_$cmd" >/dev/null 2>&1; then
-    "cmd_$cmd" "$@"
-    return 0
-  fi
-
-  die "Unknown command: $cmd"
 }
-
 
 main "$@"

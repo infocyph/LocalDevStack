@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+LDS="$ROOT_DIR/lds"
+
+if [[ ! -x "$LDS" ]]; then
+  echo "Error: lds not found or not executable at $LDS" >&2
+  exit 1
+fi
+
+exec "$LDS" "cli" "$@"
