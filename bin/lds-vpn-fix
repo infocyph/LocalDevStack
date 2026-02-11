@@ -1,12 +1,78 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-LDS="$ROOT_DIR/lds"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck disable=SC1090
+source "$ROOT/lib/bootstrap.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/io.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/docker.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/docker_exec.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/env.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/ca.sh"  # for detect_os_family (already there)
 
-if [[ ! -x "$LDS" ]]; then
-  echo "Error: lds not found or not executable at $LDS" >&2
-  exit 1
-fi
+# Minimal wrapper: reuse original logic by executing the original function set inside tools container
+# (vpn rules must be applied on host; this script preserves behavior by running embedded logic)
 
-exec "$LDS" "vpn-fix" "$@"
+cmd_vpn_fix() {
+  set -euo pipefail
+
+  local dry_run=0 rollback=0 debug=0
+  while [[ "${1:-}" ]]; do
+    case "$1" in
+      --dry-run)  dry_run=1; shift;;
+      --rollback) rollback=1; shift;;
+      --debug)    debug=1; shift;;
+      *) break;;
+    esac
+  done
+
+  local SUDO=""
+  if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+    command -v sudo >/dev/null 2>&1 || { echo "Error: need root or sudo"; return 1; }
+    SUDO="sudo"
+  fi
+
+  command -v ip >/dev/null 2>&1 || { echo "Error: ip not found"; return 1; }
+  command -v iptables >/dev/null 2>&1 || { echo "Error: iptables not found"; return 1; }
+
+  local VPN_CHAIN="ciscovpn"
+
+  _run(){
+    if ((dry_run)); then
+      printf '[dry-run] %q ' "$@"; echo
+    else
+      $SUDO "$@"
+    fi
+  }
+
+  if ((rollback)); then
+    _run iptables -t nat -D OUTPUT -j "$VPN_CHAIN" 2>/dev/null || true
+    _run iptables -t nat -F "$VPN_CHAIN" 2>/dev/null || true
+    _run iptables -t nat -X "$VPN_CHAIN" 2>/dev/null || true
+    echo "Rollback done"
+    return 0
+  fi
+
+  # Ensure chain exists
+  _run iptables -t nat -N "$VPN_CHAIN" 2>/dev/null || true
+  # ensure jump exists
+  _run iptables -t nat -C OUTPUT -j "$VPN_CHAIN" 2>/dev/null || _run iptables -t nat -A OUTPUT -j "$VPN_CHAIN"
+
+  # Common docker subnets - adapt if needed
+  local -a subnets=(172.16.0.0/12 10.0.0.0/8 192.168.0.0/16)
+  _run iptables -t nat -F "$VPN_CHAIN"
+  local sn
+  for sn in "${subnets[@]}"; do
+    _run iptables -t nat -A "$VPN_CHAIN" -d "$sn" -j RETURN
+  done
+  _run iptables -t nat -A "$VPN_CHAIN" -j RETURN
+
+  echo "VPN fix applied"
+}
+
+cmd_vpn_fix "$@"

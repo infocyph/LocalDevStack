@@ -1,12 +1,27 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-LDS="$ROOT_DIR/lds"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck disable=SC1090
+source "$ROOT/lib/bootstrap.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/io.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/docker.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/docker_exec.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/env.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/help.sh"
 
-if [[ ! -x "$LDS" ]]; then
-  echo "Error: lds not found or not executable at $LDS" >&2
-  exit 1
+if [[ "${1:-}" == "--markdown" ]]; then
+  lds_commands_discover | sed 's/^/- /'
+  exit 0
 fi
 
-exec "$LDS" "help" "$@"
+echo "Usage: lds <command> [args]"
+echo
+echo "Commands:"
+lds_commands_discover | sed 's/^/  /'
+echo

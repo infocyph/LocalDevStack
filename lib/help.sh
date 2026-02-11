@@ -1,7 +1,9 @@
-# lds lib: help
-# shellcheck shell=bash
+#!/usr/bin/env bash
 
-help_list_bin() {
-  local bin_dir="${1:?}"
-  (cd "$bin_dir" 2>/dev/null && ls -1 lds-* 2>/dev/null | sed 's/^lds-//' | sort -u) || true
+# Help rendering and command discovery
+
+lds_commands_discover() {
+  local bin_dir="${1:-$DIR/bin}"
+  [[ -d "$bin_dir" ]] || return 0
+  find "$bin_dir" -maxdepth 1 -type f -name 'lds-*' -printf '%f\n' | sed 's/^lds-//' | LC_ALL=C sort -u
 }

@@ -1,12 +1,30 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-LDS="$ROOT_DIR/lds"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck disable=SC1090
+source "$ROOT/lib/bootstrap.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/io.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/docker.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/docker_exec.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/env.sh"
+usage(){
+  cat <<USG
+Usage:
+  lds tools sh
+  lds tools exec <cmd...>
+  lds tools file <path>
+USG
+}
 
-if [[ ! -x "$LDS" ]]; then
-  echo "Error: lds not found or not executable at $LDS" >&2
-  exit 1
-fi
-
-exec "$LDS" "tools" "$@"
+sub="${1:-sh}"; shift || true
+case "$sub" in
+  sh) exec tools_sh;;
+  exec) ((${#@})) || die "tools exec <cmd...>"; exec tools_exec "$@";;
+  file) p="${1:-}"; [[ -n "$p" ]] || die "tools file <path>"; exec tools_exec sh -lc "ls -la '$p' && { [ -d '$p' ] && tree -L 2 '$p' || sed -n '1,200p' '$p'; }";;
+  *) usage; exit 1;;
+esac

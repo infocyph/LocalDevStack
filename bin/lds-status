@@ -1,12 +1,39 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-LDS="$ROOT_DIR/lds"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck disable=SC1090
+source "$ROOT/lib/bootstrap.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/io.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/docker.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/docker_exec.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/env.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/net.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/open.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/profiles.sh"
 
-if [[ ! -x "$LDS" ]]; then
-  echo "Error: lds not found or not executable at $LDS" >&2
-  exit 1
+lds_compose_project_init
+
+printf "%bLDS Status%b\n" "$CYAN" "$NC"
+
+printf "\n%bCompose project%b: %s\n" "$MAGENTA" "$NC" "${COMPOSE_PROJECT_NAME:-$(basename "$ROOT")}" || true
+
+printf "\n%bProfiles%b\n" "$MAGENTA" "$NC"
+if [[ -r "$ENV_DOCKER" ]]; then
+  grep -E '^COMPOSE_PROFILES=' "$ENV_DOCKER" || true
+else
+  echo "(missing $ENV_DOCKER)"
 fi
 
-exec "$LDS" "status" "$@"
+printf "\n%bContainers%b\n" "$MAGENTA" "$NC"
+docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' | sed 's/[[:space:]]\+$//' || true
+
+printf "\n%bCompose services%b\n" "$MAGENTA" "$NC"
+docker_compose ps || true

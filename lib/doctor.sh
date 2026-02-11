@@ -1,13 +1,21 @@
-# lds lib: doctor
+#!/usr/bin/env bash
 # shellcheck shell=bash
-# Requires lib/diag.sh and lib/docker.sh
+# Generated from lds_X refactor (lib stage)
 
-doctor_lint() { tools_exec sh -lc "command -v shellcheck >/dev/null 2>&1 && shellcheck -x '$1' || true"; }
-doctor_scan_logs() {
-  local svc="${1:-}"
-  if [[ -n "$svc" ]]; then
-    docker_compose logs --no-color --tail=500 "$svc" 2>/dev/null | tools_exec sh -lc "rg -n 'error|fail|panic|permission denied' || true"
-  else
-    docker_compose logs --no-color --tail=500 2>/dev/null | tools_exec sh -lc "rg -n 'error|fail|panic|permission denied' || true"
-  fi
+# Doctor checks - reusable pieces.
+
+lds_doctor_shellcheck() {
+  local target="${1:-.}"
+  tools_exec shellcheck -x "$target"
 }
+
+lds_doctor_scan_logs() {
+  local pattern="${1:-error|failed|panic|permission denied}"
+  # expects docker to be available in tools container
+  tools_exec sh -lc "docker ps --format '{{.Names}}' | while read -r c; do echo '==> '"$c"; docker logs --tail 200 "$c" 2>&1 | rg -n -i "$pattern" || true; done"
+}
+
+lds_doctor_compose_config() {
+  docker_compose config >/dev/null
+}
+

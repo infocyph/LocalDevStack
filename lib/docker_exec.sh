@@ -1,35 +1,33 @@
-# lds lib: docker_exec
+#!/usr/bin/env bash
 # shellcheck shell=bash
-# Requires lib/docker.sh
+# Generated from lds_X refactor (lib stage)
 
-docker_exists() { docker inspect "$1" >/dev/null 2>&1; }
-docker_running() { [[ "$(docker inspect -f '{{.State.Running}}' "$1" 2>/dev/null || true)" == "true" ]]; }
+# docker exec helpers
+# Requires: docker in PATH
 
 docker_exec() {
   local c="$1"; shift || true
-  docker exec -i "$c" "$@"
+  docker exec "$c" "$@"
 }
 
-docker_exec_tty() {
+docker_exec_sh() {
   local c="$1"; shift || true
-  docker exec -it "$c" "$@"
+  docker exec -it "$c" sh -lc "$*"
 }
 
-tools_container() {
-  if docker_running "SERVER_TOOLS" 2>/dev/null; then printf "SERVER_TOOLS"
-  elif docker_running "SERVERTOOLS" 2>/dev/null; then printf "SERVERTOOLS"
-  elif docker_running "NGINX" 2>/dev/null; then printf "NGINX"
-  else printf ""; fi
+tools_exec() { docker_exec SERVER_TOOLS "$@"; }
+tools_sh()   { docker_exec -it SERVER_TOOLS bash; }
+
+nginx_exec() { docker_exec NGINX "$@"; }
+nginx_sh()   { docker_exec -it NGINX sh; }
+
+container_running() {
+  local name="$1"
+  docker inspect -f '{{.State.Running}}' "$name" 2>/dev/null | grep -qx 'true'
 }
 
-tools_exec() {
-  local c; c="$(tools_container)"
-  [[ -n "$c" ]] || die "SERVER_TOOLS (or NGINX) container is not running"
-  docker_exec "$c" "$@"
+container_exists() {
+  local name="$1"
+  docker inspect "$name" >/dev/null 2>&1
 }
 
-tools_sh() {
-  local c; c="$(tools_container)"
-  [[ -n "$c" ]] || die "SERVER_TOOLS (or NGINX) container is not running"
-  docker_exec_tty "$c" bash -l
-}

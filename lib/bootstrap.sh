@@ -1,72 +1,82 @@
-# lds lib: bootstrap
+#!/usr/bin/env bash
 # shellcheck shell=bash
+#
+# lib/bootstrap.sh — foundational helpers (NO arg parsing, NO shifting)
+#
+# This file may be sourced by:
+#   - ./lds (dispatcher)  [DIR already exported]
+#   - ./bin/lds-*         [often sets ROOT or LDS_ROOT]
+#
+# Rules:
+#   - Never shift arguments or parse flags here
+#   - Never assume $0 is project root
+#   - Only set DIR/paths if they are missing, and never override if present
 
-# Expect DIR/CFG/ENV_MAIN/ENV_DOCKER/COMPOSE_FILE/EXTRAS_DIR set by caller.
+set -euo pipefail
 
-# Default behavior: QUIET
-: "${VERBOSE:=0}"
+# ------------------------------
+# 0) Root resolution (only if needed)
+# ------------------------------
+if [[ -z "${DIR:-}" ]]; then
+  if [[ -n "${LDS_ROOT:-}" ]]; then
+    DIR="$LDS_ROOT"
+  elif [[ -n "${ROOT:-}" ]]; then
+    DIR="$ROOT"
+  else
+    DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  fi
+  export DIR
+fi
 
+# Derived paths (do not override if already provided by dispatcher)
+: "${CFG:="$DIR/docker"}"
+: "${ENV_MAIN:="$DIR/.env"}"
+: "${ENV_DOCKER:="$CFG/.env"}"
+: "${COMPOSE_FILE:="$CFG/compose/main.yaml"}"
+: "${EXTRAS_DIR:="$CFG/extras"}"
+export CFG ENV_MAIN ENV_DOCKER COMPOSE_FILE EXTRAS_DIR
+
+# Windows workdir hint is handled by dispatcher; bin scripts may still export it.
+: "${WORKDIR_WIN:=${WORKDIR_WIN:-}}"
+export WORKDIR_WIN
+
+# ------------------------------
+# 1) Colors / logging defaults
+# ------------------------------
 COLOR() { printf '\033[%sm' "$1"; }
+RED=$(COLOR '0;31'); GREEN=$(COLOR '0;32'); CYAN=$(COLOR '0;36')
+YELLOW=$(COLOR '1;33'); BLUE=$(COLOR '0;34'); MAGENTA=$(COLOR '0;35')
+NC=$(COLOR '0')
 
-# Color helpers/vars (only if not already set)
-if [[ -z "${RED:-}" ]]; then
+: "${VERBOSE:=0}"
+: "${QUIET:=0}"
+export VERBOSE QUIET
+
+lds_colors_init() {
+  COLOR() { printf '\033[%sm' "$1"; }  # shadow-safe
   RED=$(COLOR '0;31'); GREEN=$(COLOR '0;32'); CYAN=$(COLOR '0;36')
   YELLOW=$(COLOR '1;33'); BLUE=$(COLOR '0;34'); MAGENTA=$(COLOR '0;35')
   NC=$(COLOR '0')
-fi
-
-_realpath() {
-  local p="$1"
-
-  if command -v realpath >/dev/null 2>&1; then
-    realpath "$p"
-    return 0
-  fi
-
-  # GNU readlink
-  if readlink -f / >/dev/null 2>&1; then
-    readlink -f "$p"
-    return 0
-  fi
-
-  # macOS with coreutils
-  if command -v greadlink >/dev/null 2>&1; then
-    greadlink -f "$p"
-    return 0
-  fi
-
-  # python fallback
-  if command -v python3 >/dev/null 2>&1; then
-    python3 -c 'import os,sys;print(os.path.realpath(sys.argv[1]))' "$p"
-    return 0
-  fi
-
-  # last resort: absolute physical dir + basename
-  local d b
-  d="$(cd -P -- "$(dirname -- "$p")" 2>/dev/null && pwd -P)" || return 1
-  b="$(basename -- "$p")"
-  printf '%s/%s\n' "$d" "$b"
 }
 
-on_error() {
-  printf "\n%bError:%b '%s' failed at line %d (exit %d)\n\n" \
-    "$RED" "$NC" "$3" "$2" "$1"
-  exit "$1"
-}
+logv() { ((VERBOSE)) && printf "%b[%s]%b %s\n" "$CYAN" "${1:-info}" "$NC" "${2:-}" >&2 || true; }
+logq() { ((QUIET)) && return 0; printf "%b[%s]%b %s\n" "$CYAN" "${1:-info}" "$NC" "${2:-}" >&2; }
+
+# ------------------------------
+# 2) Error helpers (trap owned by dispatcher; safe standalone usage too)
+# ------------------------------
 die() {
-  printf "%bError:%b %s\n" "$RED" "$NC" "$*"
+  printf "%bError:%b %s\n" "$RED" "$NC" "$*" >&2
   exit 1
 }
+
 need() {
   local group found cmd
   for group in "$@"; do
     IFS='|,' read -ra alts <<<"$group"
     found=0
     for cmd in "${alts[@]}"; do
-      command -v "$cmd" &>/dev/null && {
-        found=1
-        break
-      }
+      command -v "$cmd" &>/dev/null && { found=1; break; }
     done
     ((found)) && continue
     local miss=${alts[*]}
@@ -74,6 +84,10 @@ need() {
     die "Missing command(s): $miss"
   done
 }
+
+# ------------------------------
+# 3) FS helpers
+# ------------------------------
 ensure_files_exist() {
   local rel abs dir
   for rel in "$@"; do
@@ -82,41 +96,37 @@ ensure_files_exist() {
 
     if [[ ! -d $dir ]]; then
       if mkdir -p "$dir" 2>/dev/null; then
-        printf "%b- Created directory %s%b\n" "$YELLOW" "$dir" "$NC"
+        logq warn "Created directory $dir"
       else
-        printf "%b- Warning:%b cannot create directory %s (permissions?)\n" \
-          "$YELLOW" "$NC" "$dir"
+        logq warn "Cannot create directory $dir (permissions?)"
         continue
       fi
     elif [[ ! -w $dir ]]; then
-      printf "%b- Warning:%b directory not writable: %s\n" "$YELLOW" "$NC" "$dir"
+      logq warn "Directory not writable: $dir"
     fi
 
     if [[ -e $abs ]]; then
-      [[ -w $abs ]] || printf "%b- Warning:%b file not writable: %s\n" "$YELLOW" "$NC" "$abs"
+      [[ -w $abs ]] || logq warn "File not writable: $abs"
     else
       if : >"$abs" 2>/dev/null; then
-        printf "%b- Created file %s%b\n" "$YELLOW" "$abs" "$NC"
+        logq warn "Created file $abs"
       else
-        printf "%b- Error:%b cannot create file %s (permissions?)\n" "$RED" "$NC" "$abs"
+        logq warn "Cannot create file $abs (permissions?)"
       fi
     fi
   done
 }
-logv() { ((VERBOSE)) && printf "%b[%s]%b %s\n" "$CYAN" "${1:-info}" "$NC" "${2:-}" >&2 || true; }
-logq() { printf "%b[%s]%b %s\n" "$CYAN" "${1:-info}" "$NC" "${2:-}" >&2; }
+
+# ------------------------------
+# 4) Prompt helpers (used by setup/menu flows)
+# ------------------------------
 tty_readline() {
-  # Robust prompt/read across Linux/macOS/WSL/Windows Git Bash.
-  # Prefer stdin when it is a TTY (normal interactive use). If stdin is not a TTY,
-  # fall back to /dev/tty when available.
   local __var_name="$1" __prompt="$2" __line
 
   if [[ -t 0 ]]; then
-    # Interactive: show prompt on stderr (so it is never swallowed) and read stdin.
     printf '%s' "$__prompt" >&2
     IFS= read -r __line || return 1
   elif [[ -r /dev/tty ]]; then
-    # Non-interactive stdin (piped) but we still have a controlling terminal.
     printf '%s' "$__prompt" >/dev/tty
     IFS= read -r __line </dev/tty || return 1
   else
@@ -125,14 +135,19 @@ tty_readline() {
 
   printf -v "$__var_name" '%s' "$__line"
 }
+
 read_default() {
   local prompt=$1 default=$2 input
   tty_readline input "$(printf '%b%s [default: %s]:%b ' "$CYAN" "$prompt" "$default" "$NC")" || return 1
   printf '%s' "${input:-$default}"
 }
+
 ask_yes() {
   local prompt="$1" ans
   tty_readline ans "$(printf '%b%s (y/n): %b' "$BLUE" "$prompt" "$NC")" || return 1
   [[ "${ans,,}" == "y" ]]
 }
 
+is_windows_shell() {
+  [[ "${OSTYPE:-}" =~ (msys|cygwin) ]] || [[ -n "${WORKDIR_WIN:-}" ]]
+}

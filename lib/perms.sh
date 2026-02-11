@@ -1,6 +1,6 @@
-# lds lib: perms
+#!/usr/bin/env bash
 # shellcheck shell=bash
-# Requires lib/bootstrap.sh
+# Generated from lds_X refactor (lib stage)
 
 add_to_windows_path() {
   [[ "$OSTYPE" =~ (msys|cygwin) ]] || return 0
@@ -28,6 +28,7 @@ add_to_windows_path() {
     }
   " >/dev/null 2>&1 || true
 }
+
 
 fix_perms() {
   if [[ "$OSTYPE" =~ (msys|cygwin) ]]; then
@@ -62,4 +63,8 @@ fix_perms() {
   ln -fs "$DIR/lds" /usr/local/bin/lds
   printf "%bPermissions assigned.%b\n" "$GREEN" "$NC"
 }
+
+###############################################################################
+# 3. DOMAIN & PROFILE UTILITIES
+###############################################################################
 

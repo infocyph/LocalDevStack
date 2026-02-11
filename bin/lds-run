@@ -1,12 +1,134 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-LDS="$ROOT_DIR/lds"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck disable=SC1090
+source "$ROOT/lib/bootstrap.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/io.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/docker.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/docker_exec.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/env.sh"
+# Runner orchestration (ported from lds_X)
 
-if [[ ! -x "$LDS" ]]; then
-  echo "Error: lds not found or not executable at $LDS" >&2
-  exit 1
-fi
+run_host_dir() {
+  local dir="$1"
+  [[ -n "$dir" ]] || return 1
+  mkdir -p "$dir"
+  printf '%s' "$(cd "$dir" && pwd)"
+}
 
-exec "$LDS" "run" "$@"
+run_container_running() { docker ps --format '{{.Names}}' | grep -qx "${1}"; }
+
+run_start() {
+  local name="$1" tag="$2" dir="$3" keepalive="$4" sock="$5"
+  shift 5 || true
+
+  local -a pubs=() mounts=()
+  local seen_delim=0 x
+  for x in "$@"; do
+    if [[ "$x" == "--" ]]; then
+      seen_delim=1
+      continue
+    fi
+    if ((seen_delim)); then
+      mounts+=("$x")
+    else
+      pubs+=("$x")
+    fi
+  done
+
+  local -a args=(docker run -d --name "$name"
+    --label "com.infocyph.lds.run=1"
+    --label "com.infocyph.lds.dir=$dir"
+    --label "com.infocyph.lds.tag=$tag"
+    -w /workspace
+    -v "$dir:/workspace"
+  )
+
+  if [[ -n "$sock" ]]; then
+    args+=( -v "$sock:/var/run/docker.sock" )
+  fi
+
+  local p
+  for p in "${pubs[@]}"; do
+    args+=( -p "$p" )
+  done
+
+  local m
+  for m in "${mounts[@]}"; do
+    # host[:container]
+    if [[ "$m" == *":"* ]]; then
+      args+=( -v "$m" )
+    else
+      args+=( -v "$m:$m" )
+    fi
+  done
+
+  if [[ "$keepalive" == "1" ]]; then
+    args+=( "$tag" sh -lc 'trap : TERM INT; while :; do sleep 3600; done' )
+  else
+    args+=( "$tag" )
+  fi
+
+  "${args[@]}"
+}
+
+run_stop() {
+  local name="$1"
+  docker rm -f "$name" >/dev/null 2>&1 || true
+}
+
+run_logs() {
+  local name="$1"
+  shift || true
+  docker logs "$@" "$name"
+}
+
+run_exec() {
+  local name="$1"; shift || true
+  docker exec -it "$name" "$@"
+}
+
+run_ps() {
+  docker ps --filter 'label=com.infocyph.lds.run=1' --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
+}
+
+usage(){
+  cat <<USG
+Usage:
+  lds run start <name> <image> [--keepalive] [--sock] [PORT:PORT ...] [-- MOUNT ...]
+  lds run stop <name>
+  lds run logs <name> [docker logs args]
+  lds run exec <name> <cmd...>
+  lds run ps
+USG
+}
+
+sub="${1:-}"; shift || true
+case "$sub" in
+  start)
+    name="${1:-}"; tag="${2:-}"; shift 2 || true
+    [[ -n "$name" && -n "$tag" ]] || die "run start <name> <image> ..."
+
+    keepalive=0 sock=""
+    if [[ "${1:-}" == "--keepalive" ]]; then keepalive=1; shift; fi
+    if [[ "${1:-}" == "--sock" ]]; then sock="/var/run/docker.sock"; shift; fi
+
+    dir="$(run_host_dir "$ROOT")"
+    run_stop "$name"
+    run_start "$name" "$tag" "$dir" "$keepalive" "$sock" "$@" >/dev/null
+    lds_ok "started $name"
+    ;;
+  stop)
+    name="${1:-}"; [[ -n "$name" ]] || die "run stop <name>"; run_stop "$name"; lds_ok "stopped $name";;
+  logs)
+    name="${1:-}"; shift || true; [[ -n "$name" ]] || die "run logs <name>"; run_logs "$name" "$@";;
+  exec)
+    name="${1:-}"; shift || true; [[ -n "$name" ]] || die "run exec <name> <cmd...>"; ((${#@})) || set -- sh; run_exec "$name" "$@";;
+  ps) run_ps;;
+  *) usage; exit 1;;
+esac

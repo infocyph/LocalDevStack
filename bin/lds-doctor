@@ -1,12 +1,25 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-LDS="$ROOT_DIR/lds"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck disable=SC1090
+source "$ROOT/lib/bootstrap.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/io.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/docker.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/docker_exec.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/env.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/doctor.sh"
 
-if [[ ! -x "$LDS" ]]; then
-  echo "Error: lds not found or not executable at $LDS" >&2
-  exit 1
-fi
-
-exec "$LDS" "doctor" "$@"
+sub="${1:-run}"; shift || true
+case "$sub" in
+  run) lds_doctor_compose_config; lds_doctor_scan_logs; lds_doctor_shellcheck;;
+  lint) lds_doctor_shellcheck;;
+  scan-logs) lds_doctor_scan_logs;;
+  compose) lds_doctor_compose_config;;
+  *) die "doctor <run|lint|scan-logs|compose>";;
+esac

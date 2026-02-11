@@ -1,12 +1,45 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-LDS="$ROOT_DIR/lds"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck disable=SC1090
+source "$ROOT/lib/bootstrap.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/io.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/docker.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/docker_exec.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/env.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/domains.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/profiles.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/http.sh"
 
-if [[ ! -x "$LDS" ]]; then
-  echo "Error: lds not found or not executable at $LDS" >&2
-  exit 1
-fi
+usage(){
+  cat <<USG
+Usage:
+  lds host add   [mkhost args...]
+  lds host rm    [rmhost args...]
+  lds host list  [mkhost list args...]
+  lds host info  (prints active profiles from mkhost)
+USG
+}
 
-exec "$LDS" "host" "$@"
+sub="${1:-}"; shift || true
+case "$sub" in
+  add) exec mkhost "$@";;
+  rm|remove|del) exec rmhost "$@";;
+  list) exec mkhost --LIST "$@";;
+  info)
+    php_prof=$(mkhost --ACTIVE_PHP_PROFILE || true)
+    svr_prof=$(mkhost --APACHE_ACTIVE || true)
+    node_prof=$(mkhost --ACTIVE_NODE_PROFILE || true)
+    printf "PHP=%s\nAPACHE=%s\nNODE=%s\n" "$php_prof" "$svr_prof" "$node_prof"
+    ;;
+  domain) setup_domain;;
+  *) usage; exit 1;;
+esac

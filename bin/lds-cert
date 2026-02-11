@@ -1,12 +1,32 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-LDS="$ROOT_DIR/lds"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck disable=SC1090
+source "$ROOT/lib/bootstrap.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/io.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/docker.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/docker_exec.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/env.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/cert.sh"
 
-if [[ ! -x "$LDS" ]]; then
-  echo "Error: lds not found or not executable at $LDS" >&2
-  exit 1
-fi
-
-exec "$LDS" "cert" "$@"
+sub="${1:-status}"; shift || true
+case "$sub" in
+  expiry)
+    pem="${1:-/etc/mkcert/nginx-server.pem}"
+    lds_cert_expiry "$pem";;
+  verify)
+    host="${1:-}"; [[ -n "$host" ]] || die "cert verify <host> [port]"
+    port="${2:-443}"
+    lds_cert_verify "$host" "$port" && lds_ok "TLS OK" || die "TLS verify failed";;
+  status)
+    lds_cert_expiry "${1:-/etc/mkcert/nginx-server.pem}" || true;;
+  regen)
+    exec tools_exec certify --force;;
+  *) die "cert <status|expiry|verify|regen>";;
+esac

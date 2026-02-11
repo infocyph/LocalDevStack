@@ -1,6 +1,8 @@
-# lds lib: profiles
+#!/usr/bin/env bash
 # shellcheck shell=bash
-# Requires lib/env.sh
+# Generated from lds_X refactor (lib stage)
+
+# Profile management helpers. No side effects until called.
 
 modify_profiles() {
   local action=$1
@@ -38,9 +40,38 @@ modify_profiles() {
   )"
 }
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Profiles
+# ─────────────────────────────────────────────────────────────────────────────
+
+declare -A SERVICES=(
+  [POSTGRESQL]="postgresql"
+  [MYSQL]="mysql"
+  [MARIADB]="mariadb"
+  [ELASTICSEARCH]="elasticsearch"
+  [MONGODB]="mongodb"
+  [REDIS]="redis"
+)
+
+declare -a SERVICE_ORDER=(POSTGRESQL MYSQL MARIADB ELASTICSEARCH MONGODB REDIS)
+
+declare -A PROFILE_ENV=(
+  [elasticsearch]="ELASTICSEARCH_VERSION=9.2.4"
+  [mysql]="MYSQL_VERSION=latest MYSQL_ROOT_PASSWORD=12345 MYSQL_USER=infocyph MYSQL_PASSWORD=12345 MYSQL_DATABASE=localdb"
+  [mariadb]="MARIADB_VERSION=latest MARIADB_ROOT_PASSWORD=12345 MARIADB_USER=infocyph MARIADB_PASSWORD=12345 MARIADB_DATABASE=localdb"
+  [mongodb]="MONGODB_VERSION=latest MONGODB_ROOT_USERNAME=root MONGODB_ROOT_PASSWORD=12345"
+  [redis]="REDIS_VERSION=latest"
+  [postgresql]="POSTGRES_VERSION=latest POSTGRES_USER=postgres POSTGRES_PASSWORD=postgres POSTGRES_DATABASE=postgres"
+)
+
+declare -a PENDING_ENVS=()
+declare -a PENDING_PROFILES=()
+
+
 queue_env() { PENDING_ENVS+=("$1"); }
 
 queue_profile() { PENDING_PROFILES+=("$1"); }
+
 
 flush_envs() {
   local env_file="$ENV_DOCKER" kv key val
@@ -50,12 +81,16 @@ flush_envs() {
   done
 }
 
+
 flush_profiles() {
   local profile
   for profile in "${PENDING_PROFILES[@]}"; do
     modify_profiles add "$profile"
   done
 }
+
+# ── setup menu (selection-first) ──────────────────────────────────────────────
+
 
 setup_menu_print() {
   # Print menu to stderr to avoid stdout buffering in some Windows wrappers.
@@ -71,6 +106,8 @@ setup_menu_print() {
     printf "  n) NONE / Back\n\n"
   } >&2
 }
+
+# Parse user selection into indices or ALL/NONE (prints one token per line)
 
 setup_menu_parse() {
   local input="${1//[[:space:]]/}"
@@ -92,6 +129,8 @@ setup_menu_parse() {
     END { if (!ok) exit 2 }
   '
 }
+
+# Outputs: newline-separated service KEYS from SERVICE_ORDER (e.g. MYSQL, REDIS)
 
 setup_choose_services() {
   local ans parsed
@@ -136,6 +175,7 @@ setup_choose_services() {
   done
 }
 
+
 setup_service() {
   local service="$1"
   local profile="${SERVICES[$service]:-}"
@@ -152,6 +192,7 @@ setup_service() {
     queue_env "$key=$val"
   done
 }
+
 
 process_all() {
   local selected
@@ -175,4 +216,8 @@ process_all() {
   flush_profiles
   printf "\n%b✅ Selected services configured!%b\n" "$GREEN" "$NC"
 }
+
+###############################################################################
+# 4a. LAUNCH PHP CONTAINER INSIDE DOCROOT
+###############################################################################
 

@@ -1,12 +1,27 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-LDS="$ROOT_DIR/lds"
-
-if [[ ! -x "$LDS" ]]; then
-  echo "Error: lds not found or not executable at $LDS" >&2
-  exit 1
-fi
-
-exec "$LDS" "nginx" "$@"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck disable=SC1090
+source "$ROOT/lib/bootstrap.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/io.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/docker.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/docker_exec.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/env.sh"
+sub="${1:-}"; shift || true
+case "$sub" in
+  reload) http_reload;;
+  test) nginx_exec nginx -t;;
+  roots)
+    nginx_exec sh -lc "rg -n '^[[:space:]]*root[[:space:]]+' /etc/nginx/nginx.conf /etc/nginx/conf.d -S || true";;
+  dump)
+    nginx_exec sh -lc "nginx -T 2>/dev/null | sed -n '1,220p'";;
+  match)
+    host="${1:-}"; [[ -n "$host" ]] || die "nginx match <host>"
+    nginx_exec sh -lc "rg -n \"server_name.*\\b$host\\b\" -S /etc/nginx/conf.d /etc/nginx/nginx.conf || true";;
+  *) die "nginx <reload|test|roots|dump|match>";;
+esac

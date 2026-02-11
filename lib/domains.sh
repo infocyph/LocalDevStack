@@ -1,10 +1,13 @@
-# lds lib: domains
+#!/usr/bin/env bash
 # shellcheck shell=bash
-# Requires lib/docker_exec.sh and lib/http.sh
+# Generated from lds_X refactor (lib stage)
+
+# Domain/vhost helpers (delegated to SERVER_TOOLS where possible)
 
 mkhost() { docker exec SERVER_TOOLS mkhost "$@"; }
 
 delhost() { docker exec SERVER_TOOLS delhost "$@"; }
+
 
 setup_domain() {
   mkhost --RESET
@@ -20,4 +23,7 @@ setup_domain() {
   dc_up -d
   http_reload
 }
+
+
+rmhost() { docker exec SERVER_TOOLS rmhost "$@"; }  # if present in tools image
 

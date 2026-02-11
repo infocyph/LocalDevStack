@@ -1,12 +1,30 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-LDS="$ROOT_DIR/lds"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck disable=SC1090
+source "$ROOT/lib/bootstrap.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/io.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/docker.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/docker_exec.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/env.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/perms.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/domains.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/profiles.sh"
 
-if [[ ! -x "$LDS" ]]; then
-  echo "Error: lds not found or not executable at $LDS" >&2
-  exit 1
-fi
-
-exec "$LDS" "setup" "$@"
+add_required_env
+sub="${1:-}"; shift || true
+case "$sub" in
+  init) env_init;;
+  permission|permissions|perms|perm) fix_perms;;
+  domain) setup_domain;;
+  profiles|profile) process_all;;
+  *) die "setup <init|permissions|domain|profiles>";;
+esac

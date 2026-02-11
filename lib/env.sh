@@ -1,6 +1,8 @@
-# lds lib: env
+#!/usr/bin/env bash
 # shellcheck shell=bash
-# Requires lib/bootstrap.sh
+# Generated from lds_X refactor (lib stage)
+
+# .env helpers (read/update). No side effects.
 
 env_quote() {
   # Wrap in double-quotes and escape backslash + double-quote + newlines
@@ -10,6 +12,7 @@ env_quote() {
   s=${s//$'\n'/\\n}
   printf '"%s"' "$s"
 }
+
 
 env_quote_if_needed() {
   local v=${1-}
@@ -29,6 +32,8 @@ env_quote_if_needed() {
   printf '%s' "$v"
 }
 
+# Escape replacement for sed (delimiter '|')
+
 sed_escape_repl() {
   local s=${1-}
   s=${s//\\/\\\\}
@@ -36,6 +41,7 @@ sed_escape_repl() {
   s=${s//|/\\|}
   printf '%s' "$s"
 }
+
 
 update_env() {
   local file=$1 var=$2 val=${3-}
@@ -60,6 +66,7 @@ update_env() {
   fi
 }
 
+
 detect_timezone() {
   if command -v timedatectl &>/dev/null; then
     timedatectl show -p Timezone --value
@@ -73,6 +80,7 @@ detect_timezone() {
     date +%Z
   fi
 }
+
 
 env_init() {
   local env_file="$ENV_DOCKER"
@@ -94,5 +102,41 @@ env_init() {
   update_env "$env_file" "GIT_USER_EMAIL" "$git_email"
 
   printf "%bConfiguration saved!%b\n" "$GREEN" "$NC"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Root CA helpers (cross-distro)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Unique identity (avoid conflicts with other mkcert/dev CAs)
+CA_BASENAME="localdevstack-rootca"
+CA_NICK="LocalDevStack Root CA"
+
+
+add_required_env() {
+  update_env "$ENV_DOCKER" WORKING_DIR "$DIR"
+  ((EUID == 0)) && return 0
+  update_env "$ENV_DOCKER" USER "$(id -un)"
+  update_env "$ENV_DOCKER" UID "$(id -u)"
+  update_env "$ENV_DOCKER" GID "$(id -g)"
+}
+
+###############################################################################
+# Compose helpers for rebuild (robust: supports service key OR container name)
+###############################################################################
+__COMPOSE_CFG_JSON=""
+__COMPOSE_CFG_YAML=""
+__COMPOSE_SVCS_LOADED=0
+declare -a __COMPOSE_SVCS=()
+
+
+# Safe .env load (optional) - whitelist pattern.
+lds_env_load() {
+  local f="${1:-}"
+  [[ -r "$f" ]] || return 0
+  set -o allexport
+  # shellcheck disable=SC1090
+  source <(grep -E '^[A-Za-z_][A-Za-z0-9_]*=' "$f" || true)
+  set +o allexport
 }
 

@@ -1,12 +1,104 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-LDS="$ROOT_DIR/lds"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck disable=SC1090
+source "$ROOT/lib/bootstrap.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/io.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/docker.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/docker_exec.sh"
+# shellcheck disable=SC1090
+source "$ROOT/lib/env.sh"
+# Rebuild services (all or selected). Preserves behavior from lds_X.
 
-if [[ ! -x "$LDS" ]]; then
-  echo "Error: lds not found or not executable at $LDS" >&2
-  exit 1
+normalize_service() {
+  local raw="${1:-}"
+  local s="${raw//[[:space:]]/}"
+  [[ -n "$s" ]] || { printf '%s' ""; return 0; }
+
+  local low="${s,,}"
+
+  local key="${low//_/}"
+  key="${key//-/}"
+  if [[ "$key" =~ ^php ]]; then
+    local ver="${key#php}"
+    ver="${ver//[^0-9]/}"
+    if [[ "$ver" =~ ^([0-9])([0-9]).* ]]; then
+      printf 'php%s%s' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+      return 0
+    fi
+    printf 'php'
+    return 0
+  fi
+
+  low="${low//_/-}"
+  while [[ "$low" == *"--"* ]]; do low="${low//--/-}"; done
+  printf '%s' "$low"
+}
+
+lds_compose_project_init
+compose_services_load >/dev/null 2>&1 || true
+
+local -a targets=() all_svcs=()
+local arg svc img
+declare -A seen=()
+
+_add_target() {
+  local s="$1"
+  [[ -n "$s" ]] || return 0
+  [[ -n "${seen[$s]:-}" ]] && return 0
+  seen[$s]=1
+  targets+=("$s")
+}
+
+_trim() {
+  local s="$1"
+  s="${s#"${s%%[![:space:]]*}"}"
+  s="${s%"${s##*[![:space:]]}"}"
+  printf '%s' "$s"
+}
+
+# If no args => rebuild all buildable services
+if [[ $# -eq 0 ]]; then
+  mapfile -t all_svcs < <(compose_cfg_yaml | awk '/^[[:space:]]{2}[a-zA-Z0-9_.-]+:$/ {gsub(":","",$1); print $1}')
+  for svc in "${all_svcs[@]}"; do
+    if compose_has_build "$svc"; then
+      _add_target "$svc"
+    fi
+  done
+else
+  for arg in "$@"; do
+    arg="$(_trim "$arg")"
+    [[ -n "$arg" ]] || continue
+
+    svc="$(normalize_service "$arg")"
+    [[ -n "$svc" ]] || continue
+
+    if compose_service_exists "$svc"; then
+      _add_target "$svc"
+      continue
+    fi
+
+    # Allow image name match by service.image
+    img="$svc"
+    svc=""
+    while IFS='|' read -r sname simg; do
+      [[ -z "$sname" ]] && continue
+      if [[ "$simg" == *"$img"* ]]; then
+        svc="$sname"; break
+      fi
+    done < <(compose_cfg_json | jq -r '.services | to_entries[] | "\(.key)|\(.value.image // "")"' 2>/dev/null || true)
+
+    [[ -n "$svc" ]] && _add_target "$svc"
+  done
 fi
 
-exec "$LDS" "rebuild" "$@"
+((${#targets[@]})) || die "No buildable services found."
+
+lds_info "Rebuilding: ${targets[*]}"
+docker_compose build --pull "${targets[@]}"
+docker_compose up -d --force-recreate "${targets[@]}"
+http_reload
