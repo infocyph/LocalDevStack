@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# lds core [domain]
+
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# shellcheck source=../lib/bootstrap.sh
+source "$DIR/lib/bootstrap.sh"
+# shellcheck source=../lib/launch.sh
+source "$DIR/lib/launch.sh"
+
+lds_colors_init
+
+core_pick_domain() {
+  local -a domains=()
+  local f d
+
+  shopt -s nullglob
+  for f in "$DIR/configuration/nginx/"*.conf; do
+    d="$(basename -- "$f" .conf)"
+    [[ -n "$d" ]] && domains+=("$d")
+  done
+  shopt -u nullglob
+
+  ((${#domains[@]} > 0)) || die "No domains found in $DIR/configuration/nginx"
+
+  # stable ordering
+  IFS=$'\n' read -r -d '' -a domains < <(printf '%s\n' "${domains[@]}" | LC_ALL=C sort -u && printf '\0')
+
+  # If there's only one domain, just use it.
+  if ((${#domains[@]} == 1)); then
+    printf '%s' "${domains[0]}"
+    return 0
+  fi
+
+  # Must be interactive to pick.
+  if [[ ! -t 0 ]]; then
+    printf "%b[core]%b No domain provided. Available domains:\n" "$YELLOW" "$NC" >&2
+    local i=1
+    for d in "${domains[@]}"; do
+      printf "  %2d) %s\n" "$i" "$d" >&2
+      ((i++))
+    done
+    die "No TTY to prompt. Use: lds core <domain>"
+  fi
+
+  printf "%bSelect domain:%b\n" "$CYAN" "$NC" >&2
+  local i=1
+  for d in "${domains[@]}"; do
+    printf "  %2d) %s\n" "$i" "$d" >&2
+    ((i++))
+  done
+  printf "  %2d) %s\n" 0 "Cancel" >&2
+
+  local ans idx
+  while true; do
+    printf "%bDomain #%b " "$GREEN" "$NC" >&2
+    tty_readline ans "" || return 130
+    ans="${ans//[[:space:]]/}"
+    [[ -n "$ans" ]] || continue
+
+    if [[ "$ans" == "0" ]]; then
+      return 130
+    fi
+
+    if [[ "$ans" =~ ^[0-9]+$ ]]; then
+      idx=$((ans - 1))
+      if ((idx >= 0 && idx < ${#domains[@]})); then
+        printf '%s' "${domains[$idx]}"
+        return 0
+      fi
+    else
+      # allow typing domain directly
+      for d in "${domains[@]}"; do
+        if [[ "$d" == "$ans" ]]; then
+          printf '%s' "$d"
+          return 0
+        fi
+      done
+    fi
+
+    printf "%bInvalid selection.%b\n" "$YELLOW" "$NC" >&2
+  done
+}
+
+domain="${1:-}"
+if [[ -z "$domain" ]]; then
+  domain="$(core_pick_domain)" || {
+    rc=$?
+    ((rc == 130)) && exit 130
+    die "No domain selected"
+  }
+fi
+
+nconf="$DIR/configuration/nginx/$domain.conf"
+[[ -f "$nconf" ]] || die "No Nginx config for $domain"
+
+# Node vhost?
+if grep -Eq 'proxy_pass[[:space:]]+http://node_[A-Za-z0-9._-]+:[0-9]+' "$nconf"; then
+  launch_node "$domain"
+  exit 0
+fi
+
+launch_php "$domain"
