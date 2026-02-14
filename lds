@@ -93,6 +93,9 @@ if [[ ! "$cmd" =~ ^[a-z0-9][a-z0-9-]*$ ]]; then
   die "Invalid command: $cmd"
 fi
 
+: "${LDS_PROXY_TOOLS:=1}"
+export LDS_PROXY_TOOLS
+
 bin="$DIR/bin/lds-$cmd"
 if [[ -x "$bin" ]]; then
   exec "$bin" "$@"

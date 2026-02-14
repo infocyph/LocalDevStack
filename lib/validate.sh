@@ -1,20 +1,29 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash
-# Generated from lds_X refactor (lib stage)
 
-# Validation helpers
-
-lds_validate_compose() { docker_compose config >/dev/null; }
+lds_validate_compose() {
+  if docker_compose config >/dev/null 2>&1; then
+    echo "compose: OK"
+    return 0
+  fi
+  echo "compose: FAIL (docker compose config)" >&2
+  return 1
+}
 
 lds_validate_env() {
-  local f="$1"
-  [[ -r "$f" ]] || { echo "Missing env: $f" >&2; return 1; }
+  local f="${1:-}"
+  [[ -n "$f" ]] || { echo "env: FAIL (missing path)" >&2; return 2; }
+  [[ -r "$f" ]] || { echo "env: FAIL (missing/unreadable: $f)" >&2; return 1; }
+  echo "env: OK ($f)"
   return 0
 }
 
 lds_validate_profiles() {
   # Quick sanity: ensure COMPOSE_PROFILES doesn't contain empty entries
-  [[ "${COMPOSE_PROFILES:-}" =~ ,, ]] && { echo "Invalid COMPOSE_PROFILES: contains empty entry" >&2; return 1; } || true
+  if [[ "${COMPOSE_PROFILES:-}" =~ ,, ]]; then
+    echo "profiles: FAIL (COMPOSE_PROFILES contains empty entry)" >&2
+    return 1
+  fi
+  echo "profiles: OK"
   return 0
 }
-

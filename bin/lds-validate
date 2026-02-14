@@ -15,11 +15,12 @@ source "$ROOT/lib/env.sh"
 # shellcheck disable=SC1090
 source "$ROOT/lib/validate.sh"
 
-sub="${1:-all}"; shift || true
+sub="${1:-all}"
+shift || true
 case "$sub" in
-  all) lds_validate_compose; lds_validate_env; lds_validate_profiles;;
-  compose) lds_validate_compose;;
-  env) lds_validate_env;;
-  profiles) lds_validate_profiles;;
-  *) die "validate <all|compose|env|profiles>";;
+  env) lds_validate_env "${1:-$ENV_DOCKER}" ;;
+  compose) lds_validate_compose ;;
+  profiles) lds_validate_profiles ;;
+  all) lds_validate_compose && lds_validate_profiles && lds_validate_env "${ENV_DOCKER:-$DIR/docker/.env}" ;;
+  *) die "validate <all|compose|env|profiles>" ;;
 esac

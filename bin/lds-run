@@ -2,31 +2,87 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export LDS_ROOT="$ROOT"
+
 # shellcheck disable=SC1090
 source "$ROOT/lib/bootstrap.sh"
 # shellcheck disable=SC1090
 source "$ROOT/lib/io.sh"
 # shellcheck disable=SC1090
-source "$ROOT/lib/docker.sh"
+source "$ROOT/lib/open.sh"
 # shellcheck disable=SC1090
 source "$ROOT/lib/docker_exec.sh"
-# shellcheck disable=SC1090
-source "$ROOT/lib/env.sh"
-# Runner orchestration (ported from lds_X)
 
-run_host_dir() {
-  local dir="$1"
-  [[ -n "$dir" ]] || return 1
-  mkdir -p "$dir"
-  printf '%s' "$(cd "$dir" && pwd)"
+usage() {
+  cat <<'USG'
+Usage:
+  lds run                          # build (unless --no-build) + start + shell (default)
+  lds run shell [opts]             # same as default
+  lds run ps
+  lds run stop [opts]
+  lds run rm [opts]
+  lds run logs [opts] [docker logs args...]
+  lds run open [opts]
+
+Options:
+  --name <name>          Container name (default from current dir)
+  --tag <image:tag>      Image tag (default from current dir)
+  --no-build             Skip docker build
+  --no-keepalive         Run container without keepalive
+  --sock                 Mount docker.sock
+  -p, --publish A:B      Publish port (repeatable)
+  --mount SRC[:DST]      Mount extra path (repeatable)
+
+Open options:
+  --port <port>          Port to open (container port like 8025)
+  --path </path>         Path (default /)
+  --http | --https       Protocol (default http)
+
+Notes:
+  The "run" container is labeled: com.infocyph.lds.run=1
+USG
 }
 
-run_container_running() { docker ps --format '{{.Names}}' | grep -qx "${1}"; }
+# -----------------------------------------------------------------------------
+# Helpers (ported from lds_X)
+# -----------------------------------------------------------------------------
+
+is_windows_shell_run() {
+  # reuse whatever you already use in your env; keep simple
+  case "${OSTYPE:-}" in
+  msys*|cygwin*|win32*) return 0;;
+  esac
+  [[ -n "${WORKDIR_WIN:-}" ]] && return 0
+  return 1
+}
+
+run_plan() {
+  local dir_posix="$1"
+  local base name tag
+  base="$(basename "$dir_posix")"
+  name="run-${base}"
+  tag="lds:run-${base}"
+  printf '%s|%s|%s\n' "$name" "$tag" "$dir_posix"
+}
+
+run_find_container() {
+  local dir_posix="$1"
+  docker ps -a \
+    --filter "label=com.infocyph.lds.run=1" \
+    --filter "label=com.infocyph.lds.dir=$dir_posix" \
+    --format '{{.Names}}' | head -n 1
+}
+
+run_build() {
+  local tag="$1" dir_docker="$2"
+  docker build -t "$tag" "$dir_docker"
+}
 
 run_start() {
-  local name="$1" tag="$2" dir="$3" keepalive="$4" sock="$5"
+  local name="$1" tag="$2" dir_docker="$3" keepalive="$4" sock="$5"
   shift 5 || true
 
+  # Split args by "--": before = publish specs, after = mounts
   local -a pubs=() mounts=()
   local seen_delim=0 x
   for x in "$@"; do
@@ -43,92 +99,223 @@ run_start() {
 
   local -a args=(docker run -d --name "$name"
     --label "com.infocyph.lds.run=1"
-    --label "com.infocyph.lds.dir=$dir"
+    --label "com.infocyph.lds.dir=$dir_docker"
     --label "com.infocyph.lds.tag=$tag"
     -w /workspace
-    -v "$dir:/workspace"
+    -v "$dir_docker:/workspace"
   )
 
-  if [[ -n "$sock" ]]; then
-    args+=( -v "$sock:/var/run/docker.sock" )
+  if [[ "$sock" == "1" ]]; then
+    args+=(-v /var/run/docker.sock:/var/run/docker.sock)
   fi
 
+  # publish ports
   local p
   for p in "${pubs[@]}"; do
-    args+=( -p "$p" )
+    [[ -n "$p" ]] || continue
+    args+=(-p "$p")
   done
 
-  local m
+  # mounts (host[:container]) — if only host given, mount into /workspace/<basename>
+  local m host dst bn
   for m in "${mounts[@]}"; do
-    # host[:container]
-    if [[ "$m" == *":"* ]]; then
-      args+=( -v "$m" )
+    [[ -n "$m" ]] || continue
+    host="${m%%:*}"
+    dst=""
+    if [[ "$m" == *:* ]]; then
+      dst="${m#*:}"
     else
-      args+=( -v "$m:$m" )
+      bn="$(basename "$host")"
+      dst="/workspace/$bn"
     fi
+    args+=(-v "$host:$dst")
   done
 
   if [[ "$keepalive" == "1" ]]; then
-    args+=( "$tag" sh -lc 'trap : TERM INT; while :; do sleep 3600; done' )
+    args+=("$tag" sh -lc 'trap "exit 0" TERM INT; while :; do sleep 3600; done')
   else
-    args+=( "$tag" )
+    args+=("$tag")
   fi
 
   "${args[@]}"
 }
 
-run_stop() {
+run_exec_shell() {
   local name="$1"
-  docker rm -f "$name" >/dev/null 2>&1 || true
+  exec docker exec -it "$name" sh
 }
 
-run_logs() {
-  local name="$1"
-  shift || true
-  docker logs "$@" "$name"
+open_url_run() {
+  local url="$1"
+  # Prefer lib/open.sh if it exports open_url; otherwise fallback
+  if declare -F open_url >/dev/null 2>&1; then
+    open_url "$url"
+    return
+  fi
+  if command -v xdg-open >/dev/null 2>&1; then
+    xdg-open "$url" >/dev/null 2>&1 || true
+  elif command -v open >/dev/null 2>&1; then
+    open "$url" >/dev/null 2>&1 || true
+  elif command -v powershell.exe >/dev/null 2>&1; then
+    powershell.exe -NoProfile -Command "Start-Process '$url'" >/dev/null 2>&1 || true
+  fi
 }
 
-run_exec() {
-  local name="$1"; shift || true
-  docker exec -it "$name" "$@"
+# -----------------------------------------------------------------------------
+# Main (ported cmd_run from lds_X)
+# -----------------------------------------------------------------------------
+
+action="shell"
+dir="$PWD"
+name=""
+tag=""
+nobuild=0
+keepalive=1
+sock=0
+publish=()
+mounts=()
+open_port=""
+open_path="/"
+open_proto="http"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+  stop|rm|ps|shell|logs|open)
+    action="$1"; shift ;;
+  --name)
+    name="${2:-}"; shift 2 ;;
+  --tag)
+    tag="${2:-}"; shift 2 ;;
+  --no-build)
+    nobuild=1; shift ;;
+  --no-keepalive)
+    keepalive=0; shift ;;
+  --sock)
+    sock=1; shift ;;
+  -p|--publish)
+    publish+=("${2:-}"); shift 2 ;;
+  --mount)
+    mounts+=("${2:-}"); shift 2 ;;
+  --port)
+    open_port="${2:-}"; shift 2 ;;
+  --path)
+    open_path="${2:-/}"; shift 2 ;;
+  --https)
+    open_proto="https"; shift ;;
+  --http)
+    open_proto="http"; shift ;;
+  -h|--help)
+    usage; exit 0 ;;
+  *) break ;;
+  esac
+done
+
+dir_posix="$(cd "$dir" && pwd -P)"
+dir_docker="$dir_posix"
+
+# Windows Git-Bash hardening (same intent as lds_X)
+if is_windows_shell_run; then
+  export MSYS_NO_PATHCONV=1
+  export MSYS2_ARG_CONV_EXCL='*'
+  if command -v cygpath >/dev/null 2>&1; then
+    dir_docker="$(cygpath -w "$dir_posix")"
+  fi
+fi
+
+IFS='|' read -r def_name def_tag _def_dir < <(run_plan "$dir_posix")
+name="${name:-$def_name}"
+tag="${tag:-$def_tag}"
+
+_find_for_dir() {
+  local found
+  found="$(run_find_container "$dir_posix" || true)"
+  if [[ -n "$found" ]]; then
+    printf '%s' "$found"; return 0
+  fi
+  if docker inspect "$name" >/dev/null 2>&1; then
+    printf '%s' "$name"; return 0
+  fi
+  return 1
 }
 
-run_ps() {
-  docker ps --filter 'label=com.infocyph.lds.run=1' --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
-}
+case "$action" in
+ps)
+  docker ps -a --filter "label=com.infocyph.lds.run=1" \
+    --format 'table {{.Names}}	{{.Image}}	{{.Status}}	{{.Labels}}'
+  exit 0
+  ;;
 
-usage(){
-  cat <<USG
-Usage:
-  lds run start <name> <image> [--keepalive] [--sock] [PORT:PORT ...] [-- MOUNT ...]
-  lds run stop <name>
-  lds run logs <name> [docker logs args]
-  lds run exec <name> <cmd...>
-  lds run ps
-USG
-}
+stop)
+  existing="$(_find_for_dir)" || die "no run container found for: $dir_posix"
+  docker stop "$existing" >/dev/null
+  lds_ok "Stopped $existing"
+  exit 0
+  ;;
 
-sub="${1:-}"; shift || true
-case "$sub" in
-  start)
-    name="${1:-}"; tag="${2:-}"; shift 2 || true
-    [[ -n "$name" && -n "$tag" ]] || die "run start <name> <image> ..."
+logs)
+  existing="$(_find_for_dir)" || die "no run container found for: $dir_posix"
+  exec docker logs -f "$existing" "$@"
+  ;;
 
-    keepalive=0 sock=""
-    if [[ "${1:-}" == "--keepalive" ]]; then keepalive=1; shift; fi
-    if [[ "${1:-}" == "--sock" ]]; then sock="/var/run/docker.sock"; shift; fi
+open)
+  existing="$(_find_for_dir)" || die "no run container found for: $dir_posix"
 
-    dir="$(run_host_dir "$ROOT")"
-    run_stop "$name"
-    run_start "$name" "$tag" "$dir" "$keepalive" "$sock" "$@" >/dev/null
-    lds_ok "started $name"
-    ;;
-  stop)
-    name="${1:-}"; [[ -n "$name" ]] || die "run stop <name>"; run_stop "$name"; lds_ok "stopped $name";;
-  logs)
-    name="${1:-}"; shift || true; [[ -n "$name" ]] || die "run logs <name>"; run_logs "$name" "$@";;
-  exec)
-    name="${1:-}"; shift || true; [[ -n "$name" ]] || die "run exec <name> <cmd...>"; ((${#@})) || set -- sh; run_exec "$name" "$@";;
-  ps) run_ps;;
-  *) usage; exit 1;;
+  [[ -n "$open_path" ]] || open_path="/"
+  [[ "$open_path" == /* ]] || open_path="/$open_path"
+
+  if [[ -n "$open_port" ]]; then
+    line="$(docker port "$existing" "$open_port" 2>/dev/null | head -n 1 || true)"
+    [[ -n "$line" ]] || line="$(docker port "$existing" "${open_port}/tcp" 2>/dev/null | head -n 1 || true)"
+  else
+    line="$(docker port "$existing" 2>/dev/null | head -n 1 || true)"
+  fi
+
+  if [[ -z "$line" ]]; then
+    lds_warn "No published ports found."
+    lds_warn "Tip: lds run --publish 8025:8025 then: lds run open"
+    exit 1
+  fi
+
+  addr="${line##*-> }"
+  hp="${addr##*:}"
+  url="${open_proto}://localhost:${hp}${open_path}"
+  open_url_run "$url"
+  lds_ok "Opened: $url"
+  exit 0
+  ;;
+
+rm)
+  existing="$(_find_for_dir)" || true
+  if [[ -n "${existing:-}" ]]; then
+    img="$(docker inspect -f '{{.Config.Image}}' "$existing" 2>/dev/null || true)"
+    docker stop "$existing" >/dev/null 2>&1 || true
+    docker rm "$existing" >/dev/null 2>&1 || true
+    lds_ok "Removed container $existing"
+    if [[ -n "${img:-}" ]]; then
+      docker rmi -f "$img" >/dev/null 2>&1 || true
+      lds_ok "Removed image $img"
+    fi
+  else
+    lds_warn "No container found for $dir_posix"
+  fi
+  exit 0
+  ;;
+
+shell|*)
+  if ((nobuild == 0)); then
+    run_build "$tag" "$dir_docker"
+  else
+    lds_warn "Skipping build (--no-build)"
+  fi
+
+  if docker inspect -f '{{.State.Running}}' "$name" 2>/dev/null | grep -q true; then
+    lds_ok "Container already running: $name"
+  else
+    docker inspect "$name" >/dev/null 2>&1 && docker rm -f "$name" >/dev/null 2>&1 || true
+    run_start "$name" "$tag" "$dir_docker" "$keepalive" "$sock" \
+      "${publish[@]}" -- "${mounts[@]}"
+  fi
+
+  run_exec_shell "$name"
+  ;;
 esac

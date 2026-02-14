@@ -2,15 +2,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-# shellcheck disable=SC1090
 source "$ROOT/lib/bootstrap.sh"
-# shellcheck disable=SC1090
 source "$ROOT/lib/io.sh"
-# shellcheck disable=SC1090
-source "$ROOT/lib/docker.sh"
-# shellcheck disable=SC1090
 source "$ROOT/lib/docker_exec.sh"
-# shellcheck disable=SC1090
 source "$ROOT/lib/env.sh"
 usage(){
   cat <<USG
@@ -23,8 +17,8 @@ USG
 
 sub="${1:-sh}"; shift || true
 case "$sub" in
-  sh) exec tools_sh;;
-  exec) ((${#@})) || die "tools exec <cmd...>"; exec tools_exec "$@";;
-  file) p="${1:-}"; [[ -n "$p" ]] || die "tools file <path>"; exec tools_exec sh -lc "ls -la '$p' && { [ -d '$p' ] && tree -L 2 '$p' || sed -n '1,200p' '$p'; }";;
+  sh) tools_sh;;
+  exec) ((${#@})) || die "tools exec <cmd...>"; echo "$@"; tools_exec "$@";;
+  file) p="${1:-}"; [[ -n "$p" ]] || die "tools file <path>"; tools_exec sh -lc "ls -la '$p' && { [ -d '$p' ] && tree -L 2 '$p' || sed -n '1,200p' '$p'; }";;
   *) usage; exit 1;;
 esac

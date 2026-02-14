@@ -75,7 +75,6 @@ dc_build() {
 }
 
 # helper for our own minimal logging (still shows in quiet mode)
-
 compose_cfg_json() {
   if [[ -z "${__COMPOSE_CFG_JSON}" ]]; then
     __COMPOSE_CFG_JSON="$(docker_compose config --format json 2>/dev/null || true)"

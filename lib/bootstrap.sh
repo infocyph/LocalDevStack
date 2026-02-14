@@ -151,3 +151,41 @@ ask_yes() {
 is_windows_shell() {
   [[ "${OSTYPE:-}" =~ (msys|cygwin) ]] || [[ -n "${WORKDIR_WIN:-}" ]]
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tool proxy (enabled only when LDS_PROXY_TOOLS=1)
+# ─────────────────────────────────────────────────────────────────────────────
+lds_tools_cmd() {
+  local cmd="${1:-}"
+  shift || true
+  [[ -n "$cmd" ]] || { echo "lds_tools_cmd: missing command" >&2; return 2; }
+
+  local -a flags=()
+  [[ -t 0 ]] && flags+=(-i)
+  [[ -t 1 ]] && flags+=(-t)
+
+  # if command exists on host
+  if command -v "$cmd" >/dev/null 2>&1; then
+    command "$cmd" "$@"
+    return $?
+  fi
+
+  # If SERVER_TOOLS is running
+  if docker inspect -f '{{.State.Running}}' SERVER_TOOLS 2>/dev/null | grep -qx true; then
+    if docker exec "${flags[@]}" SERVER_TOOLS "$cmd" "$@"; then
+      return 0
+    fi
+  fi
+
+  echo "Error: '$cmd' not available (SERVER_TOOLS not running and host command missing)" >&2
+  return 127
+}
+
+if ((${LDS_PROXY_TOOLS:-0})); then
+  jq() { lds_tools_cmd jq "$@"; }
+  yq() { lds_tools_cmd yq "$@"; }
+  rg() { lds_tools_cmd rg "$@"; }
+  fd() { lds_tools_cmd fd "$@"; }
+  shellcheck() { lds_tools_cmd shellcheck "$@"; }
+  tree() { lds_tools_cmd tree "$@"; }
+fi
