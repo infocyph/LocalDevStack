@@ -156,6 +156,31 @@ load_extras() {
 docker_compose() {
   load_extras
 
+  # Cache compose binary selection once (v2 preferred)
+  if [[ -z "${__LDS_DC_BIN:-}" ]]; then
+    if docker compose version >/dev/null 2>&1; then
+      __LDS_DC_BIN="docker compose"
+    else
+      __LDS_DC_BIN="docker-compose"
+    fi
+  fi
+
+  # Deterministic project identity:
+  # - prefer COMPOSE_PROJECT_NAME from docker/.env (if present)
+  # - otherwise derive from repo folder name (sanitized)
+  if [[ -z "${__LDS_PROJECT:-}" ]]; then
+    local pn=""
+    if [[ -r "$ENV_DOCKER" ]]; then
+      pn="$(grep -E '^[[:space:]]*COMPOSE_PROJECT_NAME=' "$ENV_DOCKER" | tail -n1 | cut -d= -f2- | tr -d '\r' | tr -d '"' | tr -d "'")"
+    fi
+    if [[ -z "$pn" ]]; then
+      pn="$(basename -- "$DIR")"
+      pn="${pn//[^A-Za-z0-9_.-]/_}"
+      pn="${pn,,}"
+    fi
+    __LDS_PROJECT="$pn"
+  fi
+
   local -a files=()
   if ((${#__EXTRA_FILES[@]})); then
     local f
@@ -164,13 +189,9 @@ docker_compose() {
     done
   fi
 
-  # Prefer Docker Compose v2 ("docker compose"), fallback to v1 ("docker-compose")
-  local -a dc=(docker compose)
-  if ! docker compose version >/dev/null 2>&1; then
-    dc=(docker-compose)
-  fi
-
-  "${dc[@]}" \
+  # Export so docker compose picks it up
+  COMPOSE_PROJECT_NAME="$__LDS_PROJECT" \
+  ${__LDS_DC_BIN} \
     --project-directory "$DIR" \
     -f "$COMPOSE_FILE" \
     "${files[@]}" \
@@ -178,7 +199,10 @@ docker_compose() {
     "$@"
 }
 
-# ── docker compose wrappers (QUIET by default) ────────────────────────────────
+# helper: print project name
+lds_project() { printf '%s' "${__LDS_PROJECT:-$(basename -- "$DIR")}"; }
+
+ (QUIET by default) ────────────────────────────────
 dc_up() {
   if ((VERBOSE)); then
     docker_compose up "$@"
@@ -1264,13 +1288,460 @@ cmd_start() {
 }
 
 cmd_reload() { cmd_start "$@"; }
+
 cmd_stop() { docker_compose down; }
-cmd_down() { cmd_stop; }
+
+cmd_down() {
+  # Safety rails:
+  #   lds down --volumes requires --yes
+  local yes=0 vols=0
+  local -a args=()
+  while [[ "${1:-}" ]]; do
+    case "$1" in
+      --yes|-y) yes=1; shift ;;
+      --volumes|-v) vols=1; args+=("--volumes"); shift ;;
+      --remove-orphans) args+=("--remove-orphans"); shift ;;
+      *) args+=("$1"); shift ;;
+    esac
+  done
+  if ((vols)) && ((yes==0)); then
+    die "Refusing: down --volumes requires --yes"
+  fi
+  docker_compose down "${args[@]}"
+}
+
 cmd_restart() {
   cmd_stop
   cmd_start
 }
 cmd_reboot() { cmd_restart; }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 6a. STATUS / PS / STATS
+# ─────────────────────────────────────────────────────────────────────────────
+cmd_ps() { docker_compose ps "${@:-}"; }
+
+cmd_stats() {
+  local svc="${1:-}"
+  local project; project="$(lds_project)"
+  if [[ -n "$svc" ]]; then
+    # accept service or container name
+    local s; s="$(resolve_service "$svc" || true)"
+    if [[ -n "$s" ]]; then
+      docker stats --no-stream --format 'table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.NetIO}}\t{{.BlockIO}}' --filter "name=${project}_${s}"
+      return 0
+    fi
+  fi
+  docker stats --no-stream --format 'table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.NetIO}}\t{{.BlockIO}}'     --filter "label=com.docker.compose.project=$project"
+}
+
+_status_urls() {
+  local f d
+  shopt -s nullglob
+  for f in "$DIR/configuration/nginx/"*.conf; do
+    d="$(basename -- "$f" .conf)"
+    [[ -n "$d" ]] && printf 'https://%s\n' "$d"
+  done
+  shopt -u nullglob
+}
+
+_status_health_line() {
+  local c="$1"
+  local st health
+  st="$(docker inspect -f '{{.State.Status}}' "$c" 2>/dev/null || true)"
+  health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$c" 2>/dev/null || true)"
+  if [[ -n "$health" ]]; then
+    printf '%s:%s(%s)' "$c" "$st" "$health"
+  else
+    printf '%s:%s' "$c" "$st"
+  fi
+}
+
+cmd_status() {
+  local json=0 quiet=0
+  while [[ "${1:-}" ]]; do
+    case "$1" in
+      --json) json=1; shift ;;
+      --quiet|-q) quiet=1; shift ;;
+      *) break ;;
+    esac
+  done
+
+  local project; project="$(lds_project)"
+  local profiles=""
+  if [[ -r "$ENV_DOCKER" ]]; then
+    profiles="$(grep -E '^[[:space:]]*COMPOSE_PROFILES=' "$ENV_DOCKER" | tail -n1 | cut -d= -f2- | tr -d '\r' || true)"
+  fi
+
+  # containers
+  mapfile -t ctrs < <(docker ps -a --filter "label=com.docker.compose.project=$project" --format '{{.Names}}')
+
+  if ((json)); then
+    # minimal JSON without requiring jq
+    printf '{"project":%q,"profiles":%q,"containers":[' "$project" "$profiles"
+    local first=1 c
+    for c in "${ctrs[@]}"; do
+      ((first)) || printf ','
+      first=0
+      printf '%q' "$(_status_health_line "$c")"
+    done
+    printf '],"urls":['
+    first=1
+    while IFS= read -r u; do
+      [[ -n "$u" ]] || continue
+      ((first)) || printf ','
+      first=0
+      printf '%q' "$u"
+    done < <(_status_urls)
+    printf ']}
+'
+    return 0
+  fi
+
+  ((quiet)) || {
+    printf "%bProject:%b %s
+" "$CYAN" "$NC" "$project"
+    [[ -n "$profiles" ]] && printf "%bProfiles:%b %s
+" "$CYAN" "$NC" "$profiles"
+    printf "%bContainers:%b
+" "$CYAN" "$NC"
+    if ((${#ctrs[@]})); then
+      local c
+      for c in "${ctrs[@]}"; do
+        printf "  - %s
+" "$(_status_health_line "$c")"
+      done
+    else
+      printf "  (none)
+"
+    fi
+    printf "%bPorts:%b 80, 443
+" "$CYAN" "$NC"
+    printf "%bURLs:%b
+" "$CYAN" "$NC"
+    _status_urls | sed 's/^/  - /'
+  }
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 6b. LOGS / OPEN
+# ─────────────────────────────────────────────────────────────────────────────
+cmd_logs() {
+  local svc="" follow=0 since="" grep_pat=""
+  while [[ "${1:-}" ]]; do
+    case "$1" in
+      -f|--follow) follow=1; shift ;;
+      --since) since="${2:-}"; shift 2 ;;
+      --grep) grep_pat="${2:-}"; shift 2 ;;
+      *) svc="${1:-}"; shift ;;
+    esac
+  done
+
+  local -a args=()
+  ((follow)) && args+=("-f")
+  [[ -n "$since" ]] && args+=("--since" "$since")
+
+  if [[ -n "$svc" ]]; then
+    local s; s="$(resolve_service "$svc" || true)"
+    [[ -n "$s" ]] || die "Unknown service: $svc"
+    if [[ -n "$grep_pat" ]]; then
+      docker_compose logs "${args[@]}" "$s" 2>&1 | rg -n -- "$grep_pat"
+    else
+      docker_compose logs "${args[@]}" "$s"
+    fi
+  else
+    if [[ -n "$grep_pat" ]]; then
+      docker_compose logs "${args[@]}" 2>&1 | rg -n -- "$grep_pat"
+    else
+      docker_compose logs "${args[@]}"
+    fi
+  fi
+}
+
+cmd_open() {
+  local target="${1:-}"
+  [[ -n "$target" ]] || die "open <mail|db|redis|kibana|domain>"
+  local url=""
+  case "${target,,}" in
+    mail|mailpit) url="http://localhost:8025" ;;
+    db|cloudbeaver) url="http://localhost:8978" ;;
+    redis|redisinsight|redis-insight) url="http://localhost:5540" ;;
+    kibana) url="http://localhost:5601" ;;
+    *)
+      url="https://${target}"
+      ;;
+  esac
+  open_url "$url"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 6c. PROFILES
+# ─────────────────────────────────────────────────────────────────────────────
+_known_profile() {
+  local p="${1:-}"
+  [[ -n "$p" ]] || return 1
+  # quick/cheap check across compose files
+  local f
+  for f in "$COMPOSE_FILE" "${__EXTRA_FILES[@]:-}"; do
+    [[ -r "$f" ]] || continue
+    if grep -Eq "profiles:[[:space:]]*\[.*\b${p}\b.*\]" "$f" || grep -Eq "profiles:[[:space:]]*$" "$f"; then
+      # fall through to deeper check with rg if present
+      :
+    fi
+    if grep -Eq "\b${p}\b" "$f"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+cmd_profiles() {
+  local action="${1:-list}"
+  shift || true
+  case "${action,,}" in
+    list|"")
+      local cur=""
+      [[ -r "$ENV_DOCKER" ]] && cur="$(grep -E '^COMPOSE_PROFILES=' "$ENV_DOCKER" | tail -n1 | cut -d= -f2- | tr -d '\r' || true)"
+      printf "%bEnabled profiles:%b %s
+" "$CYAN" "$NC" "${cur:-<none>}"
+      printf "%bAvailable profiles:%b
+" "$CYAN" "$NC"
+      printf '  - %s
+' "${SERVICES[@]}" | LC_ALL=C sort -u
+      # warn if enabled profile has no mention in compose
+      if [[ -n "$cur" ]]; then
+        local p
+        IFS=',' read -r -a __ps <<<"$cur"
+        for p in "${__ps[@]}"; do
+          p="${p//[[:space:]]/}"
+          [[ -n "$p" ]] || continue
+          _known_profile "$p" || printf "%b[warn]%b enabled profile '%s' has no matching services in compose
+" "$YELLOW" "$NC" "$p"
+        done
+      fi
+      ;;
+    add)
+      [[ $# -gt 0 ]] || die "profiles add <profile...>"
+      for p in "$@"; do
+        modify_profiles add "$p"
+      done
+      ;;
+    remove|rm|del)
+      [[ $# -gt 0 ]] || die "profiles remove <profile...>"
+      modify_profiles remove "$@"
+      ;;
+    *)
+      die "profiles <list|add|remove>"
+      ;;
+  esac
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 6d. DIAG / SNIFF
+# ─────────────────────────────────────────────────────────────────────────────
+_tools_exec() {
+  docker inspect SERVER_TOOLS >/dev/null 2>&1 || die "SERVER_TOOLS container not found"
+  docker inspect -f '{{.State.Running}}' SERVER_TOOLS 2>/dev/null | grep -qx true || die "SERVER_TOOLS is not running"
+  docker exec -i SERVER_TOOLS sh -lc "$*"
+}
+
+cmd_diag() {
+  local sub="${1:-}"
+  shift || true
+  case "${sub,,}" in
+    dns)
+      local dom="${1:-}"; [[ -n "$dom" ]] || die "diag dns <domain>"
+      _tools_exec "dig +short "$dom"; echo; nslookup "$dom" 2>/dev/null || true; echo; getent hosts "$dom" 2>/dev/null || true"
+      ;;
+    route|net)
+      _tools_exec "ip r; echo; ip a; echo; ss -tulpen 2>/dev/null || netstat -tulpen 2>/dev/null || true"
+      ;;
+    tcp)
+      local h="${1:-}"; local p="${2:-}"
+      [[ -n "$h" && -n "$p" ]] || die "diag tcp <host> <port>"
+      _tools_exec "nc -vz -w2 "$h" "$p""
+      ;;
+    http)
+      local url="${1:-}"; shift || true
+      [[ -n "$url" ]] || die "diag http <url> [curl-args...]"
+      _tools_exec "curl -vkI "$url" "$@""
+      ;;
+    tls)
+      local dom="${1:-}"; [[ -n "$dom" ]] || die "diag tls <domain>"
+      _tools_exec "echo | openssl s_client -connect "$dom":443 -servername "$dom" -showcerts 2>/dev/null | sed -n '1,60p'"
+      ;;
+    *)
+      die "diag <dns|route|net|tcp|http|tls>"
+      ;;
+  esac
+}
+
+cmd_sniff() {
+  local url="${1:-}"; shift || true
+  [[ -n "$url" ]] || die "sniff <url> [curl-args...]"
+  _tools_exec "curl -vk -D - "$url" "$@" | (command -v jq >/dev/null 2>&1 && jq . 2>/dev/null || cat)"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 6e. SECRETS / CERT / HOST / UI / RUNTIME
+# ─────────────────────────────────────────────────────────────────────────────
+cmd_secrets() { docker exec -it SERVER_TOOLS senv "$@"; }
+
+cmd_cert() { docker exec -it SERVER_TOOLS certify "$@"; }
+
+cmd_host() {
+  local sub="${1:-}"; shift || true
+  case "${sub,,}" in
+    add)
+      setup_domain
+      ;;
+    rm|remove|del|delete)
+      local dom="${1:-}"; [[ -n "$dom" ]] || die "host rm <domain>"
+      cmd_delhost "$dom"
+      ;;
+    list)
+      shopt -s nullglob
+      for f in "$DIR/configuration/nginx/"*.conf; do
+        printf '%s
+' "$(basename -- "$f" .conf)"
+      done
+      shopt -u nullglob
+      ;;
+    *)
+      die "host <add|rm|list>"
+      ;;
+  esac
+}
+
+cmd_ui() { cmd_lzd; }
+
+cmd_runtime() {
+  local which="${1:-}"; [[ -n "$which" ]] || die "runtime <php|node>"
+  local f=""
+  for f in "$DIR/runtime-versions.json" "$DIR/docker/runtime-versions.json" "$DIR/configuration/runtime-versions.json"; do
+    [[ -r "$f" ]] && break || f=""
+  done
+  if [[ -z "$f" ]]; then
+    printf "%b[warn]%b runtime-versions.json not found
+" "$YELLOW" "$NC"
+    return 0
+  fi
+  _tools_exec "jq -r '."${which}" // empty' "$f" 2>/dev/null || cat "$f""
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 6f. EXEC / CHECK / EVENTS / CLEAN / ENV / VERIFY / DISK
+# ─────────────────────────────────────────────────────────────────────────────
+cmd_exec() {
+  local svc="${1:-}"; shift || true
+  [[ -n "$svc" ]] || die "exec <service> [cmd...]"
+  local s; s="$(resolve_service "$svc" || true)"
+  [[ -n "$s" ]] || die "Unknown service: $svc"
+  if [[ $# -gt 0 ]]; then
+    docker_compose exec "$s" "$@"
+  else
+    docker_compose exec "$s" sh -lc 'command -v bash >/dev/null 2>&1 && exec bash || exec sh'
+  fi
+}
+
+cmd_check() {
+  local sub="${1:-}"; shift || true
+  case "${sub,,}" in
+    upstream)
+      local dom="${1:-}"; [[ -n "$dom" ]] || die "check upstream <domain>"
+      local nconf="$DIR/configuration/nginx/$dom.conf"
+      [[ -r "$nconf" ]] || die "No nginx conf for domain: $dom"
+      printf "%bDomain:%b %s
+" "$CYAN" "$NC" "$dom"
+      if grep -q fastcgi_pass "$nconf"; then
+        local php; php="$(grep -Eo 'fastcgi_pass ([^:]+):9000' "$nconf" | awk '{print $2}' | sed 's/:9000$//' | head -n1 || true)"
+        printf "Upstream (php): %s
+" "${php:-unknown}"
+        [[ -n "$php" ]] && _tools_exec "nc -vz -w2 "$php" 9000 || true"
+      elif grep -q proxy_pass "$nconf"; then
+        local up; up="$(grep -m1 -Eo 'proxy_pass[[:space:]]+http://[^;]+' "$nconf" | awk '{print $2}' | sed 's|^http://||' || true)"
+        printf "Upstream (http): %s
+" "${up:-unknown}"
+        local h="${up%%:*}" p="${up##*:}"
+        [[ -n "$h" && -n "$p" && "$h" != "$up" ]] && _tools_exec "nc -vz -w2 "$h" "$p" || true"
+      fi
+      _tools_exec "curl -vkI "https://$dom" || true"
+      ;;
+    *)
+      die "check upstream <domain>"
+      ;;
+  esac
+}
+
+cmd_events() {
+  local since="${1:-1h}"
+  local project; project="$(lds_project)"
+  docker events --since "$since" --filter "label=com.docker.compose.project=$project"
+}
+
+cmd_clean() {
+  local yes=0 vols=0
+  while [[ "${1:-}" ]]; do
+    case "$1" in
+      --yes|-y) yes=1; shift ;;
+      --volumes|-v) vols=1; shift ;;
+      *) shift ;;
+    esac
+  done
+  ((yes)) || die "clean requires --yes"
+  local project; project="$(lds_project)"
+  # remove stopped containers for this project
+  docker rm -f $(docker ps -a --filter "label=com.docker.compose.project=$project" --filter "status=exited" -q) 2>/dev/null || true
+  if ((vols)); then
+    docker volume rm $(docker volume ls -q --filter "label=com.docker.compose.project=$project") 2>/dev/null || true
+  fi
+  printf "%b[clean]%b done
+" "$GREEN" "$NC"
+}
+
+cmd_env() { docker exec -it SERVER_TOOLS senv env "$@"; }
+
+cmd_verify() {
+  # smoke checks: compose config, LB up, curl each domain
+  docker_compose config >/dev/null
+  cmd_status --quiet >/dev/null || true
+  local d
+  while IFS= read -r d; do
+    [[ -n "$d" ]] || continue
+    _tools_exec "curl -skI "https://$d" | head -n 1"
+  done < <(shopt -s nullglob; for f in "$DIR/configuration/nginx/"*.conf; do basename -- "$f" .conf; done; shopt -u nullglob)
+}
+
+cmd_disk() {
+  docker system df
+  printf "
+%bProject data:%b
+" "$CYAN" "$NC"
+  du -sh "$DIR/data" 2>/dev/null || true
+}
+
+cmd_du() { cmd_disk; }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 6g. NGINX INTROSPECTION
+# ─────────────────────────────────────────────────────────────────────────────
+cmd_nginx() {
+  local dom="${1:-}"
+  [[ -n "$dom" ]] || die "nginx <domain>"
+  local f="$DIR/configuration/nginx/$dom.conf"
+  [[ -r "$f" ]] || die "No nginx conf: $f"
+  printf "%bNginx vhost:%b %s
+" "$CYAN" "$NC" "$f"
+  grep -nE 'server_name|listen|root |proxy_pass|fastcgi_pass|include |error_page' "$f" || true
+  if grep -q '/etc/nginx/html' "$f"; then
+    printf "%b[warn]%b mentions /etc/nginx/html (default root fallback risk)
+" "$YELLOW" "$NC"
+  fi
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 6h. HELP MARKDOWN
+# ─────────────────────────────────────────────────────────────────────────────
 
 normalize_service() {
   local raw="${1:-}"
@@ -1457,7 +1928,27 @@ docker_shell() {
     exec docker exec -it "$c" sh
   fi
 }
-cmd_tools() { docker_shell SERVER_TOOLS; }
+cmd_tools() {
+  local sub="${1:-sh}"
+  shift || true
+  case "${sub,,}" in
+  sh|shell|"")
+    docker_shell SERVER_TOOLS
+    ;;
+  exec)
+    [[ $# -gt 0 ]] || die "tools exec "<cmd>""
+    docker exec -it SERVER_TOOLS sh -lc "$*"
+    ;;
+  file)
+    local p="${1:-}"
+    [[ -n "$p" ]] || die "tools file <path>"
+    docker exec -it SERVER_TOOLS sh -lc "ls -la -- \"$p\" 2>/dev/null || true; echo; sed -n '1,200p' -- \"$p\" 2>/dev/null || true"
+    ;;
+  *)
+    die "tools <sh|exec|file>"
+    ;;
+  esac
+}
 cmd_lzd() { docker exec -it SERVER_TOOLS lazydocker; }
 cmd_lazydocker() { cmd_lzd; }
 cmd_http() { [[ ${1:-} == reload ]] && http_reload; }
@@ -1619,6 +2110,32 @@ cmd_certificate() {
 }
 
 cmd_doctor() {
+  # Optional focused modes
+  if [[ "${1:-}" == "--lint" ]]; then
+    shift || true
+    # Run shellcheck inside SERVER_TOOLS against lds + bin scripts (if present)
+    docker exec -i SERVER_TOOLS sh -lc '
+      set -e
+      command -v shellcheck >/dev/null 2>&1 || { echo "shellcheck not found in SERVER_TOOLS"; exit 1; }
+      files=""
+      for f in "'"$DIR"'"/lds "'"$DIR"'"/bin/* "'"$DIR"'"/lib/*.sh; do
+        [ -f "$f" ] && files="$files $f"
+      done
+      [ -n "$files" ] || { echo "No scripts found to lint"; exit 0; }
+      shellcheck -x $files
+    '
+    return 0
+  fi
+
+  if [[ "${1:-}" == "--scan-logs" ]]; then
+    shift || true
+    local pat="${1:-error|failed|panic|segfault|permission denied|fatal}"
+    local project; project="$(lds_project)"
+    # tail recent logs from compose services and grep with rg
+    docker_compose logs --since 30m 2>&1 | rg -n -i -- "$pat" || true
+    return 0
+  fi
+
   local os_id os_like
   IFS='|' read -r os_id os_like < <(detect_os_family)
 
@@ -2691,6 +3208,48 @@ cmd_vpn-fix() {
 }
 
 cmd_help() {
+
+  if [[ "${1:-}" == "--markdown" ]]; then
+    cat <<'MD'
+# LocalDevStack (lds) Commands
+
+## Core
+- `lds status [--json] [--quiet]` — project, profiles, health, URLs
+- `lds up` / `lds start` / `lds stop` / `lds down [--volumes --yes]` / `lds restart`
+- `lds ps` — compose ps
+- `lds stats [service]` — resource usage (no-stream)
+- `lds logs [service] [--follow] [--since 10m] [--grep pattern]`
+- `lds open <mail|db|redis|kibana|domain>`
+
+## Profiles / Config
+- `lds profiles [list|add|remove]`
+- `lds config [--json|--services|--profiles|--env-used]`
+
+## Diagnostics
+- `lds diag <dns|route|net|tcp|http|tls> ...`
+- `lds sniff <url> [curl-args...]`
+- `lds check upstream <domain>`
+- `lds events [since]`
+- `lds doctor [--lint] [--scan-logs]`
+
+## Tools / Power
+- `lds tools` — shell into SERVER_TOOLS
+- `lds tools exec "<cmd>"` / `lds tools file <path>`
+- `lds ui` — lazydocker
+
+## Lifecycle
+- `lds host <add|rm|list>`
+- `lds cert <args...>` — certify wrapper
+- `lds secrets <args...>` — senv wrapper
+- `lds env <args...>` — senv env wrapper
+- `lds clean --yes [--volumes]`
+- `lds verify`
+- `lds disk` / `lds du`
+
+MD
+    return 0
+  fi
+
   cat <<EOF
 ${CYAN}Usage:${NC}
   lds [--verbose|-v] <command> [args...]
