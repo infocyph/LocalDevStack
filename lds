@@ -3248,45 +3248,181 @@ cmd_vpn-fix() {
   ((dry_run)) && echo "Note: dry-run mode, nothing changed."
 }
 
+
+###############################################################################
+# 6x. GROUPED COMMAND ROUTERS (stack/domain/support) + backward-compatible aliases
+###############################################################################
+
+cmd_stack() {
+  local sub="${1:-}"; shift || true
+  case "${sub,,}" in
+    ""|help|-h|--help) cmd_help stack ;;
+    up|start)          cmd_up "$@" ;;
+    down|stop)         cmd_down "$@" ;;   # cmd_down already supports --volumes/--yes behavior where applicable
+    restart|reboot)    cmd_restart "$@" ;;
+    reload)            cmd_reload "$@" ;;
+    status)            cmd_status "$@" ;;
+    ps)                cmd_ps "$@" ;;
+    logs)              cmd_logs "$@" ;;
+    exec)              cmd_exec "$@" ;;
+    stats)             cmd_stats "$@" ;;
+    events)            cmd_events "$@" ;;
+    clean)             cmd_clean "$@" ;;
+    verify)            cmd_verify "$@" ;;
+    disk)              cmd_disk "$@" ;;
+    du)                cmd_du "$@" ;;
+    config)            cmd_config "$@" ;;
+    http)              cmd_http "$@" ;;
+    *)
+      die "stack <up|down|restart|reload|status|ps|logs|exec|stats|events|clean|verify|disk|du|config|http>"
+      ;;
+  esac
+}
+
+# Canonical: domain. Legacy: host.
+cmd_domain() {
+  local sub="${1:-}"; shift || true
+  case "${sub,,}" in
+    ""|help|-h|--help) die "domain <add|rm|ls|check|nginx>" ;;
+    add)               cmd_host add "$@" ;;
+    rm|remove|del|delete) cmd_host rm "$@" ;;
+    ls|list)           cmd_host list "$@" ;;
+    check)             cmd_check upstream "$@" ;;
+    nginx)             cmd_nginx "$@" ;;
+    *)
+      die "domain <add|rm|ls|check|nginx>"
+      ;;
+  esac
+}
+
+cmd_support() {
+  local sub="${1:-}"; shift || true
+  case "${sub,,}" in
+    ""|help|-h|--help) die "support <open|bundle|notify|ui>" ;;
+    open)              cmd_open "$@" ;;
+    bundle)            cmd_bundle "$@" ;;
+    notify)            cmd_notify "$@" ;;
+    ui)                cmd_ui "$@" ;;
+    *)
+      die "support <open|bundle|notify|ui>"
+      ;;
+  esac
+}
+
+# Minimal support bundle (shareable diagnostics zip)
+# Modes:
+#   --redact : remove secrets-like env lines from captured env/config outputs (best-effort)
+#   --full   : include more logs/inspect output (can be large)
+cmd_bundle() {
+  local mode="redact"
+  local out="${1:-}"
+  while [[ "${1:-}" ]]; do
+    case "$1" in
+      --redact) mode="redact"; shift ;;
+      --full)   mode="full"; shift ;;
+      *.zip)    out="$1"; shift ;;
+      *) break ;;
+    esac
+  done
+
+  need zip
+  local ts; ts="$(date +%Y%m%d_%H%M%S)"
+  local project; project="$(lds_project)"
+  local tmp; tmp="$(mktemp -d "${TMPDIR:-/tmp}/lds_bundle.XXXXXX")"
+  local base="lds_bundle_${project}_${ts}"
+  [[ -n "$out" ]] || out="$PWD/${base}.zip"
+
+  cleanup_bundle() { rm -rf "$tmp" 2>/dev/null || true; }
+  trap cleanup_bundle RETURN
+
+  {
+    echo "project=$project"
+    echo "dir=$DIR"
+    echo "time=$ts"
+    echo "mode=$mode"
+  } >"$tmp/meta.txt"
+
+  # compose config (effective)
+  {
+    echo "# docker compose config"
+    docker_compose config 2>&1 || true
+  } >"$tmp/compose.config.txt"
+
+  # ps + networks
+  docker_compose ps >"$tmp/compose.ps.txt" 2>&1 || true
+  docker network ls >"$tmp/docker.networks.txt" 2>&1 || true
+
+  # container list + inspect (scoped)
+  docker ps --filter "label=com.docker.compose.project=$project" --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}' \
+    >"$tmp/docker.ps.txt" 2>&1 || true
+
+  if [[ "$mode" == "full" ]]; then
+    docker inspect $(docker ps -q --filter "label=com.docker.compose.project=$project" 2>/dev/null) \
+      >"$tmp/docker.inspect.json" 2>/dev/null || true
+  fi
+
+  # recent logs (tail)
+  docker_compose logs --no-color --tail 400 >"$tmp/compose.logs.txt" 2>&1 || true
+
+  # vhost configs
+  if [[ -d "$DIR/configuration/nginx" ]]; then
+    mkdir -p "$tmp/nginx"
+    cp -a "$DIR/configuration/nginx/." "$tmp/nginx/" 2>/dev/null || true
+  fi
+
+  # env files (redacted best-effort)
+  mkdir -p "$tmp/env"
+  if [[ -r "$ENV_MAIN" ]]; then
+    if [[ "$mode" == "redact" ]]; then
+      sed -E 's/^([A-Za-z0-9_]+)=.*/\1=REDACTED/' "$ENV_MAIN" >"$tmp/env/.env"
+    else
+      cp -a "$ENV_MAIN" "$tmp/env/.env" 2>/dev/null || true
+    fi
+  fi
+  if [[ -r "$ENV_DOCKER" ]]; then
+    if [[ "$mode" == "redact" ]]; then
+      sed -E 's/^([A-Za-z0-9_]+)=.*/\1=REDACTED/' "$ENV_DOCKER" >"$tmp/env/docker.env"
+    else
+      cp -a "$ENV_DOCKER" "$tmp/env/docker.env" 2>/dev/null || true
+    fi
+  fi
+
+  # tools-side quick diagnostics (inside network)
+  {
+    echo "# ip r / ip a / ss"
+    _tools_exec "ip r; echo; ip a; echo; ss -tulpen 2>/dev/null || true"
+  } >"$tmp/tools.net.txt" 2>&1 || true
+
+  # pack
+  (cd "$tmp" && zip -qr "$out" .) || die "Failed to write bundle: $out"
+  ok "Bundle created: $out"
+}
+
 cmd_help() {
 
   if [[ "${1:-}" == "--markdown" ]]; then
     cat <<'MD'
 # LocalDevStack (lds) Commands
 
-## Core
-- `lds status [--json] [--quiet]` — project, profiles, health, URLs
-- `lds up` / `lds start` / `lds stop` / `lds down [--volumes --yes]` / `lds restart`
-- `lds ps` — compose ps
-- `lds stats [service]` — resource usage (no-stream)
-- `lds logs [service] [--follow] [--since 10m] [--grep pattern]`
-- `lds open <mail|db|redis|kibana|domain>`
+## Canonical grouped commands
+- `lds stack <up|down|restart|reload|status|ps|logs|exec|stats|events|clean|verify|disk|du|config|http> ...`
+- `lds domain <add|rm|ls|check|nginx> ...`
+- `lds cert <status|regen|diagnose> ...`
+- `lds diag <dns|net|route|tcp|http|tls> ...`
+- `lds config <show|services|profiles|env-used|validate> ...`
+- `lds doctor [run|lint|scan-logs|fix]`
+- `lds support <open|bundle|notify|ui> ...`
+- `lds secrets <args...>` — `senv` wrapper
+- `lds env <args...>` — `senv` env wrapper
+- `lds tools <sh|exec|file> ...` — gateway into SERVER_TOOLS
 
-## Profiles / Config
-- `lds profiles [list|add|remove]`
-- `lds config [--json|--services|--profiles|--env-used]`
-
-## Diagnostics
-- `lds diag <dns|route|net|tcp|http|tls> ...`
-- `lds sniff <url> [curl-args...]`
-- `lds check upstream <domain>`
-- `lds events [since]`
-- `lds doctor [--lint] [--scan-logs]`
-
-## Tools / Power
-- `lds tools` — shell into SERVER_TOOLS
-- `lds tools exec "<cmd>"` / `lds tools file <path>`
-- `lds ui` — lazydocker
-
-## Lifecycle
-- `lds host <add|rm|list>`
-- `lds cert <args...>` — certify wrapper
-- `lds secrets <args...>` — senv wrapper
-- `lds env <args...>` — senv env wrapper
-- `lds clean --yes [--volumes]`
-- `lds verify`
-- `lds disk` / `lds du`
-
+## Backward-compatible shortcuts (aliases)
+- `lds up|start|stop|down|restart|reload`
+- `lds status|ps|logs|exec|stats|events|clean|verify|disk|du`
+- `lds open|bundle|notify|ui`
+- `lds host ...` (legacy) → same behavior as `lds domain ...`
+- `lds sniff <url>` → `lds diag http <url>`
+- DB/PHP/Node shortcuts: `php|composer|node|npm|npx`, `my|mysql|mysqldump`, `maria|mariadb`, `pg|psql`, `redis|redis-cli`
 MD
     return 0
   fi
