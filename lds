@@ -174,42 +174,24 @@ docker_compose() {
   # Cache compose binary selection once (v2 preferred)
   if [[ -z "${__LDS_DC_BIN:-}" ]]; then
     if docker compose version >/dev/null 2>&1; then
-      __LDS_DC_BIN="docker compose"
+      __LDS_DC_BIN=(docker compose)
     else
-      __LDS_DC_BIN="docker-compose"
+      __LDS_DC_BIN=(docker-compose)
     fi
   fi
 
-  # Deterministic project identity:
-  # - prefer COMPOSE_PROJECT_NAME from docker/.env (if present)
-  # - otherwise derive from repo folder name (sanitized)
-  if [[ -z "${__LDS_PROJECT:-}" ]]; then
-    local pn=""
-    if [[ -r "$ENV_DOCKER" ]]; then
-      pn="$(grep -E '^[[:space:]]*COMPOSE_PROJECT_NAME=' "$ENV_DOCKER" | tail -n1 | cut -d= -f2- | tr -d '\r' | tr -d '"' | tr -d "'")"
-    fi
-    if [[ -z "$pn" ]]; then
-      pn="$(basename -- "$DIR")"
-      pn="${pn//[^A-Za-z0-9_.-]/_}"
-      pn="${pn,,}"
-    fi
-    __LDS_PROJECT="$pn"
-  fi
+  # Build -f list (stable order; later overrides earlier)
+  local -a extra_f=()
+  local f
+  for f in "${__EXTRA_FILES[@]:-}"; do
+    extra_f+=(-f "$f")
+  done
 
-  local -a files=()
-  if ((${#__EXTRA_FILES[@]})); then
-    local f
-    for f in "${__EXTRA_FILES[@]}"; do
-      files+=(-f "$f")
-    done
-  fi
-
-  # Export so docker compose picks it up
-  COMPOSE_PROJECT_NAME="$__LDS_PROJECT" \
-  ${__LDS_DC_BIN} \
+  # If you already have `name:` in YAML, you can remove COMPOSE_PROJECT_NAME entirely.
+    "${__LDS_DC_BIN[@]}" \
     --project-directory "$DIR" \
     -f "$COMPOSE_FILE" \
-    "${files[@]}" \
+    "${extra_f[@]}" \
     --env-file "$ENV_DOCKER" \
     "$@"
 }
@@ -1402,66 +1384,206 @@ cmd_status() {
   local json=0 quiet=0
   while [[ "${1:-}" ]]; do
     case "$1" in
-      --json) json=1; shift ;;
-      --quiet|-q) quiet=1; shift ;;
-      *) break ;;
+    --json) json=1; shift ;;
+    --quiet|-q) quiet=1; shift ;;
+    *) break ;;
     esac
   done
 
   local project; project="$(lds_project)"
+
   local profiles=""
   if [[ -r "$ENV_DOCKER" ]]; then
     profiles="$(grep -E '^[[:space:]]*COMPOSE_PROFILES=' "$ENV_DOCKER" | tail -n1 | cut -d= -f2- | tr -d '\r' || true)"
   fi
 
-  # containers
-  mapfile -t ctrs < <(docker ps -a --filter "label=com.docker.compose.project=$project" --format '{{.Names}}')
+  # containers (Name \t Service \t State \t Health)
+  local -a ctrs=()
+  mapfile -t ctrs < <(
+    docker_compose ps -a --format '{{.Name}}\t{{.Service}}\t{{.State}}\t{{.Health}}' 2>/dev/null \
+      | sed '/^[[:space:]]*$/d'
+  )
 
-  if ((json)); then
-    # minimal JSON without requiring jq
-    printf '{"project":%q,"profiles":%q,"containers":[' "$project" "$profiles"
-    local first=1 c
-    for c in "${ctrs[@]}"; do
-      ((first)) || printf ','
-      first=0
-      printf '%q' "$(_status_health_line_plain "$c")"
+  # urls
+  local -a urls=()
+  mapfile -t urls < <(_status_urls 2>/dev/null || true)
+
+  # ---- helpers ----
+  _json_escape() {
+    local s="$1"
+    s="${s//\\/\\\\}"
+    s="${s//\"/\\\"}"
+    s="${s//$'\n'/\\n}"
+    s="${s//$'\r'/\\r}"
+    s="${s//$'\t'/\\t}"
+    printf '%s' "$s"
+  }
+
+  _health_color() {
+    local h="$1"
+    # avoid ${var,,} to stay compatible
+    if [[ -z "$h" || "$h" == "null" ]]; then
+      printf '%s' "$DIM"
+    elif [[ "$h" == *"healthy"* ]]; then
+      printf '%s' "$GREEN"
+    elif [[ "$h" == *"unhealthy"* ]]; then
+      printf '%s' "$RED"
+    else
+      printf '%s' "$YELLOW"
+    fi
+  }
+
+  _state_color() {
+    local s="$1"
+    case "$s" in
+    running) printf '%s' "$GREEN" ;;
+    exited|dead) printf '%s' "$RED" ;;
+    restarting) printf '%s' "$YELLOW" ;;
+    *) printf '%s' "$DIM" ;;
+    esac
+  }
+
+  # NEW: health icon (✓, !, ×) - safe + simple
+  _health_icon() {
+    local h="$1"
+    if [[ -z "$h" || "$h" == "null" || "$h" == "-" ]]; then
+      printf '!'
+    elif [[ "$h" == *"unhealthy"* ]]; then
+      printf '×'
+    elif [[ "$h" == *"healthy"* ]]; then
+      printf '✓'
+    else
+      printf '!'
+    fi
+  }
+
+  # NEW: running/total summary
+  local total running
+  total=${#ctrs[@]}
+  running=0
+  if (( total )); then
+    local line _n _svc st _h
+    for line in "${ctrs[@]}"; do
+      IFS=$'\t' read -r _n _svc st _h <<<"$line"
+      [[ "$st" == "running" ]] && ((++running))
     done
-    printf '],"urls":['
-    first=1
-    while IFS= read -r u; do
-      [[ -n "$u" ]] || continue
-      ((first)) || printf ','
+  fi
+
+  # ---- JSON mode ----
+  if (( json )); then
+    printf '{'
+    printf '"project":"%s",' "$(_json_escape "$project")"
+    printf '"profiles":"%s",' "$(_json_escape "$profiles")"
+    printf '"summary":{"running":%s,"total":%s},' "$running" "$total"
+
+    printf '"containers":['
+    local first=1 line name svc state health
+    for line in "${ctrs[@]}"; do
+      IFS=$'\t' read -r name svc state health <<<"$line"
+      (( first )) || printf ','
       first=0
-      printf '%q' "$u"
-    done < <(_status_urls)
-    printf ']}
-'
+
+      local health_disp="${health:-}"
+      [[ -z "$health_disp" || "$health_disp" == "null" ]] && health_disp="-"
+
+      printf '{'
+      printf '"name":"%s",'   "$(_json_escape "$name")"
+      printf '"service":"%s",' "$(_json_escape "$svc")"
+      printf '"state":"%s",'  "$(_json_escape "$state")"
+      printf '"health":"%s",' "$(_json_escape "$health_disp")"
+      printf '"health_icon":"%s"' "$(_json_escape "$(_health_icon "$health_disp")")"
+      printf '}'
+    done
+    printf '],'
+
+    printf '"ports":[80,443],'
+
+    printf '"urls":['
+    first=1
+    local u
+    for u in "${urls[@]}"; do
+      [[ -n "$u" ]] || continue
+      (( first )) || printf ','
+      first=0
+      printf '"%s"' "$(_json_escape "$u")"
+    done
+    printf ']'
+
+    printf '}\n'
     return 0
   fi
 
-  ((quiet)) || {
-    printf "%bProject:%b %s
-" "$CYAN" "$NC" "$project"
-    [[ -n "$profiles" ]] && printf "%bProfiles:%b %s
-" "$CYAN" "$NC" "$profiles"
-    printf "%bContainers:%b
-" "$CYAN" "$NC"
-    if ((${#ctrs[@]})); then
-      local c
-      for c in "${ctrs[@]}"; do
-        printf "  - %s
-" "$(_status_health_line "$c")"
-      done
-    else
-      printf "  (none)
-"
-    fi
-    printf "%bPorts:%b 80, 443
-" "$CYAN" "$NC"
-    printf "%bURLs:%b
-" "$CYAN" "$NC"
-    _status_urls | sed 's/^/  - /'
-  }
+  # ---- Quiet mode ----
+  if (( quiet )); then
+    return 0
+  fi
+
+  # ---- Pretty output ----
+  printf "%bProject:%b %s\n" "$CYAN" "$NC" "$project"
+  [[ -n "$profiles" ]] && printf "%bProfiles:%b %s\n" "$CYAN" "$NC" "$profiles"
+
+  # UPDATED: Containers line shows running/total summary
+  printf "%bContainers:%b %b(%s/%s running)%b\n" "$CYAN" "$NC" "$DIM" "$running" "$total" "$NC"
+
+  if ((${#ctrs[@]} == 0)); then
+    printf "  (none)\n"
+  else
+    # column widths
+    local w_name=4 w_svc=7
+    local line name svc state health
+    for line in "${ctrs[@]}"; do
+      IFS=$'\t' read -r name svc state health <<<"$line"
+      ((${#name} > w_name)) && w_name=${#name}
+      ((${#svc}  > w_svc))  && w_svc=${#svc}
+    done
+    (( w_name > 34 )) && w_name=34
+    (( w_svc  > 18 )) && w_svc=18
+
+    # header
+    printf "  %b%-*s%b  %b%-*s%b  %b%-10s%b  %b%s%b\n" \
+      "$BOLD" "$w_name" "NAME" "$NC" \
+      "$BOLD" "$w_svc"  "SERVICE" "$NC" \
+      "$BOLD" "STATE" "$NC" \
+      "$BOLD" "HEALTH" "$NC"
+
+    # rows
+    for line in "${ctrs[@]}"; do
+      IFS=$'\t' read -r name svc state health <<<"$line"
+
+      local name_disp="$name" svc_disp="$svc"
+      if ((${#name_disp} > w_name)); then name_disp="${name_disp:0:w_name-1}…"; fi
+      if ((${#svc_disp} > w_svc)); then svc_disp="${svc_disp:0:w_svc-1}…"; fi
+
+      local stc hc
+      stc="$(_state_color "$state")"
+      hc="$(_health_color "${health:-}")"
+
+      local health_disp="${health:-}"
+      [[ -z "$health_disp" || "$health_disp" == "null" ]] && health_disp="-"
+
+      # NEW: icon prefix
+      local hi; hi="$(_health_icon "$health_disp")"
+
+      printf "  %-*s  %-*s  %b%-10s%b  %b%s %s%b\n" \
+        "$w_name" "$name_disp" \
+        "$w_svc"  "$svc_disp" \
+        "$stc" "${state:-"-"}" "$NC" \
+        "$hc" "$hi" "$health_disp" "$NC"
+    done
+  fi
+
+  printf "%bPorts:%b 80, 443\n" "$CYAN" "$NC"
+
+  printf "%bURLs:%b\n" "$CYAN" "$NC"
+  if ((${#urls[@]})); then
+    local u
+    for u in "${urls[@]}"; do
+      [[ -n "$u" ]] || continue
+      printf "  - %b%s%b\n" "$BLUE" "$u" "$NC"
+    done
+  else
+    printf "  (none)\n"
+  fi
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -3270,8 +3392,9 @@ cmd_stack() {
   local sub="${1:-}"; shift || true
   case "${sub,,}" in
     ""|help|-h|--help) cmd_help stack ;;
-    up|start)          cmd_up "$@" ;;
-    down|stop)         cmd_down "$@" ;;   # cmd_down already supports --volumes/--yes behavior where applicable
+    up)          cmd_up "$@" ;;
+    start)          cmd_start "$@" ;;
+    down|stop)         cmd_down "$@" ;;
     restart|reboot)    cmd_restart "$@" ;;
     reload)            cmd_reload "$@" ;;
     status)            cmd_status "$@" ;;
@@ -3418,7 +3541,8 @@ cmd_help() {
 # LocalDevStack (lds) — Command Reference
 
 ## Stack (compose + runtime)
-- `lds stack up`  *(aliases: `up`, `start`)*
+- `lds stack up`  *(aliases: `up`)*
+- `lds stack up`  *(aliases: `start`)*
 - `lds stack down [--volumes --yes]`  *(aliases: `down`, `stop`)*
 - `lds stack restart [svc]`  *(aliases: `restart`, `reboot`)*
 - `lds stack reload`
@@ -3515,8 +3639,9 @@ MD
 ${BOLD}LocalDevStack (lds)${NC}
 
 ${CYAN}Stack (compose + runtime):${NC}
-  stack up|down|restart|reload|status|ps|logs|exec|stats|events|clean|verify|disk|du|config
-  up|start                         Alias of: stack up
+  stack up|start|down|restart|reload|status|ps|logs|exec|stats|events|clean|verify|disk|du|config
+  up                               Alias of: stack up
+  start                            Alias of: stack start
   down|stop                        Alias of: stack down
   restart|reboot                   Alias of: stack restart
   status|ps|logs|exec|stats|events Alias of: stack <...>
