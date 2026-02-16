@@ -1316,7 +1316,13 @@ cmd_reboot() { cmd_restart; }
 # ─────────────────────────────────────────────────────────────────────────────
 # 6a. STATUS / PS / STATS
 # ─────────────────────────────────────────────────────────────────────────────
-cmd_ps() { docker_compose ps "${@:-}"; }
+cmd_ps() {
+  if (( $# )); then
+    docker_compose ps "$@"
+  else
+    docker_compose ps
+  fi
+}
 
 cmd_stats() {
   local svc="${1:-}"
@@ -1626,10 +1632,11 @@ cmd_open() {
   [[ -n "$target" ]] || die "open <mail|db|redis|kibana|domain>"
   local url=""
   case "${target,,}" in
-    mail|mailpit) url="http://localhost:8025" ;;
-    db|cloudbeaver) url="http://localhost:8978" ;;
-    redis|redisinsight|redis-insight) url="http://localhost:5540" ;;
-    kibana) url="http://localhost:5601" ;;
+    mail|mailpit|webmail) url="https://webmail.localhost" ;;
+    db|cloudbeaver) url="https://db.localhost" ;;
+    redis|redisinsight|redis-insight|rds) url="http://ri.localhost" ;;
+    mongo|me|mongoexpress|mongo-express) url="http://me.localhost" ;;
+    kibana|kbn) url="http://kibana.localhost" ;;
     *)
       url="https://${target}"
       ;;
