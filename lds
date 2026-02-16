@@ -55,10 +55,25 @@ if [[ "${1:-}" == "--__win_workdir" ]]; then
   shift 2
 fi
 
-COLOR() { printf '\033[%sm' "$1"; }
-RED=$(COLOR '0;31') GREEN=$(COLOR '0;32') CYAN=$(COLOR '0;36')
-YELLOW=$(COLOR '1;33') BLUE=$(COLOR '0;34') MAGENTA=$(COLOR '0;35')
-NC=$(COLOR '0')
+COLOR() { printf '[%sm' "$1"; }
+###############################################################################
+# Colors + UI (higher contrast; aligned with mkhost.sh)
+###############################################################################
+BOLD=$'[1m'
+DIM=$'[2m'
+RED=$'[1;31m'
+GREEN=$'[1;32m'
+CYAN=$'[1;36m'
+YELLOW=$'[1;33m'
+BLUE=$'[1;34m'
+MAGENTA=$'[1;35m'
+NC=$'[0m'
+
+say()  { echo -e "$*"; }
+ok()   { say "${GREEN}$*${NC}"; }
+warn() { say "${YELLOW}$*${NC}"; }
+err()  { say "${RED}$*${NC}"; }
+
 
 # Default behavior: QUIET
 VERBOSE=0
@@ -202,7 +217,7 @@ docker_compose() {
 # helper: print project name
 lds_project() { printf '%s' "${__LDS_PROJECT:-$(basename -- "$DIR")}"; }
 
- (QUIET by default) ────────────────────────────────
+# (QUIET by default) ────────────────────────────────
 dc_up() {
   if ((VERBOSE)); then
     docker_compose up "$@"
@@ -1345,7 +1360,7 @@ _status_urls() {
   shopt -u nullglob
 }
 
-_status_health_line() {
+_status_health_line_plain() {
   local c="$1"
   local st health
   st="$(docker inspect -f '{{.State.Status}}' "$c" 2>/dev/null || true)"
@@ -1354,6 +1369,32 @@ _status_health_line() {
     printf '%s:%s(%s)' "$c" "$st" "$health"
   else
     printf '%s:%s' "$c" "$st"
+  fi
+}
+
+_status_health_line() {
+  # Colorized for human output (mkhost-style theme)
+  local c="$1"
+  local st health line
+  st="$(docker inspect -f '{{.State.Status}}' "$c" 2>/dev/null || true)"
+  health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$c" 2>/dev/null || true)"
+  line="$(_status_health_line_plain "$c")"
+
+  # Prefer health when present, otherwise State.Status
+  if [[ -n "$health" ]]; then
+    case "$health" in
+      healthy)   printf '%b%s%b' "$GREEN" "$line" "$NC" ;;
+      starting)  printf '%b%s%b' "$YELLOW" "$line" "$NC" ;;
+      unhealthy) printf '%b%s%b' "$RED" "$line" "$NC" ;;
+      *)         printf '%b%s%b' "$MAGENTA" "$line" "$NC" ;;
+    esac
+  else
+    case "$st" in
+      running) printf '%b%s%b' "$GREEN" "$line" "$NC" ;;
+      exited|dead) printf '%b%s%b' "$RED" "$line" "$NC" ;;
+      created|paused|restarting) printf '%b%s%b' "$YELLOW" "$line" "$NC" ;;
+      *) printf '%b%s%b' "$MAGENTA" "$line" "$NC" ;;
+    esac
   fi
 }
 
@@ -1383,7 +1424,7 @@ cmd_status() {
     for c in "${ctrs[@]}"; do
       ((first)) || printf ','
       first=0
-      printf '%q' "$(_status_health_line "$c")"
+      printf '%q' "$(_status_health_line_plain "$c")"
     done
     printf '],"urls":['
     first=1
