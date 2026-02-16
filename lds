@@ -3399,106 +3399,262 @@ cmd_bundle() {
 }
 
 cmd_help() {
+  local topic="${1:-}"
 
-  if [[ "${1:-}" == "--markdown" ]]; then
+  # ────────────────────────────────────────────────────────────────────────────
+  # Markdown output (for README)
+  # ────────────────────────────────────────────────────────────────────────────
+  if [[ "$topic" == "--markdown" ]]; then
     cat <<'MD'
-# LocalDevStack (lds) Commands
+# LocalDevStack (lds) — Command Reference
 
-## Canonical grouped commands
-- `lds stack <up|down|restart|reload|status|ps|logs|exec|stats|events|clean|verify|disk|du|config|http> ...`
-- `lds domain <add|rm|ls|check|nginx> ...`
-- `lds cert <status|regen|diagnose> ...`
-- `lds diag <dns|net|route|tcp|http|tls> ...`
-- `lds config <show|services|profiles|env-used|validate> ...`
-- `lds doctor [run|lint|scan-logs|fix]`
-- `lds support <open|bundle|notify|ui> ...`
-- `lds secrets <args...>` — `senv` wrapper
-- `lds env <args...>` — `senv` env wrapper
-- `lds tools <sh|exec|file> ...` — gateway into SERVER_TOOLS
+> Tip: Most commands support `--json` and/or `--quiet` where applicable.
+> Safety: destructive ops require `--yes` (e.g., `down --volumes`, `clean --volumes`).
 
-## Backward-compatible shortcuts (aliases)
-- `lds up|start|stop|down|restart|reload`
-- `lds status|ps|logs|exec|stats|events|clean|verify|disk|du`
-- `lds open|bundle|notify|ui`
-- `lds host ...` (legacy) → same behavior as `lds domain ...`
-- `lds sniff <url>` → `lds diag http <url>`
-- DB/PHP/Node shortcuts: `php|composer|node|npm|npx`, `my|mysql|mysqldump`, `maria|mariadb`, `pg|psql`, `redis|redis-cli`
+---
+
+## Stack (compose + runtime)
+
+**Canonical**
+- `lds stack up` *(aliases: `up`, `start`)*
+- `lds stack down [--volumes --yes]` *(aliases: `down`, `stop`)*
+- `lds stack restart [svc]` *(aliases: `restart`, `reboot`)*
+- `lds stack reload` *(alias: `reload`)*
+- `lds stack status [--json] [--quiet]` *(alias: `status`)*
+- `lds stack ps` *(alias: `ps`)*
+- `lds stack logs [svc] [--follow] [--since <dur>] [--grep <pattern>]` *(alias: `logs`)*
+- `lds stack exec <svc> [cmd…]` *(alias: `exec`)*
+- `lds stack stats [svc]` *(alias: `stats`)*
+- `lds stack events [--since <dur>]` *(alias: `events`)*
+- `lds stack clean --yes [--volumes]` *(alias: `clean`)*
+- `lds stack verify` *(alias: `verify`)*
+- `lds stack disk` / `lds stack du` *(aliases: `disk`, `du`)*
+
+**Legacy shortcuts (kept)**
+- `lds up|start`, `lds down|stop`, `lds restart|reboot`, `lds status`, `lds ps`, `lds logs`, `lds exec`, `lds stats`, `lds events`, `lds clean`, `lds verify`, `lds disk`, `lds du`
+
+---
+
+## Domain (vhost lifecycle + routing)
+
+**Canonical**
+- `lds domain add …`
+- `lds domain rm …`
+- `lds domain ls`
+- `lds domain check <domain>`
+- `lds domain nginx <domain>`
+
+**Aliases**
+- `lds host …` → same as `lds domain …`
+- `lds delhost <domain>` *(legacy)*
+
+---
+
+## Certificates (TLS)
+- `lds cert status [domain|all]`
+- `lds cert regen [domain|all] [--yes]`
+- `lds cert diagnose <domain>`
+- `lds certificate install`
+- `lds certificate uninstall [--all]`
+
+---
+
+## Diagnostics (DNS / Net / TCP / HTTP / TLS)
+- `lds diag dns <domain>`
+- `lds diag net`
+- `lds diag tcp <host> <port>`
+- `lds diag http <url>` *(alias: `sniff <url>`)*
+- `lds diag tls <domain>`
+
+---
+
+## Config (effective compose config + validation)
+- `lds config show [--json]`
+- `lds config services`
+- `lds config profiles`
+- `lds config env-used`
+- `lds config validate`
+
+---
+
+## Doctor (checks + lint + scans)
+- `lds doctor` / `lds doctor run`
+- `lds doctor lint`
+- `lds doctor scan-logs [pattern]`
+- `lds doctor fix`
+
+---
+
+## Support (open/ui/bundle/notify)
+**Canonical**
+- `lds support open <mail|db|redis|kibana|domain>`
+- `lds support bundle [--redact|--full]`
+- `lds support notify …`
+- `lds support ui`
+
+**Shortcuts**
+- `lds open …`, `lds bundle …`, `lds notify …`, `lds ui`
+
+---
+
+## Secrets / Env (powered by senv)
+- `lds secrets <senv-args…>`
+- `lds env <senv-args…>`
+
+---
+
+## Tools (SERVER_TOOLS gateway)
+- `lds tools sh`
+- `lds tools exec "<cmd>"`
+- `lds tools file <path>`
+- `lds lzd` / `lds lazydocker`
+
+---
+
+## Setup / Bootstrap
+- `lds setup init`
+- `lds setup permissions`
+- `lds setup domain`
+- `lds setup profiles`
+
+---
+
+## Runner (ad-hoc Dockerfile runner)
+- `lds run`
+- `lds run ps|logs|stop|rm|open`
+- Flags: `--publish|-p A:B`, `--no-keepalive`, `--mount HOST[:CONT]`, `--sock`
+
+---
+
+## Other
+- `lds runtime php|node`
+- `lds vpn-fix`
+- `lds nginx <domain>`
+- `lds rebuild [all|<svc…>]`
+- `lds core [domain]`
+- `lds http reload`
+- `lds cli <container> [cmd…]`
+
+---
+
+## Short client wrappers
+- `lds php|composer|node|npm|npx …`
+- `lds my|mysql|mysqldump …`
+- `lds maria|mariadb|mariadb-dump …`
+- `lds pg|psql|pg_dump|pg_restore …`
+- `lds redis|redis-cli …`
+
 MD
     return 0
   fi
 
+  # ────────────────────────────────────────────────────────────────────────────
+  # Human output (terminal)
+  # ────────────────────────────────────────────────────────────────────────────
   cat <<EOF
-${CYAN}Usage:${NC}
-  lds [--verbose|-v] <command> [args...]
-  lds <shortcut> [args...]                # php/composer/node/npm/npx, my/mysql, maria, pg/psql, redis-cli
+${BOLD}LocalDevStack (lds)${NC}
 
-${CYAN}Global:${NC}
-  -v, --verbose     Show docker pull/build progress + extra logs
-  -q, --quiet       Quiet mode (default)
+${DIM}Common:${NC}
+  ${BOLD}lds up${NC}                 Start stack          ${DIM}(= lds stack up)${NC}
+  ${BOLD}lds status${NC}             Stack summary        ${DIM}(= lds stack status)${NC}
+  ${BOLD}lds logs nginx --follow${NC} Follow logs
+  ${BOLD}lds domain add example.localhost${NC}
+  ${BOLD}lds open mail${NC}           Open Mailpit
 
-${CYAN}Core stack:${NC}
-  up                         Start stack (quiet pull by default)
-  start                      Alias of up
-  stop                       Stop stack (docker compose down)
-  down                       Alias of stop
-  reload                     Alias of start (recreate) + HTTP reload
-  restart                    Stop + up + HTTP reload
-  reboot                     Alias of restart
-  rebuild [all|<svc...>]     Pull/build selected services without full down (fast iteration)
-  config                     Print resolved compose config (uses extras + env-file)
-  http reload                Reload HTTP (Nginx/Apache) inside the LB container
-  tools                      Shell into SERVER_TOOLS container
-  lzd | lazydocker            Open LazyDocker inside SERVER_TOOLS
-  core [domain]              Open shell in the container for a domain (or core service)
+${CYAN}Stack (compose + runtime):${NC}
+  lds stack up
+  lds stack down [--volumes --yes]
+  lds stack restart [svc]
+  lds stack reload
+  lds stack status [--json] [--quiet]
+  lds stack ps
+  lds stack logs [svc] [--follow] [--since <dur>] [--grep <pattern>]
+  lds stack exec <svc> [cmd...]
+  lds stack stats [svc]
+  lds stack events [--since <dur>]
+  lds stack clean --yes [--volumes]
+  lds stack verify
+  lds stack disk | lds stack du
 
-${CYAN}Domains / hosts:${NC}
-  setup domain               Run mkhost wizard, update COMPOSE_PROFILES, up + HTTP reload
-  delhost <domain>           Remove a domain host entry + HTTP reload
+${DIM}Aliases kept:${NC}
+  up|start → stack up
+  down|stop → stack down
+  restart|reboot → stack restart
+  status|ps|logs|exec|stats|events|clean|verify|disk|du → stack <...>
 
-${CYAN}Setup:${NC}
-  setup init                 Create required files (.env, docker/.env, php.ini, etc.)
-  setup permissions          Fix permissions for data/logs/config/bin (Linux/macOS; no-op on Windows)
-  setup profile|profiles     Configure service profiles (selection menu; writes defaults into docker/.env)
+${CYAN}Domain (vhosts + routing):${NC}
+  lds domain add ...
+  lds domain rm ...
+  lds domain ls
+  lds domain check <domain>
+  lds domain nginx <domain>
 
-${CYAN}Certificates:${NC}
-  certificate install         Install local rootCA (Linux trust store / Windows CurrentUser\\Root)
-  certificate uninstall [--all]
-                              Remove local rootCA (use --all to remove from known anchor paths)
+${DIM}Legacy aliases:${NC}
+  lds host <subcmd...>     ${DIM}(same as domain)${NC}
+  lds delhost <domain>     ${DIM}(legacy remove + reload)${NC}
+
+${CYAN}Certificates (TLS):${NC}
+  lds cert status [domain|all]
+  lds cert regen [domain|all] [--yes]
+  lds cert diagnose <domain>
+  lds certificate install
+  lds certificate uninstall [--all]
+
+${CYAN}Diagnostics:${NC}
+  lds diag dns <domain>
+  lds diag net
+  lds diag tcp <host> <port>
+  lds diag http <url>           ${DIM}(alias: lds sniff <url>)${NC}
+  lds diag tls <domain>
+
+${CYAN}Config:${NC}
+  lds config show [--json]
+  lds config services
+  lds config profiles
+  lds config env-used
+  lds config validate
 
 ${CYAN}Doctor:${NC}
-  doctor                     Host diagnostics (docker/compose, config validity, ports 80/443, disk, WSL on Windows)
+  lds doctor [run]
+  lds doctor lint
+  lds doctor scan-logs [pattern]
+  lds doctor fix
 
-${CYAN}VPN:${NC}
-  vpn-fix                    Allow Docker bridge networks to use the active VPN routes (IPv4 + best-effort IPv6)
+${CYAN}Support:${NC}
+  lds support open <mail|db|redis|kibana|domain>
+  lds support bundle [--redact|--full]
+  lds support notify ...
+  lds support ui
+  open|bundle|notify|ui          ${DIM}(shortcuts → support <...>)${NC}
 
-${CYAN}Notify:${NC}
-  notify watch [container]    Stream notifications from SERVER_TOOLS (desktop popups)
-  notify test "Title" "Body"  Send a test notification to SERVER_TOOLS
+${CYAN}Secrets / Env (senv):${NC}
+  lds secrets <senv-args...>
+  lds env <senv-args...>
 
-${CYAN}Run (ad-hoc Dockerfile runner):${NC}
-  run                         Build+start+exec container for current directory (Dockerfile required)
-  run ps|logs|stop|rm          Manage the ad-hoc container for current directory
-  run open [port]             Open published port URL (best-effort)
-  run --publish|-p A:B         Publish ports (repeatable)
-  run --no-keepalive           Run image CMD/ENTRYPOINT (no infinite sleep)
-  run --mount HOST[:CONT]      Mount extra dir/file (repeatable)
-  run --sock                   Mount /var/run/docker.sock into container (DinD style)
+${CYAN}Tools (SERVER_TOOLS):${NC}
+  lds tools sh
+  lds tools exec "<cmd>"
+  lds tools file <path>
+  lds lzd | lds lazydocker
 
-${CYAN}Shortcuts:${NC}
-  php|composer <args...>
-  my|mysql|mysqldump <args...>
-  maria|mariadb|mariadb-dump <args...>
-  pg|psql|pg_dump|pg_restore <args...>
-  redis|redis-cli <args...>
+${CYAN}Setup:${NC}
+  lds setup init|permissions|domain|profiles
 
-${CYAN}Examples:${NC}
-  lds setup init
-  lds setup profiles
-  lds up
-  lds http reload
-  lds certificate install
+${CYAN}Runner (ad-hoc Dockerfile runner):${NC}
+  lds run [ps|logs|stop|rm|open] [--publish|-p A:B] [--no-keepalive] [--mount HOST[:CONT]] [--sock]
+
+${CYAN}Other:${NC}
+  lds runtime php|node
   lds vpn-fix
-  lds run --publish 8025:8025
+  lds nginx <domain>
+  lds rebuild [all|<svc...>]
+  lds core [domain]
+  lds http reload
+  lds cli <container> [cmd...]
+
+${CYAN}Help:${NC}
+  lds help [--markdown]
+
 EOF
 }
 
