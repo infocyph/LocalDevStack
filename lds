@@ -1583,16 +1583,21 @@ cmd_profiles() {
 _tools_exec() {
   docker inspect SERVER_TOOLS >/dev/null 2>&1 || die "SERVER_TOOLS container not found"
   docker inspect -f '{{.State.Running}}' SERVER_TOOLS 2>/dev/null | grep -qx true || die "SERVER_TOOLS is not running"
+  # NOTE: pass a SINGLE command string; do not pass arrays here.
   docker exec -i SERVER_TOOLS sh -lc "$*"
 }
+
+_shq() { printf '%q' "$1"; }
 
 cmd_diag() {
   local sub="${1:-}"
   shift || true
+
   case "${sub,,}" in
     dns)
       local dom="${1:-}"; [[ -n "$dom" ]] || die "diag dns <domain>"
-      _tools_exec "dig +short "$dom"; echo; nslookup "$dom" 2>/dev/null || true; echo; getent hosts "$dom" 2>/dev/null || true"
+      local qdom; qdom="$(_shq "$dom")"
+      _tools_exec "dig +short $qdom; echo; nslookup $qdom 2>/dev/null || true; echo; getent hosts $qdom 2>/dev/null || true"
       ;;
     route|net)
       _tools_exec "ip r; echo; ip a; echo; ss -tulpen 2>/dev/null || netstat -tulpen 2>/dev/null || true"
@@ -1600,16 +1605,20 @@ cmd_diag() {
     tcp)
       local h="${1:-}"; local p="${2:-}"
       [[ -n "$h" && -n "$p" ]] || die "diag tcp <host> <port>"
-      _tools_exec "nc -vz -w2 "$h" "$p""
+      _tools_exec "nc -vz -w2 $(_shq "$h") $(_shq "$p")"
       ;;
     http)
       local url="${1:-}"; shift || true
       [[ -n "$url" ]] || die "diag http <url> [curl-args...]"
-      _tools_exec "curl -vkI "$url" "$@""
+      local -a qargs=()
+      local a
+      for a in "$@"; do qargs+=("$(printf '%q' "$a")"); done
+      _tools_exec "curl -vkI $(_shq "$url") ${qargs[*]}"
       ;;
     tls)
       local dom="${1:-}"; [[ -n "$dom" ]] || die "diag tls <domain>"
-      _tools_exec "echo | openssl s_client -connect "$dom":443 -servername "$dom" -showcerts 2>/dev/null | sed -n '1,60p'"
+      local qdom; qdom="$(_shq "$dom")"
+      _tools_exec "echo | openssl s_client -connect ${qdom}:443 -servername $qdom -showcerts 2>/dev/null | sed -n '1,60p'"
       ;;
     *)
       die "diag <dns|route|net|tcp|http|tls>"
@@ -1617,10 +1626,14 @@ cmd_diag() {
   esac
 }
 
+
 cmd_sniff() {
   local url="${1:-}"; shift || true
   [[ -n "$url" ]] || die "sniff <url> [curl-args...]"
-  _tools_exec "curl -vk -D - "$url" "$@" | (command -v jq >/dev/null 2>&1 && jq . 2>/dev/null || cat)"
+  local -a qargs=()
+  local a
+  for a in "$@"; do qargs+=("$(printf '%q' "$a")"); done
+  _tools_exec "curl -vk -D - $(_shq "$url") ${qargs[*]} | (command -v jq >/dev/null 2>&1 && jq . 2>/dev/null || cat)"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -3399,56 +3412,34 @@ cmd_bundle() {
 }
 
 cmd_help() {
-  local topic="${1:-}"
 
-  # ────────────────────────────────────────────────────────────────────────────
-  # Markdown output (for README)
-  # ────────────────────────────────────────────────────────────────────────────
-  if [[ "$topic" == "--markdown" ]]; then
+  if [[ "${1:-}" == "--markdown" ]]; then
     cat <<'MD'
 # LocalDevStack (lds) — Command Reference
 
-> Tip: Most commands support `--json` and/or `--quiet` where applicable.
-> Safety: destructive ops require `--yes` (e.g., `down --volumes`, `clean --volumes`).
-
----
-
 ## Stack (compose + runtime)
-
-**Canonical**
-- `lds stack up` *(aliases: `up`, `start`)*
-- `lds stack down [--volumes --yes]` *(aliases: `down`, `stop`)*
-- `lds stack restart [svc]` *(aliases: `restart`, `reboot`)*
-- `lds stack reload` *(alias: `reload`)*
-- `lds stack status [--json] [--quiet]` *(alias: `status`)*
-- `lds stack ps` *(alias: `ps`)*
-- `lds stack logs [svc] [--follow] [--since <dur>] [--grep <pattern>]` *(alias: `logs`)*
-- `lds stack exec <svc> [cmd…]` *(alias: `exec`)*
-- `lds stack stats [svc]` *(alias: `stats`)*
-- `lds stack events [--since <dur>]` *(alias: `events`)*
-- `lds stack clean --yes [--volumes]` *(alias: `clean`)*
-- `lds stack verify` *(alias: `verify`)*
-- `lds stack disk` / `lds stack du` *(aliases: `disk`, `du`)*
-
-**Legacy shortcuts (kept)**
-- `lds up|start`, `lds down|stop`, `lds restart|reboot`, `lds status`, `lds ps`, `lds logs`, `lds exec`, `lds stats`, `lds events`, `lds clean`, `lds verify`, `lds disk`, `lds du`
-
----
+- `lds stack up`  *(aliases: `up`, `start`)*
+- `lds stack down [--volumes --yes]`  *(aliases: `down`, `stop`)*
+- `lds stack restart [svc]`  *(aliases: `restart`, `reboot`)*
+- `lds stack reload`
+- `lds stack status [--json] [--quiet]`  *(alias: `status`)*
+- `lds stack ps`  *(alias: `ps`)*
+- `lds stack logs [svc] [--follow] [--since <dur>] [--grep <pattern>]`  *(alias: `logs`)*
+- `lds stack exec <svc> [cmd…]`  *(alias: `exec`)*
+- `lds stack stats [svc]`  *(alias: `stats`)*
+- `lds stack events [--since <dur>]`  *(alias: `events`)*
+- `lds stack clean --yes [--volumes]`  *(alias: `clean`)*
+- `lds stack verify`  *(alias: `verify`)*
+- `lds stack disk` / `lds stack du`  *(aliases: `disk`, `du`)*
 
 ## Domain (vhost lifecycle + routing)
-
-**Canonical**
 - `lds domain add …`
 - `lds domain rm …`
 - `lds domain ls`
 - `lds domain check <domain>`
 - `lds domain nginx <domain>`
 
-**Aliases**
-- `lds host …` → same as `lds domain …`
-- `lds delhost <domain>` *(legacy)*
-
----
+Legacy alias: `lds host …` → same subcommands as `domain`.
 
 ## Certificates (TLS)
 - `lds cert status [domain|all]`
@@ -3457,85 +3448,58 @@ cmd_help() {
 - `lds certificate install`
 - `lds certificate uninstall [--all]`
 
----
-
-## Diagnostics (DNS / Net / TCP / HTTP / TLS)
+## Diagnostics
 - `lds diag dns <domain>`
 - `lds diag net`
 - `lds diag tcp <host> <port>`
 - `lds diag http <url>` *(alias: `sniff <url>`)*
 - `lds diag tls <domain>`
 
----
-
-## Config (effective compose config + validation)
+## Config
 - `lds config show [--json]`
 - `lds config services`
 - `lds config profiles`
 - `lds config env-used`
 - `lds config validate`
 
----
-
-## Doctor (checks + lint + scans)
+## Doctor
 - `lds doctor` / `lds doctor run`
 - `lds doctor lint`
-- `lds doctor scan-logs [pattern]`
+- `lds doctor scan-logs`
 - `lds doctor fix`
 
----
-
-## Support (open/ui/bundle/notify)
-**Canonical**
+## Support
 - `lds support open <mail|db|redis|kibana|domain>`
 - `lds support bundle [--redact|--full]`
 - `lds support notify …`
 - `lds support ui`
 
-**Shortcuts**
-- `lds open …`, `lds bundle …`, `lds notify …`, `lds ui`
+Shortcuts: `open`, `bundle`, `notify`, `ui` map to `support …`.
 
----
+## Secrets / Env (senv)
+- `lds secrets …`
+- `lds env …`
 
-## Secrets / Env (powered by senv)
-- `lds secrets <senv-args…>`
-- `lds env <senv-args…>`
-
----
-
-## Tools (SERVER_TOOLS gateway)
+## Tools (SERVER_TOOLS)
 - `lds tools sh`
 - `lds tools exec "<cmd>"`
 - `lds tools file <path>`
 - `lds lzd` / `lds lazydocker`
 
----
+## Setup
+- `lds setup init|permissions|domain|profiles`
 
-## Setup / Bootstrap
-- `lds setup init`
-- `lds setup permissions`
-- `lds setup domain`
-- `lds setup profiles`
+## Runner (ad‑hoc Dockerfile runner)
+- `lds run` (+ `ps|logs|stop|rm|open` and flags: `--publish|-p`, `--no-keepalive`, `--mount`, `--sock`)
 
----
-
-## Runner (ad-hoc Dockerfile runner)
-- `lds run`
-- `lds run ps|logs|stop|rm|open`
-- Flags: `--publish|-p A:B`, `--no-keepalive`, `--mount HOST[:CONT]`, `--sock`
-
----
+## Runtime awareness
+- `lds runtime php|node`
 
 ## Other
-- `lds runtime php|node`
 - `lds vpn-fix`
 - `lds nginx <domain>`
 - `lds rebuild [all|<svc…>]`
 - `lds core [domain]`
-- `lds http reload`
-- `lds cli <container> [cmd…]`
-
----
 
 ## Short client wrappers
 - `lds php|composer|node|npm|npx …`
@@ -3543,120 +3507,76 @@ cmd_help() {
 - `lds maria|mariadb|mariadb-dump …`
 - `lds pg|psql|pg_dump|pg_restore …`
 - `lds redis|redis-cli …`
-
 MD
     return 0
   fi
 
-  # ────────────────────────────────────────────────────────────────────────────
-  # Human output (terminal)
-  # ────────────────────────────────────────────────────────────────────────────
   cat <<EOF
 ${BOLD}LocalDevStack (lds)${NC}
 
-${DIM}Common:${NC}
-  ${BOLD}lds up${NC}                 Start stack          ${DIM}(= lds stack up)${NC}
-  ${BOLD}lds status${NC}             Stack summary        ${DIM}(= lds stack status)${NC}
-  ${BOLD}lds logs nginx --follow${NC} Follow logs
-  ${BOLD}lds domain add example.localhost${NC}
-  ${BOLD}lds open mail${NC}           Open Mailpit
-
 ${CYAN}Stack (compose + runtime):${NC}
-  lds stack up
-  lds stack down [--volumes --yes]
-  lds stack restart [svc]
-  lds stack reload
-  lds stack status [--json] [--quiet]
-  lds stack ps
-  lds stack logs [svc] [--follow] [--since <dur>] [--grep <pattern>]
-  lds stack exec <svc> [cmd...]
-  lds stack stats [svc]
-  lds stack events [--since <dur>]
-  lds stack clean --yes [--volumes]
-  lds stack verify
-  lds stack disk | lds stack du
-
-${DIM}Aliases kept:${NC}
-  up|start → stack up
-  down|stop → stack down
-  restart|reboot → stack restart
-  status|ps|logs|exec|stats|events|clean|verify|disk|du → stack <...>
+  stack up|down|restart|reload|status|ps|logs|exec|stats|events|clean|verify|disk|du|config
+  up|start                         Alias of: stack up
+  down|stop                        Alias of: stack down
+  restart|reboot                   Alias of: stack restart
+  status|ps|logs|exec|stats|events Alias of: stack <...>
+  clean|verify|disk|du             Alias of: stack <...>
 
 ${CYAN}Domain (vhosts + routing):${NC}
-  lds domain add ...
-  lds domain rm ...
-  lds domain ls
-  lds domain check <domain>
-  lds domain nginx <domain>
-
-${DIM}Legacy aliases:${NC}
-  lds host <subcmd...>     ${DIM}(same as domain)${NC}
-  lds delhost <domain>     ${DIM}(legacy remove + reload)${NC}
+  domain add|rm|ls|check|nginx
+  host add|rm|list|check|nginx     Legacy alias of: domain <...>
 
 ${CYAN}Certificates (TLS):${NC}
-  lds cert status [domain|all]
-  lds cert regen [domain|all] [--yes]
-  lds cert diagnose <domain>
-  lds certificate install
-  lds certificate uninstall [--all]
+  cert status|regen|diagnose
+  certificate install|uninstall [--all]
 
 ${CYAN}Diagnostics:${NC}
-  lds diag dns <domain>
-  lds diag net
-  lds diag tcp <host> <port>
-  lds diag http <url>           ${DIM}(alias: lds sniff <url>)${NC}
-  lds diag tls <domain>
+  diag dns|net|tcp|http|tls
+  sniff <url>                      Alias of: diag http <url>
 
 ${CYAN}Config:${NC}
-  lds config show [--json]
-  lds config services
-  lds config profiles
-  lds config env-used
-  lds config validate
+  config show|services|profiles|env-used|validate
 
 ${CYAN}Doctor:${NC}
-  lds doctor [run]
-  lds doctor lint
-  lds doctor scan-logs [pattern]
-  lds doctor fix
+  doctor [run]                     Full environment checks
+  doctor lint                       shellcheck (inside SERVER_TOOLS)
+  doctor scan-logs [pattern]        rg scan (recent logs)
+  doctor fix                        Safe auto-fixes (when available)
 
 ${CYAN}Support:${NC}
-  lds support open <mail|db|redis|kibana|domain>
-  lds support bundle [--redact|--full]
-  lds support notify ...
-  lds support ui
-  open|bundle|notify|ui          ${DIM}(shortcuts → support <...>)${NC}
+  support open <mail|db|redis|kibana|domain>
+  support bundle [--redact|--full]
+  support notify ...
+  support ui
+  open|bundle|notify|ui             Shortcuts → support <...>
 
-${CYAN}Secrets / Env (senv):${NC}
-  lds secrets <senv-args...>
-  lds env <senv-args...>
+${CYAN}Secrets / Env:${NC}
+  secrets <senv-args...>
+  env <senv-args...>
 
 ${CYAN}Tools (SERVER_TOOLS):${NC}
-  lds tools sh
-  lds tools exec "<cmd>"
-  lds tools file <path>
-  lds lzd | lds lazydocker
+  tools sh|exec|file
+  lzd|lazydocker
 
 ${CYAN}Setup:${NC}
-  lds setup init|permissions|domain|profiles
+  setup init|permissions|domain|profiles
 
 ${CYAN}Runner (ad-hoc Dockerfile runner):${NC}
-  lds run [ps|logs|stop|rm|open] [--publish|-p A:B] [--no-keepalive] [--mount HOST[:CONT]] [--sock]
+  run [ps|logs|stop|rm|open] [--publish|-p A:B] [--no-keepalive] [--mount HOST[:CONT]] [--sock]
 
 ${CYAN}Other:${NC}
-  lds runtime php|node
-  lds vpn-fix
-  lds nginx <domain>
-  lds rebuild [all|<svc...>]
-  lds core [domain]
-  lds http reload
-  lds cli <container> [cmd...]
+  runtime php|node
+  vpn-fix
+  nginx <domain>
+  rebuild [all|<svc…>]
+  core [domain]
 
 ${CYAN}Help:${NC}
-  lds help [--markdown]
+  help [--markdown]
 
 EOF
 }
+
 
 ###############################################################################
 # 7. MAIN
