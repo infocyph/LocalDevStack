@@ -48,7 +48,7 @@ CFG="$DIR/docker"
 ENV_MAIN="$DIR/.env"
 ENV_DOCKER="$CFG/.env"
 COMPOSE_FILE="$CFG/compose/main.yaml"
-EXTRAS_DIR="$CFG/extras"
+EXTRAS_DIR="$DIR/configuration/node"
 
 if [[ "${1:-}" == "--__win_workdir" ]]; then
   export WORKDIR_WIN="${2:-}"
@@ -162,14 +162,16 @@ load_extras() {
 
   [[ -d "$EXTRAS_DIR" ]] || return 0
 
-  # Stable ordering: later -f overrides earlier.
   mapfile -t __EXTRA_FILES < <(
-    find "$EXTRAS_DIR" -maxdepth 1 -type f \( -name '*.yaml' -o -name '*.yml' \) 2>/dev/null | sort
+    find "$EXTRAS_DIR" -maxdepth 1 -type f \( -name '*.yaml' -o -name '*.yml' \) -print 2>/dev/null \
+      | sort \
+      | sed '/^[[:space:]]*$/d'
   )
 }
 
 docker_compose() {
   load_extras
+  local __LDS_DC_BIN
 
   # Cache compose binary selection once (v2 preferred)
   if [[ -z "${__LDS_DC_BIN:-}" ]]; then
@@ -184,8 +186,12 @@ docker_compose() {
   local -a extra_f=()
   local f
   for f in "${__EXTRA_FILES[@]:-}"; do
-    extra_f+=(-f "$f")
+    [[ -f "$f" ]] || continue
+    case "$f" in
+    *.yml|*.yaml) extra_f+=(-f "$f") ;;
+    esac
   done
+
 
   # If you already have `name:` in YAML, you can remove COMPOSE_PROJECT_NAME entirely.
     "${__LDS_DC_BIN[@]}" \
