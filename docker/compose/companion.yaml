@@ -36,7 +36,17 @@ services:
       - ../../configuration/scheduler/cron-jobs:/etc/cron.d:ro
       - ../../logs/runner:/var/log/supervisor
       - ../../logs/apache:/global/log/apache
+      - ../../logs/cloudbeaver:/global/log/cloudbeaver
+      - ../../logs/elasticsearch:/global/log/elasticsearch
+      - ../../logs/kibana:/global/log/kibana
+      - ../../logs/mariadb:/global/log/mariadb
+      - ../../logs/mongo-express:/global/log/mongo-express
+      - ../../logs/mongodb:/global/log/mongodb
+      - ../../logs/mysql:/global/log/mysql
       - ../../logs/nginx:/global/log/nginx
+      - ../../logs/postgresql:/global/log/postgresql
+      - ../../logs/redis:/global/log/redis
+      - ../../logs/redis-insight:/global/log/redis-insight
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       - server-tools

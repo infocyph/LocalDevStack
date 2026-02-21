@@ -17,6 +17,7 @@ services:
       - RI_REDIS_HOST=redis
     volumes:
       - ../../data/redis-insight:/data
+      - ../../logs/redis-insight:/var/log/redis-insight
     networks:
       datastore:
         ipv4_address: 172.30.0.150
@@ -33,6 +34,7 @@ services:
       - TZ=${TZ:-}
     volumes:
       - ../../data/cloudbeaver:/opt/cloudbeaver/workspace
+      - ../../logs/cloudbeaver:/opt/cloudbeaver/logs
     networks:
       datastore:
         ipv4_address: 172.30.0.151
@@ -53,6 +55,8 @@ services:
       - ME_CONFIG_MONGODB_ADMINUSERNAME=${MONGODB_ROOT_USERNAME:-root}
       - ME_CONFIG_MONGODB_ADMINPASSWORD=${MONGODB_ROOT_PASSWORD:-12345}
       - ME_CONFIG_MONGODB_URL=mongodb://${MONGODB_ROOT_USERNAME:-root}:${MONGODB_ROOT_PASSWORD:-12345}@mongodb:${MONGODB_PORT:-27017}/admin
+    volumes:
+      - ../../logs/mongo-express:/var/log/mongo-express
     networks:
       datastore:
         ipv4_address: 172.30.0.152
@@ -72,6 +76,7 @@ services:
       - "ELASTICSEARCH_HOSTS=http://elasticsearch:9200"
     volumes:
       - ../../data/kibana:/usr/share/kibana/data
+      - ../../logs/kibana:/usr/share/kibana/logs
     networks:
       datastore:
         ipv4_address: 172.30.0.153
