@@ -86,6 +86,7 @@ services:
     image: docker.elastic.co/beats/filebeat:${ELASTICSEARCH_VERSION:-9.3.0}
     container_name: FILEBEAT
     restart: unless-stopped
+    user: root
     depends_on:
       - elasticsearch
     volumes:

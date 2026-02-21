@@ -19,5 +19,9 @@ filebeat.inputs:
 output.elasticsearch:
   hosts: ["http://elasticsearch:9200"]
   index: "lds-%{[service]}-%{+yyyyMMdd}"
+setup.template.enabled: true
+setup.template.name: "lds"
+setup.template.pattern: "lds-*-*"
+setup.template.overwrite: false
 setup.kibana:
   host: "http://kibana:5601"
