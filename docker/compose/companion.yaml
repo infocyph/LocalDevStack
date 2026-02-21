@@ -9,15 +9,15 @@ services:
     volumes:
       - ../../configuration/apache:/etc/share/vhosts/apache
       - ../../configuration/nginx:/etc/share/vhosts/nginx
-      - ../extras:/etc/share/vhosts/node
+      - ../../configuration/node:/etc/share/vhosts/node
+      - ../../configuration/sops/config:/etc/share/sops/config
+      - ../../configuration/sops/global:/etc/share/sops/global
+      - ../../configuration/sops/keys:/etc/share/sops/keys
       - ../../configuration/ssl:/etc/mkcert
       - "../../configuration/ssh:/home/root/.ssh:ro"
       - "${PROJECT_DIR:-./../../../application}:/app"
       - ../../configuration/rootCA:/etc/share/rootCA
       - /var/run/docker.sock:/var/run/docker.sock
-      - ../../configuration/sops/config:/etc/share/sops/config
-      - ../../configuration/sops/global:/etc/share/sops/global
-      - ../../configuration/sops/keys:/etc/share/sops/keys
       - "${SOP_REPO:-./../../../sops-repo}:/etc/share/vhosts/sops"
       - "${HOME}/.gitconfig:/home/root/.gitconfig:ro"
     networks:

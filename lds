@@ -30,12 +30,6 @@ _realpath() {
     return 0
   fi
 
-  # python fallback
-  if command -v python3 >/dev/null 2>&1; then
-    python3 -c 'import os,sys;print(os.path.realpath(sys.argv[1]))' "$p"
-    return 0
-  fi
-
   # last resort: absolute physical dir + basename
   local d b
   d="$(cd -P -- "$(dirname -- "$p")" 2>/dev/null && pwd -P)" || return 1
@@ -48,17 +42,31 @@ CFG="$DIR/docker"
 ENV_MAIN="$DIR/.env"
 ENV_DOCKER="$CFG/.env"
 COMPOSE_FILE="$CFG/compose/main.yaml"
-EXTRAS_DIR="$CFG/extras"
+EXTRAS_DIR="$DIR/configuration/node"
 
 if [[ "${1:-}" == "--__win_workdir" ]]; then
   export WORKDIR_WIN="${2:-}"
   shift 2
 fi
 
-COLOR() { printf '\033[%sm' "$1"; }
-RED=$(COLOR '0;31') GREEN=$(COLOR '0;32') CYAN=$(COLOR '0;36')
-YELLOW=$(COLOR '1;33') BLUE=$(COLOR '0;34') MAGENTA=$(COLOR '0;35')
-NC=$(COLOR '0')
+COLOR() { printf '[%sm' "$1"; }
+###############################################################################
+# Colors + UI (higher contrast; aligned with mkhost.sh)
+###############################################################################
+BOLD=$'[1m'
+DIM=$'[2m'
+RED=$'[1;31m'
+GREEN=$'[1;32m'
+CYAN=$'[1;36m'
+YELLOW=$'[1;33m'
+BLUE=$'[1;34m'
+MAGENTA=$'[1;35m'
+NC=$'[0m'
+
+say()  { echo -e "$*"; }
+ok()   { say "${GREEN}$*${NC}"; }
+warn() { say "${YELLOW}$*${NC}"; }
+err()  { say "${RED}$*${NC}"; }
 
 # Default behavior: QUIET
 VERBOSE=0
@@ -147,38 +155,44 @@ load_extras() {
 
   [[ -d "$EXTRAS_DIR" ]] || return 0
 
-  # Stable ordering: later -f overrides earlier.
   mapfile -t __EXTRA_FILES < <(
-    find "$EXTRAS_DIR" -maxdepth 1 -type f \( -name '*.yaml' -o -name '*.yml' \) 2>/dev/null | sort
+    find "$EXTRAS_DIR" -maxdepth 1 -type f \( -name '*.yaml' -o -name '*.yml' \) -print 2>/dev/null \
+      | sort \
+      | sed '/^[[:space:]]*$/d'
   )
 }
 
 docker_compose() {
   load_extras
-
-  local -a files=()
-  if ((${#__EXTRA_FILES[@]})); then
-    local f
-    for f in "${__EXTRA_FILES[@]}"; do
-      files+=(-f "$f")
-    done
+  if [[ -z "${__LDS_DC_BIN:-}" ]]; then
+    if docker compose version >/dev/null 2>&1; then
+      __LDS_DC_BIN=(docker compose)
+    else
+      __LDS_DC_BIN=(docker-compose)
+    fi
   fi
 
-  # Prefer Docker Compose v2 ("docker compose"), fallback to v1 ("docker-compose")
-  local -a dc=(docker compose)
-  if ! docker compose version >/dev/null 2>&1; then
-    dc=(docker-compose)
-  fi
+  # Build -f list (stable order; later overrides earlier)
+  local -a extra_f=() f
+  for f in "${__EXTRA_FILES[@]:-}"; do
+    [[ -f "$f" ]] || continue
+    case "$f" in
+    *.yml|*.yaml) extra_f+=(-f "$f") ;;
+    esac
+  done
 
-  "${dc[@]}" \
-    --project-directory "$DIR" \
-    -f "$COMPOSE_FILE" \
-    "${files[@]}" \
-    --env-file "$ENV_DOCKER" \
-    "$@"
+  "${__LDS_DC_BIN[@]}" \
+  --project-directory "$DIR" \
+  -f "$COMPOSE_FILE" \
+  "${extra_f[@]}" \
+  --env-file "$ENV_DOCKER" \
+  "$@"
 }
 
-# ── docker compose wrappers (QUIET by default) ────────────────────────────────
+# helper: print project name
+lds_project() { printf '%s' "${__LDS_PROJECT:-$(basename -- "$DIR")}"; }
+
+# (QUIET by default) ────────────────────────────────
 dc_up() {
   if ((VERBOSE)); then
     docker_compose up "$@"
@@ -455,12 +469,12 @@ declare -A SERVICES=(
 declare -a SERVICE_ORDER=(POSTGRESQL MYSQL MARIADB ELASTICSEARCH MONGODB REDIS)
 
 declare -A PROFILE_ENV=(
-  [elasticsearch]="ELASTICSEARCH_VERSION=9.2.4 ELASTICSEARCH_PORT=9200"
-  [mysql]="MYSQL_VERSION=latest MYSQL_PORT=3306 MYSQL_ROOT_PASSWORD=12345 MYSQL_USER=infocyph MYSQL_PASSWORD=12345 MYSQL_DATABASE=localdb"
-  [mariadb]="MARIADB_VERSION=latest MARIADB_PORT=3306 MARIADB_ROOT_PASSWORD=12345 MARIADB_USER=infocyph MARIADB_PASSWORD=12345 MARIADB_DATABASE=localdb"
-  [mongodb]="MONGODB_VERSION=latest MONGODB_PORT=27017 MONGODB_ROOT_USERNAME=root MONGODB_ROOT_PASSWORD=12345"
-  [redis]="REDIS_VERSION=latest REDIS_PORT=6379"
-  [postgresql]="POSTGRES_VERSION=latest POSTGRES_PORT=5432 POSTGRES_USER=postgres POSTGRES_PASSWORD=postgres POSTGRES_DATABASE=postgres"
+  [elasticsearch]="ELASTICSEARCH_VERSION=9.2.4"
+  [mysql]="MYSQL_VERSION=latest MYSQL_ROOT_PASSWORD=12345 MYSQL_USER=infocyph MYSQL_PASSWORD=12345 MYSQL_DATABASE=localdb"
+  [mariadb]="MARIADB_VERSION=latest MARIADB_ROOT_PASSWORD=12345 MARIADB_USER=infocyph MARIADB_PASSWORD=12345 MARIADB_DATABASE=localdb"
+  [mongodb]="MONGODB_VERSION=latest MONGODB_ROOT_USERNAME=root MONGODB_ROOT_PASSWORD=12345"
+  [redis]="REDIS_VERSION=latest"
+  [postgresql]="POSTGRES_VERSION=latest POSTGRES_USER=postgres POSTGRES_PASSWORD=postgres POSTGRES_DATABASE=postgres"
 )
 
 declare -a PENDING_ENVS=()
@@ -747,6 +761,11 @@ env_init() {
 # ─────────────────────────────────────────────────────────────────────────────
 # Root CA helpers (cross-distro)
 # ─────────────────────────────────────────────────────────────────────────────
+
+# Unique identity (avoid conflicts with other mkcert/dev CAs)
+CA_BASENAME="localdevstack-rootca"
+CA_NICK="LocalDevStack Root CA"
+
 detect_os_family() {
   # Output: "id|like"
   # Must never fail under set -e
@@ -788,25 +807,20 @@ ca_plan() {
 
   case " $os_id $os_like " in
   *" debian "* | *" ubuntu "* | *" linuxmint "* | *" pop "* | *" raspbian "*)
-    printf 'debian|/usr/local/share/ca-certificates/rootCA.crt|update-ca-certificates
-'
+    printf "debian|/usr/local/share/ca-certificates/${CA_BASENAME}.crt|update-ca-certificates\n"
     ;;
   *" alpine "*)
-    printf 'alpine|/usr/local/share/ca-certificates/rootCA.crt|update-ca-certificates
-'
+    printf "alpine|/usr/local/share/ca-certificates/${CA_BASENAME}.crt|update-ca-certificates\n"
     ;;
   *" fedora "* | *" rhel "* | *" redhat "* | *" centos "* | *" rocky "* | *" alma "* | *" amzn "* | *" amazon "* | *" sles "* | *" suse "*)
-    printf 'rhel|/etc/pki/ca-trust/source/anchors/rootCA.crt|update-ca-trust
-'
+    printf "rhel|/etc/pki/ca-trust/source/anchors/${CA_BASENAME}.crt|update-ca-trust\n"
     ;;
   *" arch "* | *" manjaro "*)
-    printf 'arch|/etc/ca-certificates/trust-source/anchors/rootCA.crt|trust
-'
+    printf "arch|/etc/ca-certificates/trust-source/anchors/${CA_BASENAME}.crt|trust\n"
     ;;
   *)
     # best default: Debian-style location (works on many distros even if updater differs)
-    printf 'fallback|/usr/local/share/ca-certificates/rootCA.crt|
-'
+    printf "fallback|/usr/local/share/ca-certificates/${CA_BASENAME}.crt|\n"
     ;;
   esac
 }
@@ -818,6 +832,33 @@ is_windows_shell() {
 need_windows_tools() {
   command -v cygpath >/dev/null 2>&1 || die "Windows certificate install needs 'cygpath' (Git Bash)."
   command -v powershell.exe >/dev/null 2>&1 || die "Windows certificate install needs 'powershell.exe' on PATH."
+}
+
+# Import CA into the invoking user's NSS DB (Chrome/Chromium/Firefox on many Linux setups)
+install_ca_nss_user() {
+  local ca_file="$1"
+  command -v certutil >/dev/null 2>&1 || return 0
+
+  local user="${SUDO_USER:-}"
+  [[ -n "$user" && "$user" != "root" ]] || return 0
+
+  local home
+  home="$(getent passwd "$user" | cut -d: -f6)"
+  [[ -n "$home" && -d "$home" ]] || return 0
+
+  local nssdb="sql:${home}/.pki/nssdb"
+  sudo -u "$user" mkdir -p "${home}/.pki/nssdb" >/dev/null 2>&1 || true
+
+  if sudo -u "$user" certutil -d "$nssdb" -L 2>/dev/null | grep -Fq "$CA_NICK"; then
+    printf "%b✔ NSS already has CA%b (%s)\n" "$GREEN" "$NC" "$user"
+    return 0
+  fi
+
+  if sudo -u "$user" certutil -d "$nssdb" -A -n "$CA_NICK" -t "C,," -i "$ca_file" >/dev/null 2>&1; then
+    printf "%b✔ Imported CA into NSS%b (%s)\n" "$GREEN" "$NC" "$user"
+  else
+    printf "%bWARN%b: NSS import failed (certutil).\n" "$YELLOW" "$NC" >&2
+  fi
 }
 
 install_ca_windows() {
@@ -835,6 +876,7 @@ install_ca_windows() {
     \$ErrorActionPreference = 'Stop'
     \$path = '$win_ca'
     \$cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2(\$path)
+    \$cert.FriendlyName = '$CA_NICK'
 
     \$store = New-Object System.Security.Cryptography.X509Certificates.X509Store('Root','CurrentUser')
     \$store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
@@ -845,8 +887,91 @@ install_ca_windows() {
     \$store.Close()
   " >/dev/null 2>&1 || die "Windows certificate install failed (PowerShell import)."
 
-  printf "%bRoot CA installed on Windows%b (CurrentUser\\Root)\n" "$GREEN" "$NC"
+  printf "%bRoot CA installed on Windows%b (CurrentUser\\Root) as %s\n" "$GREEN" "$NC" "$CA_NICK"
   printf "%bNote:%b restart browsers if they still show trust errors.\n" "$YELLOW" "$NC"
+}
+
+install_ca() {
+  if is_windows_shell; then
+    install_ca_windows
+    return 0
+  fi
+
+  local src_ca="$DIR/configuration/rootCA/rootCA.pem"
+  [[ ${EUID:-$(id -u)} -eq 0 ]] || die "certificate install requires sudo"
+  [[ -r "$src_ca" ]] || die "certificate not found: $src_ca"
+
+  local family dest updater os_id os_like
+  IFS='|' read -r os_id os_like < <(detect_os_family)
+  IFS='|' read -r family dest updater < <(ca_plan)
+
+  printf "%bInstalling root CA…%b\n" "$CYAN" "$NC"
+  printf "%bDetected OS%b: id=%s like=%s → %s\n" "$CYAN" "$NC" "$os_id" "$os_like" "$family"
+
+  install -d -m 755 "$(dirname "$dest")"
+  install -m 644 "$src_ca" "$dest"
+  printf "%b✔ Copied%b → %s\n" "$GREEN" "$NC" "$dest"
+
+  case "$family" in
+  debian | alpine)
+    if command -v update-ca-certificates >/dev/null 2>&1; then
+      printf "%bUpdating trust store%b (update-ca-certificates)…\n" "$CYAN" "$NC"
+      if update-ca-certificates; then
+        printf "%b✔ Trust store updated%b\n" "$GREEN" "$NC"
+        printf "%bNote:%b If you see \"rehash: skipping ca-certificates.crt…\", that’s normal (it’s a bundle).\n" "$YELLOW" "$NC"
+      else
+        printf "%bWARN%b: update-ca-certificates failed. CA is installed but may not be active yet.\n" "$YELLOW" "$NC" >&2
+      fi
+    else
+      printf "%bWARN%b: update-ca-certificates not found. CA is installed but auto-update is unavailable.\n" "$YELLOW" "$NC" >&2
+    fi
+
+    # Optional p11-kit sync: best-effort only (can be missing helper on minimal installs)
+    if command -v trust >/dev/null 2>&1; then
+      printf "%bSyncing p11-kit%b (trust extract-compat)…\n" "$CYAN" "$NC"
+      if trust extract-compat >/dev/null 2>&1; then
+        printf "%b✔ p11-kit trust synced%b\n" "$GREEN" "$NC"
+      else
+        printf "%bWARN%b: trust extract-compat failed (helper missing on some installs). Skipping.\n" "$YELLOW" "$NC" >&2
+      fi
+    else
+      printf "%bINFO%b: 'trust' not found — skipping p11-kit sync.\n" "$YELLOW" "$NC"
+    fi
+    ;;
+  rhel)
+    if command -v update-ca-trust >/dev/null 2>&1; then
+      printf "%bUpdating trust store%b (update-ca-trust extract)…\n" "$CYAN" "$NC"
+      if update-ca-trust extract; then
+        printf "%b✔ Trust store updated%b\n" "$GREEN" "$NC"
+      else
+        printf "%bWARN%b: update-ca-trust extract failed. CA is installed but may not be active yet.\n" "$YELLOW" "$NC" >&2
+      fi
+    else
+      printf "%bWARN%b: update-ca-trust not found. CA is installed but auto-update is unavailable.\n" "$YELLOW" "$NC" >&2
+    fi
+    ;;
+  arch)
+    if command -v trust >/dev/null 2>&1; then
+      printf "%bUpdating trust store%b (trust extract-compat)…\n" "$CYAN" "$NC"
+      if trust extract-compat >/dev/null 2>&1; then
+        printf "%b✔ Trust store updated%b\n" "$GREEN" "$NC"
+      else
+        printf "%bWARN%b: trust extract-compat failed. CA is installed, but trust sync may be incomplete.\n" "$YELLOW" "$NC" >&2
+      fi
+    else
+      printf "%bWARN%b: 'trust' not found. CA is installed, but trust sync is unavailable.\n" "$YELLOW" "$NC" >&2
+    fi
+    ;;
+  *)
+    printf "%bINFO%b: Unknown distro; CA copied to %s.\n" "$YELLOW" "$NC" "$dest"
+    printf "%bINFO%b: You may need to update trust store manually for your OS.\n" "$YELLOW" "$NC"
+    ;;
+  esac
+
+  # Extra: ensure browsers that rely on NSS trust pick it up
+  install_ca_nss_user "$src_ca"
+
+  printf "%bRoot CA installed%b → %s (%s)\n" "$GREEN" "$NC" "$dest" "$CA_NICK"
 }
 
 uninstall_ca_windows() {
@@ -885,103 +1010,20 @@ uninstall_ca_windows() {
   fi
 }
 
-install_ca() {
-  if is_windows_shell; then
-    install_ca_windows
-    return 0
+uninstall_ca_nss_user() {
+  command -v certutil >/dev/null 2>&1 || return 0
+  local user="${SUDO_USER:-}"
+  [[ -n "$user" && "$user" != "root" ]] || return 0
+
+  local home
+  home="$(getent passwd "$user" | cut -d: -f6)"
+  [[ -n "$home" && -d "$home" ]] || return 0
+
+  local nssdb="sql:${home}/.pki/nssdb"
+  if sudo -u "$user" certutil -d "$nssdb" -L 2>/dev/null | grep -Fq "$CA_NICK"; then
+    sudo -u "$user" certutil -d "$nssdb" -D -n "$CA_NICK" >/dev/null 2>&1 || true
+    printf "%b✔ Removed CA from NSS%b (%s)\n" "$GREEN" "$NC" "$user"
   fi
-
-  local src_ca="$DIR/configuration/rootCA/rootCA.pem"
-  [[ ${EUID:-$(id -u)} -eq 0 ]] || die "certificate install requires sudo"
-  [[ -r "$src_ca" ]] || die "certificate not found: $src_ca"
-
-  local family dest updater os_id os_like
-  IFS='|' read -r os_id os_like < <(detect_os_family)
-  IFS='|' read -r family dest updater < <(ca_plan)
-
-  printf "%bInstalling root CA…%b
-" "$CYAN" "$NC"
-  printf "%bDetected OS%b: id=%s like=%s → %s
-" "$CYAN" "$NC" "$os_id" "$os_like" "$family"
-
-  install -d -m 755 "$(dirname "$dest")"
-  install -m 644 "$src_ca" "$dest"
-  printf "%b✔ Copied%b → %s
-" "$GREEN" "$NC" "$dest"
-
-  case "$family" in
-  debian | alpine)
-    if command -v update-ca-certificates >/dev/null 2>&1; then
-      printf "%bUpdating trust store%b (update-ca-certificates)…\n" "$CYAN" "$NC"
-      if update-ca-certificates; then
-        printf "%b✔ Trust store updated%b
-" "$GREEN" "$NC"
-        printf "%bNote:%b If you see \"rehash: skipping ca-certificates.crt…\", that’s normal (it’s a bundle).
-" "$YELLOW" "$NC"
-      else
-        printf "%bWARN%b: update-ca-certificates failed. CA is installed but may not be active yet.
-" "$YELLOW" "$NC" >&2
-      fi
-    else
-      printf "%bWARN%b: update-ca-certificates not found. CA is installed but auto-update is unavailable.
-" "$YELLOW" "$NC" >&2
-    fi
-
-    # Optional p11-kit sync: best-effort only (can be missing helper on minimal installs)
-    if command -v trust >/dev/null 2>&1; then
-      printf "%bSyncing p11-kit%b (trust extract-compat)…\n" "$CYAN" "$NC"
-      if trust extract-compat >/dev/null 2>&1; then
-        printf "%b✔ p11-kit trust synced%b
-" "$GREEN" "$NC"
-      else
-        printf "%bWARN%b: trust extract-compat failed (helper missing on some installs). Skipping.
-" "$YELLOW" "$NC" >&2
-      fi
-    else
-      printf "%bINFO%b: 'trust' not found — skipping p11-kit sync.
-" "$YELLOW" "$NC"
-    fi
-    ;;
-  rhel)
-    if command -v update-ca-trust >/dev/null 2>&1; then
-      printf "%bUpdating trust store%b (update-ca-trust extract)…\n" "$CYAN" "$NC"
-      if update-ca-trust extract; then
-        printf "%b✔ Trust store updated%b
-" "$GREEN" "$NC"
-      else
-        printf "%bWARN%b: update-ca-trust extract failed. CA is installed but may not be active yet.
-" "$YELLOW" "$NC" >&2
-      fi
-    else
-      printf "%bWARN%b: update-ca-trust not found. CA is installed but auto-update is unavailable.
-" "$YELLOW" "$NC" >&2
-    fi
-    ;;
-  arch)
-    if command -v trust >/dev/null 2>&1; then
-      printf "%bUpdating trust store%b (trust extract-compat)…\n" "$CYAN" "$NC"
-      if trust extract-compat >/dev/null 2>&1; then
-        printf "%b✔ Trust store updated%b
-" "$GREEN" "$NC"
-      else
-        printf "%bWARN%b: trust extract-compat failed. CA is installed, but trust sync may be incomplete.
-" "$YELLOW" "$NC" >&2
-      fi
-    else
-      printf "%bWARN%b: 'trust' not found. CA is installed, but trust sync is unavailable.
-" "$YELLOW" "$NC" >&2
-    fi
-    ;;
-  *)
-    printf "%bINFO%b: Unknown distro; CA copied to %s.
-" "$YELLOW" "$NC" "$dest"
-    printf "%bINFO%b: You may need to update trust store manually for your OS.
-" "$YELLOW" "$NC"
-    ;;
-  esac
-
-  printf "%bRoot CA installed%b → %s
-" "$GREEN" "$NC" "$dest"
 }
 
 uninstall_ca() {
@@ -1002,86 +1044,69 @@ uninstall_ca() {
   IFS='|' read -r os_id os_like < <(detect_os_family)
   IFS='|' read -r family dest updater < <(ca_plan)
 
-  printf "%bUninstalling root CA…%b
-" "$CYAN" "$NC"
-  printf "%bDetected OS%b: id=%s like=%s → %s
-" "$CYAN" "$NC" "$os_id" "$os_like" "$family"
+  printf "%bUninstalling root CA…%b\n" "$CYAN" "$NC"
+  printf "%bDetected OS%b: id=%s like=%s → %s\n" "$CYAN" "$NC" "$os_id" "$os_like" "$family"
 
-  # Always remove the planned destination first
   local removed=0
+
   if [[ -e "$dest" ]]; then
     rm -f "$dest"
     removed=$((removed + 1))
-    printf "%b✔ Removed%b → %s
-" "$GREEN" "$NC" "$dest"
+    printf "%b✔ Removed%b → %s\n" "$GREEN" "$NC" "$dest"
   else
-    printf "%bINFO%b: CA file not found at %s (nothing to remove)
-" "$YELLOW" "$NC" "$dest"
+    printf "%bINFO%b: CA file not found at %s (nothing to remove)\n" "$YELLOW" "$NC" "$dest"
   fi
 
-  # Optional: remove from all common anchor locations (for people who switched distros/paths)
   if ((all)); then
-    printf "%bScanning all known CA anchor paths…%b
-" "$CYAN" "$NC"
+    printf "%bScanning all known CA anchor paths…%b\n" "$CYAN" "$NC"
     local f
     for f in \
-      /usr/local/share/ca-certificates/rootCA.crt \
-      /usr/local/share/ca-certificates/rootCA.pem \
-      /etc/pki/ca-trust/source/anchors/rootCA.crt \
-      /etc/pki/ca-trust/source/anchors/rootCA.pem \
-      /etc/ca-certificates/trust-source/anchors/rootCA.crt \
-      /etc/ca-certificates/trust-source/anchors/rootCA.pem; do
+      "/usr/local/share/ca-certificates/${CA_BASENAME}.crt" \
+      "/usr/local/share/ca-certificates/${CA_BASENAME}.pem" \
+      "/etc/pki/ca-trust/source/anchors/${CA_BASENAME}.crt" \
+      "/etc/pki/ca-trust/source/anchors/${CA_BASENAME}.pem" \
+      "/etc/ca-certificates/trust-source/anchors/${CA_BASENAME}.crt" \
+      "/etc/ca-certificates/trust-source/anchors/${CA_BASENAME}.pem"; do
       [[ "$f" == "$dest" ]] && continue
       if [[ -e "$f" ]]; then
         rm -f "$f"
         removed=$((removed + 1))
-        printf "%b✔ Removed%b → %s
-" "$GREEN" "$NC" "$f"
+        printf "%b✔ Removed%b → %s\n" "$GREEN" "$NC" "$f"
       fi
     done
   fi
 
-  # Refresh trust store (best-effort, do not fail uninstall)
   case "$family" in
   debian | alpine)
     if command -v update-ca-certificates >/dev/null 2>&1; then
       printf "%bUpdating trust store%b (update-ca-certificates)…\n" "$CYAN" "$NC"
-      update-ca-certificates || printf "%bWARN%b: update-ca-certificates failed.
-" "$YELLOW" "$NC" >&2
+      update-ca-certificates || printf "%bWARN%b: update-ca-certificates failed.\n" "$YELLOW" "$NC" >&2
     else
-      printf "%bWARN%b: update-ca-certificates not found; trust store not refreshed.
-" "$YELLOW" "$NC" >&2
+      printf "%bWARN%b: update-ca-certificates not found; trust store not refreshed.\n" "$YELLOW" "$NC" >&2
     fi
 
-    # Optional p11-kit sync: best-effort only
     if command -v trust >/dev/null 2>&1; then
       printf "%bSyncing p11-kit%b (trust extract-compat)…\n" "$CYAN" "$NC"
-      trust extract-compat >/dev/null 2>&1 || printf "%bWARN%b: trust extract-compat failed. Skipping.
-" "$YELLOW" "$NC" >&2
+      trust extract-compat >/dev/null 2>&1 || printf "%bWARN%b: trust extract-compat failed. Skipping.\n" "$YELLOW" "$NC" >&2
     fi
     ;;
   rhel)
     if command -v update-ca-trust >/dev/null 2>&1; then
       printf "%bUpdating trust store%b (update-ca-trust extract)…\n" "$CYAN" "$NC"
-      update-ca-trust extract || printf "%bWARN%b: update-ca-trust extract failed.
-" "$YELLOW" "$NC" >&2
+      update-ca-trust extract || printf "%bWARN%b: update-ca-trust extract failed.\n" "$YELLOW" "$NC" >&2
     else
-      printf "%bWARN%b: update-ca-trust not found; trust store not refreshed.
-" "$YELLOW" "$NC" >&2
+      printf "%bWARN%b: update-ca-trust not found; trust store not refreshed.\n" "$YELLOW" "$NC" >&2
     fi
     ;;
   arch)
     if command -v trust >/dev/null 2>&1; then
       printf "%bUpdating trust store%b (trust extract-compat)…\n" "$CYAN" "$NC"
-      trust extract-compat >/dev/null 2>&1 || printf "%bWARN%b: trust extract-compat failed.
-" "$YELLOW" "$NC" >&2
+      trust extract-compat >/dev/null 2>&1 || printf "%bWARN%b: trust extract-compat failed.\n" "$YELLOW" "$NC" >&2
     else
-      printf "%bWARN%b: 'trust' not found; trust store not refreshed.
-" "$YELLOW" "$NC" >&2
+      printf "%bWARN%b: 'trust' not found; trust store not refreshed.\n" "$YELLOW" "$NC" >&2
     fi
     ;;
   *)
-    # If unknown family, try what exists
     if command -v update-ca-certificates >/dev/null 2>&1; then
       printf "%bUpdating trust store%b (update-ca-certificates)…\n" "$CYAN" "$NC"
       update-ca-certificates || true
@@ -1094,17 +1119,16 @@ uninstall_ca() {
       printf "%bSyncing p11-kit%b (trust extract-compat)…\n" "$CYAN" "$NC"
       trust extract-compat >/dev/null 2>&1 || true
     fi
-    printf "%bINFO%b: Unknown distro; removed CA file(s) if present. Refresh trust store manually if needed.
-" "$YELLOW" "$NC"
+    printf "%bINFO%b: Unknown distro; removed CA file(s) if present. Refresh trust store manually if needed.\n" "$YELLOW" "$NC"
     ;;
   esac
 
+  uninstall_ca_nss_user
+
   if ((removed)); then
-    printf "%bRoot CA uninstalled%b (removed %d file(s))
-" "$GREEN" "$NC" "$removed"
+    printf "%bRoot CA uninstalled%b (removed %d file(s))\n" "$GREEN" "$NC" "$removed"
   else
-    printf "%bRoot CA already absent%b (no files removed)
-" "$YELLOW" "$NC"
+    printf "%bRoot CA already absent%b (no files removed)\n" "$YELLOW" "$NC"
   fi
 }
 
@@ -1254,13 +1278,646 @@ cmd_start() {
 }
 
 cmd_reload() { cmd_start "$@"; }
+
 cmd_stop() { docker_compose down; }
-cmd_down() { cmd_stop; }
+
+cmd_down() {
+  # Safety rails:
+  #   lds down --volumes requires --yes
+  local yes=0 vols=0
+  local -a args=()
+  while [[ "${1:-}" ]]; do
+    case "$1" in
+      --yes|-y) yes=1; shift ;;
+      --volumes|-v) vols=1; args+=("--volumes"); shift ;;
+      --remove-orphans) args+=("--remove-orphans"); shift ;;
+      *) args+=("$1"); shift ;;
+    esac
+  done
+  if ((vols)) && ((yes==0)); then
+    die "Refusing: down --volumes requires --yes"
+  fi
+  docker_compose down "${args[@]}"
+}
+
 cmd_restart() {
   cmd_stop
   cmd_start
 }
 cmd_reboot() { cmd_restart; }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 6a. STATUS / PS / STATS
+# ─────────────────────────────────────────────────────────────────────────────
+cmd_ps() {
+  if (( $# )); then
+    docker_compose ps "$@"
+  else
+    docker_compose ps
+  fi
+}
+
+cmd_stats() {
+  local svc="${1:-}"
+  local project; project="$(lds_project)"
+  if [[ -n "$svc" ]]; then
+    # accept service or container name
+    local s; s="$(resolve_service "$svc" || true)"
+    if [[ -n "$s" ]]; then
+      docker stats --no-stream --format 'table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.NetIO}}\t{{.BlockIO}}' --filter "name=${project}_${s}"
+      return 0
+    fi
+  fi
+  docker stats --no-stream --format 'table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.NetIO}}\t{{.BlockIO}}'     --filter "label=com.docker.compose.project=$project"
+}
+
+_status_urls() {
+  local f d
+  shopt -s nullglob
+  for f in "$DIR/configuration/nginx/"*.conf; do
+    d="$(basename -- "$f" .conf)"
+    [[ -n "$d" ]] && printf 'https://%s\n' "$d"
+  done
+  shopt -u nullglob
+}
+
+_status_health_line_plain() {
+  local c="$1"
+  local st health
+  st="$(docker inspect -f '{{.State.Status}}' "$c" 2>/dev/null || true)"
+  health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$c" 2>/dev/null || true)"
+  if [[ -n "$health" ]]; then
+    printf '%s:%s(%s)' "$c" "$st" "$health"
+  else
+    printf '%s:%s' "$c" "$st"
+  fi
+}
+
+_status_health_line() {
+  # Colorized for human output (mkhost-style theme)
+  local c="$1"
+  local st health line
+  st="$(docker inspect -f '{{.State.Status}}' "$c" 2>/dev/null || true)"
+  health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$c" 2>/dev/null || true)"
+  line="$(_status_health_line_plain "$c")"
+
+  # Prefer health when present, otherwise State.Status
+  if [[ -n "$health" ]]; then
+    case "$health" in
+      healthy)   printf '%b%s%b' "$GREEN" "$line" "$NC" ;;
+      starting)  printf '%b%s%b' "$YELLOW" "$line" "$NC" ;;
+      unhealthy) printf '%b%s%b' "$RED" "$line" "$NC" ;;
+      *)         printf '%b%s%b' "$MAGENTA" "$line" "$NC" ;;
+    esac
+  else
+    case "$st" in
+      running) printf '%b%s%b' "$GREEN" "$line" "$NC" ;;
+      exited|dead) printf '%b%s%b' "$RED" "$line" "$NC" ;;
+      created|paused|restarting) printf '%b%s%b' "$YELLOW" "$line" "$NC" ;;
+      *) printf '%b%s%b' "$MAGENTA" "$line" "$NC" ;;
+    esac
+  fi
+}
+
+cmd_status() {
+  local json=0 quiet=0
+  while [[ "${1:-}" ]]; do
+    case "$1" in
+    --json) json=1; shift ;;
+    --quiet|-q) quiet=1; shift ;;
+    *) break ;;
+    esac
+  done
+
+  local project; project="$(lds_project)"
+
+  local profiles=""
+  if [[ -r "$ENV_DOCKER" ]]; then
+    profiles="$(grep -E '^[[:space:]]*COMPOSE_PROFILES=' "$ENV_DOCKER" | tail -n1 | cut -d= -f2- | tr -d '\r' || true)"
+  fi
+
+  # containers (Name \t Service \t State \t Health)
+  local -a ctrs=()
+  mapfile -t ctrs < <(
+    docker_compose ps -a --format '{{.Name}}\t{{.Service}}\t{{.State}}\t{{.Health}}' 2>/dev/null \
+      | sed '/^[[:space:]]*$/d'
+  )
+
+  # urls
+  local -a urls=()
+  mapfile -t urls < <(_status_urls 2>/dev/null || true)
+
+  # ---- helpers ----
+  _json_escape() {
+    local s="$1"
+    s="${s//\\/\\\\}"
+    s="${s//\"/\\\"}"
+    s="${s//$'\n'/\\n}"
+    s="${s//$'\r'/\\r}"
+    s="${s//$'\t'/\\t}"
+    printf '%s' "$s"
+  }
+
+  _health_color() {
+    local h="$1"
+    # avoid ${var,,} to stay compatible
+    if [[ -z "$h" || "$h" == "null" ]]; then
+      printf '%s' "$DIM"
+    elif [[ "$h" == *"healthy"* ]]; then
+      printf '%s' "$GREEN"
+    elif [[ "$h" == *"unhealthy"* ]]; then
+      printf '%s' "$RED"
+    else
+      printf '%s' "$YELLOW"
+    fi
+  }
+
+  _state_color() {
+    local s="$1"
+    case "$s" in
+    running) printf '%s' "$GREEN" ;;
+    exited|dead) printf '%s' "$RED" ;;
+    restarting) printf '%s' "$YELLOW" ;;
+    *) printf '%s' "$DIM" ;;
+    esac
+  }
+
+  # NEW: health icon (✓, !, ×) - safe + simple
+  _health_icon() {
+    local h="$1"
+    if [[ -z "$h" || "$h" == "null" || "$h" == "-" ]]; then
+      printf '!'
+    elif [[ "$h" == *"unhealthy"* ]]; then
+      printf '×'
+    elif [[ "$h" == *"healthy"* ]]; then
+      printf '✓'
+    else
+      printf '!'
+    fi
+  }
+
+  # NEW: running/total summary
+  local total running
+  total=${#ctrs[@]}
+  running=0
+  if (( total )); then
+    local line _n _svc st _h
+    for line in "${ctrs[@]}"; do
+      IFS=$'\t' read -r _n _svc st _h <<<"$line"
+      [[ "$st" == "running" ]] && ((++running))
+    done
+  fi
+
+  # ---- JSON mode ----
+  if (( json )); then
+    printf '{'
+    printf '"project":"%s",' "$(_json_escape "$project")"
+    printf '"profiles":"%s",' "$(_json_escape "$profiles")"
+    printf '"summary":{"running":%s,"total":%s},' "$running" "$total"
+
+    printf '"containers":['
+    local first=1 line name svc state health
+    for line in "${ctrs[@]}"; do
+      IFS=$'\t' read -r name svc state health <<<"$line"
+      (( first )) || printf ','
+      first=0
+
+      local health_disp="${health:-}"
+      [[ -z "$health_disp" || "$health_disp" == "null" ]] && health_disp="-"
+
+      printf '{'
+      printf '"name":"%s",'   "$(_json_escape "$name")"
+      printf '"service":"%s",' "$(_json_escape "$svc")"
+      printf '"state":"%s",'  "$(_json_escape "$state")"
+      printf '"health":"%s",' "$(_json_escape "$health_disp")"
+      printf '"health_icon":"%s"' "$(_json_escape "$(_health_icon "$health_disp")")"
+      printf '}'
+    done
+    printf '],'
+
+    printf '"ports":[80,443],'
+
+    printf '"urls":['
+    first=1
+    local u
+    for u in "${urls[@]}"; do
+      [[ -n "$u" ]] || continue
+      (( first )) || printf ','
+      first=0
+      printf '"%s"' "$(_json_escape "$u")"
+    done
+    printf ']'
+
+    printf '}\n'
+    return 0
+  fi
+
+  # ---- Quiet mode ----
+  if (( quiet )); then
+    return 0
+  fi
+
+  # ---- Pretty output ----
+  printf "%bProject:%b %s\n" "$CYAN" "$NC" "$project"
+  [[ -n "$profiles" ]] && printf "%bProfiles:%b %s\n" "$CYAN" "$NC" "$profiles"
+
+  # UPDATED: Containers line shows running/total summary
+  printf "%bContainers:%b %b(%s/%s running)%b\n" "$CYAN" "$NC" "$DIM" "$running" "$total" "$NC"
+
+  if ((${#ctrs[@]} == 0)); then
+    printf "  (none)\n"
+  else
+    # column widths
+    local w_name=4 w_svc=7
+    local line name svc state health
+    for line in "${ctrs[@]}"; do
+      IFS=$'\t' read -r name svc state health <<<"$line"
+      ((${#name} > w_name)) && w_name=${#name}
+      ((${#svc}  > w_svc))  && w_svc=${#svc}
+    done
+    (( w_name > 34 )) && w_name=34
+    (( w_svc  > 18 )) && w_svc=18
+
+    # header
+    printf "  %b%-*s%b  %b%-*s%b  %b%-10s%b  %b%s%b\n" \
+      "$BOLD" "$w_name" "NAME" "$NC" \
+      "$BOLD" "$w_svc"  "SERVICE" "$NC" \
+      "$BOLD" "STATE" "$NC" \
+      "$BOLD" "HEALTH" "$NC"
+
+    # rows
+    for line in "${ctrs[@]}"; do
+      IFS=$'\t' read -r name svc state health <<<"$line"
+
+      local name_disp="$name" svc_disp="$svc"
+      if ((${#name_disp} > w_name)); then name_disp="${name_disp:0:w_name-1}…"; fi
+      if ((${#svc_disp} > w_svc)); then svc_disp="${svc_disp:0:w_svc-1}…"; fi
+
+      local stc hc
+      stc="$(_state_color "$state")"
+      hc="$(_health_color "${health:-}")"
+
+      local health_disp="${health:-}"
+      [[ -z "$health_disp" || "$health_disp" == "null" ]] && health_disp="-"
+
+      # NEW: icon prefix
+      local hi; hi="$(_health_icon "$health_disp")"
+
+      printf "  %-*s  %-*s  %b%-10s%b  %b%s %s%b\n" \
+        "$w_name" "$name_disp" \
+        "$w_svc"  "$svc_disp" \
+        "$stc" "${state:-"-"}" "$NC" \
+        "$hc" "$hi" "$health_disp" "$NC"
+    done
+  fi
+
+  printf "%bPorts:%b 80, 443\n" "$CYAN" "$NC"
+
+  printf "%bURLs:%b\n" "$CYAN" "$NC"
+  if ((${#urls[@]})); then
+    local u
+    for u in "${urls[@]}"; do
+      [[ -n "$u" ]] || continue
+      printf "  - %b%s%b\n" "$BLUE" "$u" "$NC"
+    done
+  else
+    printf "  (none)\n"
+  fi
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 6b. LOGS / OPEN
+# ─────────────────────────────────────────────────────────────────────────────
+cmd_logs() {
+  local svc="" follow=0 since="" grep_pat=""
+  while [[ "${1:-}" ]]; do
+    case "$1" in
+      -f|--follow) follow=1; shift ;;
+      --since) since="${2:-}"; shift 2 ;;
+      --grep) grep_pat="${2:-}"; shift 2 ;;
+      *) svc="${1:-}"; shift ;;
+    esac
+  done
+
+  local -a args=()
+  ((follow)) && args+=("-f")
+  [[ -n "$since" ]] && args+=("--since" "$since")
+
+  if [[ -n "$svc" ]]; then
+    local s; s="$(resolve_service "$svc" || true)"
+    [[ -n "$s" ]] || die "Unknown service: $svc"
+    if [[ -n "$grep_pat" ]]; then
+      docker_compose logs "${args[@]}" "$s" 2>&1 | rg -n -- "$grep_pat"
+    else
+      docker_compose logs "${args[@]}" "$s"
+    fi
+  else
+    if [[ -n "$grep_pat" ]]; then
+      docker_compose logs "${args[@]}" 2>&1 | rg -n -- "$grep_pat"
+    else
+      docker_compose logs "${args[@]}"
+    fi
+  fi
+}
+
+cmd_open() {
+  local target="${1:-}"
+  [[ -n "$target" ]] || die "open <mail|db|redis|kibana|domain>"
+  local url=""
+  case "${target,,}" in
+    mail|mailpit|webmail) url="https://webmail.localhost" ;;
+    db|cloudbeaver) url="https://db.localhost" ;;
+    redis|redisinsight|redis-insight|rds) url="http://ri.localhost" ;;
+    mongo|me|mongoexpress|mongo-express) url="http://me.localhost" ;;
+    kibana|kbn) url="http://kibana.localhost" ;;
+    *)
+      url="https://${target}"
+      ;;
+  esac
+  open_url "$url"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 6c. PROFILES
+# ─────────────────────────────────────────────────────────────────────────────
+_known_profile() {
+  local p="${1:-}"
+  [[ -n "$p" ]] || return 1
+  # quick/cheap check across compose files
+  local f
+  for f in "$COMPOSE_FILE" "${__EXTRA_FILES[@]:-}"; do
+    [[ -r "$f" ]] || continue
+    if grep -Eq "profiles:[[:space:]]*\[.*\b${p}\b.*\]" "$f" || grep -Eq "profiles:[[:space:]]*$" "$f"; then
+      # fall through to deeper check with rg if present
+      :
+    fi
+    if grep -Eq "\b${p}\b" "$f"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+cmd_profiles() {
+  local action="${1:-list}"
+  shift || true
+  case "${action,,}" in
+    list|"")
+      local cur=""
+      [[ -r "$ENV_DOCKER" ]] && cur="$(grep -E '^COMPOSE_PROFILES=' "$ENV_DOCKER" | tail -n1 | cut -d= -f2- | tr -d '\r' || true)"
+      printf "%bEnabled profiles:%b %s
+" "$CYAN" "$NC" "${cur:-<none>}"
+      printf "%bAvailable profiles:%b
+" "$CYAN" "$NC"
+      printf '  - %s
+' "${SERVICES[@]}" | LC_ALL=C sort -u
+      # warn if enabled profile has no mention in compose
+      if [[ -n "$cur" ]]; then
+        local p
+        IFS=',' read -r -a __ps <<<"$cur"
+        for p in "${__ps[@]}"; do
+          p="${p//[[:space:]]/}"
+          [[ -n "$p" ]] || continue
+          _known_profile "$p" || printf "%b[warn]%b enabled profile '%s' has no matching services in compose
+" "$YELLOW" "$NC" "$p"
+        done
+      fi
+      ;;
+    add)
+      [[ $# -gt 0 ]] || die "profiles add <profile...>"
+      for p in "$@"; do
+        modify_profiles add "$p"
+      done
+      ;;
+    remove|rm|del)
+      [[ $# -gt 0 ]] || die "profiles remove <profile...>"
+      modify_profiles remove "$@"
+      ;;
+    *)
+      die "profiles <list|add|remove>"
+      ;;
+  esac
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 6d. DIAG / SNIFF
+# ─────────────────────────────────────────────────────────────────────────────
+_tools_exec() {
+  docker inspect SERVER_TOOLS >/dev/null 2>&1 || die "SERVER_TOOLS container not found"
+  docker inspect -f '{{.State.Running}}' SERVER_TOOLS 2>/dev/null | grep -qx true || die "SERVER_TOOLS is not running"
+  # NOTE: pass a SINGLE command string; do not pass arrays here.
+  docker exec -i SERVER_TOOLS sh -lc "$*"
+}
+
+_shq() { printf '%q' "$1"; }
+
+cmd_diag() {
+  local sub="${1:-}"
+  shift || true
+
+  case "${sub,,}" in
+    dns)
+      local dom="${1:-}"; [[ -n "$dom" ]] || die "diag dns <domain>"
+      local qdom; qdom="$(_shq "$dom")"
+      _tools_exec "dig +short $qdom; echo; nslookup $qdom 2>/dev/null || true; echo; getent hosts $qdom 2>/dev/null || true"
+      ;;
+    route|net)
+      _tools_exec "ip r; echo; ip a; echo; ss -tulpen 2>/dev/null || netstat -tulpen 2>/dev/null || true"
+      ;;
+    tcp)
+      local h="${1:-}"; local p="${2:-}"
+      [[ -n "$h" && -n "$p" ]] || die "diag tcp <host> <port>"
+      _tools_exec "nc -vz -w2 $(_shq "$h") $(_shq "$p")"
+      ;;
+    http)
+      local url="${1:-}"; shift || true
+      [[ -n "$url" ]] || die "diag http <url> [curl-args...]"
+      local -a qargs=()
+      local a
+      for a in "$@"; do qargs+=("$(printf '%q' "$a")"); done
+      _tools_exec "curl -vkI $(_shq "$url") ${qargs[*]}"
+      ;;
+    tls)
+      local dom="${1:-}"; [[ -n "$dom" ]] || die "diag tls <domain>"
+      local qdom; qdom="$(_shq "$dom")"
+      _tools_exec "echo | openssl s_client -connect ${qdom}:443 -servername $qdom -showcerts 2>/dev/null | sed -n '1,60p'"
+      ;;
+    *)
+      die "diag <dns|route|net|tcp|http|tls>"
+      ;;
+  esac
+}
+
+
+cmd_sniff() {
+  local url="${1:-}"; shift || true
+  [[ -n "$url" ]] || die "sniff <url> [curl-args...]"
+  local -a qargs=()
+  local a
+  for a in "$@"; do qargs+=("$(printf '%q' "$a")"); done
+  _tools_exec "curl -vk -D - $(_shq "$url") ${qargs[*]} | (command -v jq >/dev/null 2>&1 && jq . 2>/dev/null || cat)"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 6e. SECRETS / CERT / HOST / UI / RUNTIME
+# ─────────────────────────────────────────────────────────────────────────────
+cmd_secrets() { docker exec -it SERVER_TOOLS senv "$@"; }
+
+cmd_cert() { docker exec -it SERVER_TOOLS certify "$@"; }
+
+cmd_host() {
+  local sub="${1:-}"; shift || true
+  case "${sub,,}" in
+    add)
+      setup_domain
+      ;;
+    rm|remove|del|delete)
+      local dom="${1:-}"; [[ -n "$dom" ]] || die "host rm <domain>"
+      cmd_delhost "$dom"
+      ;;
+    list)
+      shopt -s nullglob
+      for f in "$DIR/configuration/nginx/"*.conf; do
+        printf '%s
+' "$(basename -- "$f" .conf)"
+      done
+      shopt -u nullglob
+      ;;
+    *)
+      die "host <add|rm|list>"
+      ;;
+  esac
+}
+
+cmd_ui() { cmd_lzd; }
+
+cmd_runtime() {
+  local which="${1:-}"; [[ -n "$which" ]] || die "runtime <php|node>"
+  local f=""
+  for f in "$DIR/runtime-versions.json" "$DIR/docker/runtime-versions.json" "$DIR/configuration/runtime-versions.json"; do
+    [[ -r "$f" ]] && break || f=""
+  done
+  if [[ -z "$f" ]]; then
+    printf "%b[warn]%b runtime-versions.json not found
+" "$YELLOW" "$NC"
+    return 0
+  fi
+  _tools_exec "jq -r '."${which}" // empty' "$f" 2>/dev/null || cat "$f""
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 6f. EXEC / CHECK / EVENTS / CLEAN / ENV / VERIFY / DISK
+# ─────────────────────────────────────────────────────────────────────────────
+cmd_exec() {
+  local svc="${1:-}"; shift || true
+  [[ -n "$svc" ]] || die "exec <service> [cmd...]"
+  local s; s="$(resolve_service "$svc" || true)"
+  [[ -n "$s" ]] || die "Unknown service: $svc"
+  if [[ $# -gt 0 ]]; then
+    docker_compose exec "$s" "$@"
+  else
+    docker_compose exec "$s" sh -lc 'command -v bash >/dev/null 2>&1 && exec bash || exec sh'
+  fi
+}
+
+cmd_check() {
+  local sub="${1:-}"; shift || true
+  case "${sub,,}" in
+    upstream)
+      local dom="${1:-}"; [[ -n "$dom" ]] || die "check upstream <domain>"
+      local nconf="$DIR/configuration/nginx/$dom.conf"
+      [[ -r "$nconf" ]] || die "No nginx conf for domain: $dom"
+      printf "%bDomain:%b %s
+" "$CYAN" "$NC" "$dom"
+      if grep -q fastcgi_pass "$nconf"; then
+        local php; php="$(grep -Eo 'fastcgi_pass ([^:]+):9000' "$nconf" | awk '{print $2}' | sed 's/:9000$//' | head -n1 || true)"
+        printf "Upstream (php): %s
+" "${php:-unknown}"
+        [[ -n "$php" ]] && _tools_exec "nc -vz -w2 "$php" 9000 || true"
+      elif grep -q proxy_pass "$nconf"; then
+        local up; up="$(grep -m1 -Eo 'proxy_pass[[:space:]]+http://[^;]+' "$nconf" | awk '{print $2}' | sed 's|^http://||' || true)"
+        printf "Upstream (http): %s
+" "${up:-unknown}"
+        local h="${up%%:*}" p="${up##*:}"
+        [[ -n "$h" && -n "$p" && "$h" != "$up" ]] && _tools_exec "nc -vz -w2 "$h" "$p" || true"
+      fi
+      _tools_exec "curl -vkI "https://$dom" || true"
+      ;;
+    *)
+      die "check upstream <domain>"
+      ;;
+  esac
+}
+
+cmd_events() {
+  local since="${1:-1h}"
+  local project; project="$(lds_project)"
+  docker events --since "$since" --filter "label=com.docker.compose.project=$project"
+}
+
+cmd_clean() {
+  local yes=0 vols=0
+  while [[ "${1:-}" ]]; do
+    case "$1" in
+      --yes|-y) yes=1; shift ;;
+      --volumes|-v) vols=1; shift ;;
+      *) shift ;;
+    esac
+  done
+  ((yes)) || die "clean requires --yes"
+  local project; project="$(lds_project)"
+  # remove stopped containers for this project
+  docker rm -f $(docker ps -a --filter "label=com.docker.compose.project=$project" --filter "status=exited" -q) 2>/dev/null || true
+  if ((vols)); then
+    docker volume rm $(docker volume ls -q --filter "label=com.docker.compose.project=$project") 2>/dev/null || true
+  fi
+  printf "%b[clean]%b done
+" "$GREEN" "$NC"
+}
+
+cmd_env() { docker exec -it SERVER_TOOLS senv env "$@"; }
+
+cmd_verify() {
+  # smoke checks: compose config, LB up, curl each domain
+  docker_compose config >/dev/null
+  cmd_status --quiet >/dev/null || true
+  local d
+  while IFS= read -r d; do
+    [[ -n "$d" ]] || continue
+    _tools_exec "curl -skI "https://$d" | head -n 1"
+  done < <(shopt -s nullglob; for f in "$DIR/configuration/nginx/"*.conf; do basename -- "$f" .conf; done; shopt -u nullglob)
+}
+
+cmd_disk() {
+  docker system df
+  printf "
+%bProject data:%b
+" "$CYAN" "$NC"
+  du -sh "$DIR/data" 2>/dev/null || true
+}
+
+cmd_du() { cmd_disk; }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 6g. NGINX INTROSPECTION
+# ─────────────────────────────────────────────────────────────────────────────
+cmd_nginx() {
+  local dom="${1:-}"
+  [[ -n "$dom" ]] || die "nginx <domain>"
+  local f="$DIR/configuration/nginx/$dom.conf"
+  [[ -r "$f" ]] || die "No nginx conf: $f"
+  printf "%bNginx vhost:%b %s
+" "$CYAN" "$NC" "$f"
+  grep -nE 'server_name|listen|root |proxy_pass|fastcgi_pass|include |error_page' "$f" || true
+  if grep -q '/etc/nginx/html' "$f"; then
+    printf "%b[warn]%b mentions /etc/nginx/html (default root fallback risk)
+" "$YELLOW" "$NC"
+  fi
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 6h. HELP MARKDOWN
+# ─────────────────────────────────────────────────────────────────────────────
 
 normalize_service() {
   local raw="${1:-}"
@@ -1447,7 +2104,27 @@ docker_shell() {
     exec docker exec -it "$c" sh
   fi
 }
-cmd_tools() { docker_shell SERVER_TOOLS; }
+cmd_tools() {
+  local sub="${1:-sh}"
+  shift || true
+  case "${sub,,}" in
+  sh|shell|"")
+    docker_shell SERVER_TOOLS
+    ;;
+  exec)
+    [[ $# -gt 0 ]] || die "tools exec "<cmd>""
+    docker exec -it SERVER_TOOLS sh -lc "$*"
+    ;;
+  file)
+    local p="${1:-}"
+    [[ -n "$p" ]] || die "tools file <path>"
+    docker exec -it SERVER_TOOLS sh -lc "ls -la -- \"$p\" 2>/dev/null || true; echo; sed -n '1,200p' -- \"$p\" 2>/dev/null || true"
+    ;;
+  *)
+    die "tools <sh|exec|file>"
+    ;;
+  esac
+}
 cmd_lzd() { docker exec -it SERVER_TOOLS lazydocker; }
 cmd_lazydocker() { cmd_lzd; }
 cmd_http() { [[ ${1:-} == reload ]] && http_reload; }
@@ -1609,6 +2286,32 @@ cmd_certificate() {
 }
 
 cmd_doctor() {
+  # Optional focused modes
+  if [[ "${1:-}" == "--lint" ]]; then
+    shift || true
+    # Run shellcheck inside SERVER_TOOLS against lds + bin scripts (if present)
+    docker exec -i SERVER_TOOLS sh -lc '
+      set -e
+      command -v shellcheck >/dev/null 2>&1 || { echo "shellcheck not found in SERVER_TOOLS"; exit 1; }
+      files=""
+      for f in "'"$DIR"'"/lds "'"$DIR"'"/bin/* "'"$DIR"'"/lib/*.sh; do
+        [ -f "$f" ] && files="$files $f"
+      done
+      [ -n "$files" ] || { echo "No scripts found to lint"; exit 0; }
+      shellcheck -x $files
+    '
+    return 0
+  fi
+
+  if [[ "${1:-}" == "--scan-logs" ]]; then
+    shift || true
+    local pat="${1:-error|failed|panic|segfault|permission denied|fatal}"
+    local project; project="$(lds_project)"
+    # tail recent logs from compose services and grep with rg
+    docker_compose logs --since 30m 2>&1 | rg -n -i -- "$pat" || true
+    return 0
+  fi
+
   local os_id os_like
   IFS='|' read -r os_id os_like < <(detect_os_family)
 
@@ -2104,37 +2807,119 @@ run_start() {
   local name="$1" tag="$2" dir="$3" keepalive="$4" sock="$5"
   shift 5 || true
 
+  # Remaining args are split by a "--" sentinel:
+  #   - before "--" : publish specs (HOST:CONT), repeatable
+  #   - after "--"  : mount specs (HOST[:CONT]), repeatable
+  local -a pubs=() mounts=()
+  local seen_delim=0 x
+  for x in "$@"; do
+    if [[ "$x" == "--" ]]; then
+      seen_delim=1
+      continue
+    fi
+    if ((seen_delim)); then
+      mounts+=("$x")
+    else
+      pubs+=("$x")
+    fi
+  done
+
+  # Normalize project dir (POSIX absolute).
+  # On Windows Git Bash, /e/... is OK; docker.exe will receive converted path automatically.
+  local dir_posix
+  dir_posix="$(cd "$dir" 2>/dev/null && pwd -P)" || die "invalid dir: $dir"
+
+  # MSYS-safe container paths: use '//' prefix to prevent path conversion.
+  # Docker interprets //path as /path inside container.
+  local WDIR="//workspace"
+  local WDIR_MOUNT="${dir_posix}://workspace"
+
   local -a args=(docker run -d --name "$name"
     --label "com.infocyph.lds.run=1"
-    --label "com.infocyph.lds.dir=$dir"
+    --label "com.infocyph.lds.dir=$dir_posix"
     --label "com.infocyph.lds.tag=$tag"
-    -w /workspace
-    -v "$dir:/workspace"
+    -w "$WDIR"
+    -v "$WDIR_MOUNT"
   )
 
-  # Optional: allow containers to talk to Docker (DinD via host socket)
+  # Mount extra directories/files (HOST[:CONT]).
+  # - If container path missing, mounts under /mnt/<basename>.
+  # - HOST may be relative to the run directory.
+  if ((${#mounts[@]})); then
+    local spec host cont base
+    for spec in "${mounts[@]}"; do
+      [[ -n "$spec" ]] || continue
+      host="$spec"
+      cont=""
+
+      # Split as HOST:CONT ONLY if suffix after last ':' looks like a container absolute path (/...)
+      # (safe for Windows drive letters like E:\... because tail won't start with '/')
+      if [[ "$spec" == *:* ]]; then
+        local tail="${spec##*:}"
+        if [[ "$tail" == /* ]]; then
+          host="${spec%:*}"
+          cont="$tail"
+        fi
+      fi
+
+      # Resolve host to absolute (POSIX) for checks
+      if [[ "$host" != /* && "$host" != ~* && ! "$host" =~ ^[A-Za-z]:[\\/].* ]]; then
+        host="${dir_posix%/}/$host"
+      fi
+
+      # If user provided Windows path (E:\...), convert to POSIX for existence check
+      if [[ "$host" =~ ^[A-Za-z]:[\\/].* ]] && command -v cygpath >/dev/null 2>&1; then
+        host="$(cygpath -u "$host")"
+      fi
+
+      host="$(cd "${host%/*}" 2>/dev/null && pwd -P)/${host##*/}" || {
+        printf "%b[run]%b Warning: cannot resolve mount path: %s\n" "$YELLOW" "$NC" "$spec" >&2
+        continue
+      }
+
+      [[ -e "$host" ]] || {
+        printf "%b[run]%b Warning: mount path does not exist: %s\n" "$YELLOW" "$NC" "$host" >&2
+        continue
+      }
+
+      if [[ -z "$cont" ]]; then
+        base="${host##*/}"
+        cont="/mnt/${base}"
+      fi
+      [[ "$cont" == /* ]] || cont="/mnt/${cont}"
+
+      # Prevent MSYS conversion for container side by using '//' prefix
+      cont="//${cont#/}"
+
+      args+=(-v "${host}:${cont}")
+    done
+  fi
+
+  # Optional docker sock
   if [[ "${sock:-0}" == 1 ]]; then
-    [[ -S /var/run/docker.sock ]] || printf "%b[run]%b Warning: /var/run/docker.sock not found on host, mount may fail.\n" "$YELLOW" "$NC" >&2
     args+=(-v "/var/run/docker.sock:/var/run/docker.sock")
   fi
 
-  # Publish ports: pass multiple --publish/-p flags from cmd_run
+  # Publish ports
   local pub
-  for pub in "$@"; do
+  for pub in "${pubs[@]}"; do
     [[ -n "$pub" ]] || continue
     args+=(-p "$pub")
   done
 
   if [[ "$keepalive" == 1 ]]; then
-    # keep container alive even if image CMD exits (good for "exec bash" workflow)
     args+=(--entrypoint sh "$tag" -c "trap : TERM INT; sleep infinity & wait")
   else
     args+=("$tag")
   fi
 
-  printf "%b[run]%b Starting container %b%s%b
-" "$CYAN" "$NC" "$BLUE" "$name" "$NC"
-  "${args[@]}" >/dev/null
+  printf "%b[run]%b Starting container %b%s%b\n" "$CYAN" "$NC" "$BLUE" "$name" "$NC"
+
+  # IMPORTANT: don't hide errors; if it fails, you need to see why
+  if ! "${args[@]}"; then
+    printf "%b[run]%b docker run failed.\n" "$RED" "$NC" >&2
+    return 1
+  fi
 }
 
 run_exec_shell() {
@@ -2146,281 +2931,9 @@ run_exec_shell() {
   fi
 }
 
-cmd_vpn-fix() {
-  set -euo pipefail
-
-  local dry_run=0 rollback=0
-  case "${1:-}" in
-  --dry-run)
-    dry_run=1
-    shift || true
-    ;;
-  --rollback)
-    rollback=1
-    shift || true
-    ;;
-  esac
-
-  local SUDO=""
-  if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
-    command -v sudo >/dev/null 2>&1 || {
-      echo "Error: need root or sudo"
-      return 1
-    }
-    SUDO="sudo"
-  fi
-
-  command -v ip >/dev/null 2>&1 || {
-    echo "Error: ip not found"
-    return 1
-  }
-  command -v iptables >/dev/null 2>&1 || {
-    echo "Error: iptables not found"
-    return 1
-  }
-
-  _run() {
-    if ((dry_run)); then
-      printf '[dry-run] %q ' "$@"
-      echo
-    else
-      "$@"
-    fi
-  }
-
-  # ---------------------------
-  # Detect docker bridges (docker0 + br-*)
-  # ---------------------------
-  local br_ifs=()
-  while IFS= read -r ifc; do br_ifs+=("$ifc"); done < <(
-    ip -br link 2>/dev/null |
-      awk '$1 ~ /^(docker0|br-[0-9a-f]{12})$/ {print $1}' |
-      LC_ALL=C sort -u || true
-  )
-
-  if ((${#br_ifs[@]} == 0)); then
-    echo "No docker bridge interfaces found (docker0 / br-*)."
-    return 3
-  fi
-
-  # ---------------------------
-  # Detect VPN interfaces
-  # ---------------------------
-  local vpn_ifs=()
-  while IFS= read -r ifc; do vpn_ifs+=("$ifc"); done < <(
-    ip -br link 2>/dev/null |
-      awk '$2 ~ /UP/ {print $1}' |
-      grep -E '^(tun|tap|wg|ppp|cscotun|utun|tailscale|zt|nordlynx|proton|vpn)[0-9]*$' |
-      LC_ALL=C sort -u || true
-  )
-
-  if ((${#vpn_ifs[@]} == 0)); then
-    echo "No VPN interface detected (tun*/wg*/ppp*/cscotun*/utun*)."
-    echo "Tip: run: ip -br link  (If you are actually running VPN then open an issue)"
-    return 2
-  fi
-
-  # ---------------------------
-  # IPv4 forwarding
-  # ---------------------------
-  if [[ -r /proc/sys/net/ipv4/ip_forward ]]; then
-    local ipf
-    ipf="$(cat /proc/sys/net/ipv4/ip_forward 2>/dev/null || echo 0)"
-    if [[ "$ipf" != "1" ]]; then
-      _run $SUDO sysctl -w net.ipv4.ip_forward=1 >/dev/null
-    fi
-  fi
-
-  local TAG="lds:vpn-fix"
-
-  _ipt_append_if_missing() {
-    local table="$1"
-    shift
-    local chain="$1"
-    shift
-    if _run $SUDO iptables -t "$table" -C "$chain" "$@" 2>/dev/null; then
-      return 0
-    fi
-    _run $SUDO iptables -t "$table" -A "$chain" "$@"
-  }
-
-  _ipt_delete_if_present() {
-    local table="$1"
-    shift
-    local chain="$1"
-    shift
-    if $SUDO iptables -t "$table" -C "$chain" "$@" >/dev/null 2>&1; then
-      _run $SUDO iptables -t "$table" -D "$chain" "$@"
-    fi
-  }
-
-  local vpnif brif subnet
-  for vpnif in "${vpn_ifs[@]}"; do
-    local -a subnets=()
-    while IFS= read -r subnet; do
-      [[ -n "$subnet" ]] && subnets+=("$subnet")
-    done < <(
-      ip -4 route show dev "$vpnif" 2>/dev/null |
-        awk '{print $1}' |
-        grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+$' |
-        LC_ALL=C sort -u || true
-    )
-
-    if ((${#subnets[@]} == 0)); then
-      echo "Warning: $vpnif has no IPv4 routed subnets; skipping scoped rules."
-      continue
-    fi
-
-    for subnet in "${subnets[@]}"; do
-      # NAT only towards VPN-routed subnets
-      if ((rollback)); then
-        _ipt_delete_if_present nat POSTROUTING -o "$vpnif" -d "$subnet" -j MASQUERADE -m comment --comment "$TAG"
-      else
-        _ipt_append_if_missing nat POSTROUTING -o "$vpnif" -d "$subnet" -j MASQUERADE -m comment --comment "$TAG"
-      fi
-
-      # Forward only towards VPN-routed subnets (and allow return traffic)
-      for brif in "${br_ifs[@]}"; do
-        if ((rollback)); then
-          _ipt_delete_if_present filter FORWARD -i "$brif" -o "$vpnif" -d "$subnet" -j ACCEPT -m comment --comment "$TAG"
-          _ipt_delete_if_present filter FORWARD -i "$vpnif" -o "$brif" -s "$subnet" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT -m comment --comment "$TAG"
-        else
-          _ipt_append_if_missing filter FORWARD -i "$brif" -o "$vpnif" -d "$subnet" -j ACCEPT -m comment --comment "$TAG"
-          _ipt_append_if_missing filter FORWARD -i "$vpnif" -o "$brif" -s "$subnet" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT -m comment --comment "$TAG"
-        fi
-      done
-    done
-  done
-
-  # ---------------------------
-  # IPv6 (best-effort, scoped; skip if not actually in use)
-  # ---------------------------
-  if command -v ip6tables >/dev/null 2>&1; then
-    local docker_has_v6=0 vpn_has_v6=0
-
-    for brif in "${br_ifs[@]}"; do
-      if ip -o -6 addr show dev "$brif" 2>/dev/null | grep -q 'inet6 '; then
-        docker_has_v6=1
-        break
-      fi
-    done
-
-    for vpnif in "${vpn_ifs[@]}"; do
-      if ip -o -6 addr show dev "$vpnif" 2>/dev/null | grep -q 'inet6 '; then
-        vpn_has_v6=1
-        break
-      fi
-    done
-
-    if ((docker_has_v6 && vpn_has_v6)); then
-      # enable IPv6 forwarding
-      if [[ -r /proc/sys/net/ipv6/conf/all/forwarding ]]; then
-        local ip6f
-        ip6f="$(cat /proc/sys/net/ipv6/conf/all/forwarding 2>/dev/null || echo 0)"
-        if [[ "$ip6f" != "1" ]]; then
-          _run $SUDO sysctl -w net.ipv6.conf.all.forwarding=1 >/dev/null
-        fi
-      fi
-
-      _ip6t_append_if_missing() {
-        local table="$1"
-        shift
-        local chain="$1"
-        shift
-        if _run $SUDO ip6tables -t "$table" -C "$chain" "$@" 2>/dev/null; then
-          return 0
-        fi
-        _run $SUDO ip6tables -t "$table" -A "$chain" "$@"
-      }
-
-      _ip6t_delete_if_present() {
-        local table="$1"
-        shift
-        local chain="$1"
-        shift
-        if $SUDO ip6tables -t "$table" -C "$chain" "$@" >/dev/null 2>&1; then
-          _run $SUDO ip6tables -t "$table" -D "$chain" "$@"
-        fi
-      }
-
-      local v6subnet
-      for vpnif in "${vpn_ifs[@]}"; do
-        local -a v6subnets=()
-        while IFS= read -r v6subnet; do
-          [[ -n "$v6subnet" ]] && v6subnets+=("$v6subnet")
-        done < <(
-          ip -6 route show dev "$vpnif" 2>/dev/null |
-            awk '{print $1}' |
-            grep -E '^[0-9a-fA-F:]+/[0-9]+$' |
-            LC_ALL=C sort -u || true
-        )
-
-        # If VPN has no explicit v6 routes, don't try to be clever.
-        ((${#v6subnets[@]})) || {
-          echo "IPv6: $vpnif has no routed IPv6 subnets; skipped."
-          continue
-        }
-
-        for v6subnet in "${v6subnets[@]}"; do
-          for brif in "${br_ifs[@]}"; do
-            if ((rollback)); then
-              _ip6t_delete_if_present filter FORWARD -i "$brif" -o "$vpnif" -d "$v6subnet" -j ACCEPT -m comment --comment "$TAG"
-              _ip6t_delete_if_present filter FORWARD -i "$vpnif" -o "$brif" -s "$v6subnet" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT -m comment --comment "$TAG"
-            else
-              _ip6t_append_if_missing filter FORWARD -i "$brif" -o "$vpnif" -d "$v6subnet" -j ACCEPT -m comment --comment "$TAG"
-              _ip6t_append_if_missing filter FORWARD -i "$vpnif" -o "$brif" -s "$v6subnet" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT -m comment --comment "$TAG"
-            fi
-          done
-
-          # NAT66 optional: only if nat table exists
-          if $SUDO ip6tables -t nat -L >/dev/null 2>&1; then
-            if ((rollback)); then
-              _ip6t_delete_if_present nat POSTROUTING -o "$vpnif" -d "$v6subnet" -j MASQUERADE -m comment --comment "$TAG"
-            else
-              _ip6t_append_if_missing nat POSTROUTING -o "$vpnif" -d "$v6subnet" -j MASQUERADE -m comment --comment "$TAG"
-            fi
-          fi
-        done
-      done
-    else
-      echo "IPv6: skipped (Docker bridges or VPN interface have no IPv6 addresses)."
-    fi
-  else
-    echo "IPv6: skipped (ip6tables not installed)."
-  fi
-
-  if ((rollback)); then
-    echo "OK: vpn-fix rolled back ($TAG)."
-  else
-    echo "OK: vpn-fix applied ($TAG)."
-    echo "VPN interfaces: ${vpn_ifs[*]}"
-    echo "Docker bridges: ${br_ifs[*]}"
-    ((dry_run)) && echo "Note: dry-run mode, nothing changed."
-  fi
-}
-
 cmd_run() {
-  # Usage:
-  #   lds run                          # build+start+exec for current directory
-  #   lds run stop                     # stop container for current directory
-  #   lds run rm                       # remove container (and image tag) for current directory
-  #   lds run ps                       # list run containers
-  #   lds run logs                     # follow logs for current directory container
-  #   lds run open [--port P]          # open first published port (or P) in browser
-  #
-  # Flags:
-  #   --dir PATH                          # run from another directory
-  #   --name NAME                         # container name override
-  #   --tag TAG                           # image tag override
-  #   --no-build                          # do not build
-  #   --no-keepalive                      # run image's default CMD/ENTRYPOINT
-  #   --sock                              # mount docker sock: /var/run/docker.sock
-  #   -p|--publish HOST:CONT              # publish port (repeatable)
-  #   --port CONT_PORT                    # for 'open': choose container port
-  #   --path /some/path                   # for 'open': default /
-  #   --https                             # for 'open': use https
   local action="shell" dir="$PWD" name="" tag="" nobuild=0 keepalive=1 sock=0
-  local -a publish=()
+  local -a publish=() mounts=()
   local open_port="" open_path="/" open_proto="http"
 
   while [[ $# -gt 0 ]]; do
@@ -2428,10 +2941,6 @@ cmd_run() {
     stop | rm | ps | shell | logs | open)
       action="$1"
       shift
-      ;;
-    --dir)
-      dir="${2:-}"
-      shift 2
       ;;
     --name)
       name="${2:-}"
@@ -2457,6 +2966,10 @@ cmd_run() {
       publish+=("${2:-}")
       shift 2
       ;;
+    --mount)
+      mounts+=("${2:-}")
+      shift 2
+      ;;
     --port)
       open_port="${2:-}"
       shift 2
@@ -2477,20 +2990,36 @@ cmd_run() {
     esac
   done
 
-  dir="$(cd "$dir" && pwd)"
-  IFS='|' read -r def_name def_tag _def_dir < <(run_plan "$dir")
+  # Host path (POSIX) for planning/labels
+  local dir_posix
+  dir_posix="$(cd "$dir" && pwd -P)"
+
+  # Docker path (may need Windows form for docker.exe)
+  local dir_docker="$dir_posix"
+
+  # Windows Git Bash/MSYS hardening:
+  # - stop MSYS rewriting container paths (/workspace -> D:/Program Files/Git/workspace)
+  # - but still feed docker.exe Windows-absolute host paths for build/run contexts
+  if is_windows_shell; then
+    export MSYS_NO_PATHCONV=1
+    export MSYS2_ARG_CONV_EXCL='*'
+    if command -v cygpath >/dev/null 2>&1; then
+      dir_docker="$(cygpath -w "$dir_posix")"
+    fi
+  fi
+
+  # Plan/name/tag should be based on the real project identity (POSIX dir)
+  IFS='|' read -r def_name def_tag _def_dir < <(run_plan "$dir_posix")
   name="${name:-$def_name}"
   tag="${tag:-$def_tag}"
 
-  # Helper to locate "the" container for a dir
   _find_for_dir() {
     local found
-    found="$(run_find_container "$dir" || true)"
+    found="$(run_find_container "$dir_posix" || true)"
     if [[ -n "$found" ]]; then
       printf '%s' "$found"
       return 0
     fi
-    # fallback to explicit name if present
     if docker inspect "$name" >/dev/null 2>&1; then
       printf '%s' "$name"
       return 0
@@ -2506,50 +3035,42 @@ cmd_run() {
     ;;
   stop)
     local existing
-    existing="$(_find_for_dir)" || die "no run container found for: $dir"
+    existing="$(_find_for_dir)" || die "no run container found for: $dir_posix"
     docker stop "$existing" >/dev/null
-    printf "%b[run]%b Stopped %s
-" "$GREEN" "$NC" "$existing"
+    printf "%b[run]%b Stopped %s\n" "$GREEN" "$NC" "$existing"
     return 0
     ;;
   logs)
     local existing
-    existing="$(_find_for_dir)" || die "no run container found for: $dir"
+    existing="$(_find_for_dir)" || die "no run container found for: $dir_posix"
     exec docker logs -f "$existing"
     ;;
   open)
     local existing line addr hp url
-    existing="$(_find_for_dir)" || die "no run container found for: $dir"
+    existing="$(_find_for_dir)" || die "no run container found for: $dir_posix"
 
-    # Normalize path
     [[ -n "$open_path" ]] || open_path="/"
     [[ "$open_path" == /* ]] || open_path="/$open_path"
 
     if [[ -n "$open_port" ]]; then
       line="$(docker port "$existing" "$open_port" 2>/dev/null | head -n 1 || true)"
-      # Some docker versions require proto, try tcp as fallback
       [[ -n "$line" ]] || line="$(docker port "$existing" "${open_port}/tcp" 2>/dev/null | head -n 1 || true)"
     else
       line="$(docker port "$existing" 2>/dev/null | head -n 1 || true)"
     fi
 
     if [[ -z "$line" ]]; then
-      printf "%b[run]%b No published ports found.
-" "$YELLOW" "$NC"
-      printf "%b[run]%b Tip: start with %blds run --publish 8025:8025%b then %blds run open%b
-" \
+      printf "%b[run]%b No published ports found.\n" "$YELLOW" "$NC"
+      printf "%b[run]%b Tip: start with %blds run --publish 8025:8025%b then %blds run open%b\n" \
         "$YELLOW" "$NC" "$BLUE" "$NC" "$BLUE" "$NC"
       return 1
     fi
 
-    # Example line: "8025/tcp -> 0.0.0.0:8025"
     addr="${line##*-> }"
     hp="${addr##*:}"
-
     url="${open_proto}://localhost:${hp}${open_path}"
     open_url "$url"
-    printf "%b[run]%b Opened: %s
-" "$GREEN" "$NC" "$url"
+    printf "%b[run]%b Opened: %s\n" "$GREEN" "$NC" "$url"
     return 0
     ;;
   rm)
@@ -2557,37 +3078,37 @@ cmd_run() {
     existing="$(_find_for_dir)" || true
     if [[ -n "${existing:-}" ]]; then
       img="$(docker inspect -f '{{.Config.Image}}' "$existing" 2>/dev/null || true)"
-      docker rm -f "$existing" >/dev/null
-      printf "%b[run]%b Removed container %s
-" "$GREEN" "$NC" "$existing"
+      docker stop "$existing" >/dev/null 2>&1 || true
+      docker rm "$existing" >/dev/null 2>&1 || true
+      printf "%b[run]%b Removed container %s\n" "$GREEN" "$NC" "$existing"
       if [[ -n "${img:-}" ]]; then
         docker rmi -f "$img" >/dev/null 2>&1 || true
-        printf "%b[run]%b Removed image %s
-" "$GREEN" "$NC" "$img"
+        printf "%b[run]%b Removed image %s\n" "$GREEN" "$NC" "$img"
       fi
     else
-      printf "%b[run]%b No container found for %s
-" "$YELLOW" "$NC" "$dir"
+      printf "%b[run]%b No container found for %s\n" "$YELLOW" "$NC" "$dir_posix"
     fi
     return 0
     ;;
   shell | *)
     if ((nobuild == 0)); then
-      run_build "$tag" "$dir"
+      # Build needs docker.exe-friendly path on Windows
+      run_build "$tag" "$dir_docker"
     else
-      printf "%b[run]%b Skipping build (--no-build)
-" "$YELLOW" "$NC"
+      printf "%b[run]%b Skipping build (--no-build)\n" "$YELLOW" "$NC"
     fi
 
     if docker inspect -f '{{.State.Running}}' "$name" 2>/dev/null | grep -q true; then
-      printf "%b[run]%b Container already running: %s
-" "$GREEN" "$NC" "$name"
+      printf "%b[run]%b Container already running: %s\n" "$GREEN" "$NC" "$name"
     else
-      # if a previous container with same name exists but stopped, remove it
       if docker inspect "$name" >/dev/null 2>&1; then
         docker rm -f "$name" >/dev/null 2>&1 || true
       fi
-      run_start "$name" "$tag" "$dir" "$keepalive" "$sock" "${publish[@]}"
+
+      # Keep mounts as user gave them (POSIX/relative); run_start should validate POSIX
+      # and convert host-side to Windows only at docker run time.
+      run_start "$name" "$tag" "$dir_docker" "$keepalive" "$sock" \
+        "${publish[@]}" -- "${mounts[@]}"
     fi
 
     run_exec_shell "$name"
@@ -2595,80 +3116,322 @@ cmd_run() {
   esac
 }
 
+###############################################################################
+# 6x. GROUPED COMMAND ROUTERS (stack/domain/support) + backward-compatible aliases
+###############################################################################
+
+cmd_stack() {
+  local sub="${1:-}"; shift || true
+  case "${sub,,}" in
+    ""|help|-h|--help) cmd_help stack ;;
+    up)          cmd_up "$@" ;;
+    start)          cmd_start "$@" ;;
+    down|stop)         cmd_down "$@" ;;
+    restart|reboot)    cmd_restart "$@" ;;
+    reload)            cmd_reload "$@" ;;
+    status)            cmd_status "$@" ;;
+    ps)                cmd_ps "$@" ;;
+    logs)              cmd_logs "$@" ;;
+    exec)              cmd_exec "$@" ;;
+    stats)             cmd_stats "$@" ;;
+    events)            cmd_events "$@" ;;
+    clean)             cmd_clean "$@" ;;
+    verify)            cmd_verify "$@" ;;
+    disk)              cmd_disk "$@" ;;
+    du)                cmd_du "$@" ;;
+    config)            cmd_config "$@" ;;
+    http)              cmd_http "$@" ;;
+    *)
+      die "stack <up|down|restart|reload|status|ps|logs|exec|stats|events|clean|verify|disk|du|config|http>"
+      ;;
+  esac
+}
+
+# Canonical: domain. Legacy: host.
+cmd_domain() {
+  local sub="${1:-}"; shift || true
+  case "${sub,,}" in
+    ""|help|-h|--help) die "domain <add|rm|ls|check|nginx>" ;;
+    add)               cmd_host add "$@" ;;
+    rm|remove|del|delete) cmd_host rm "$@" ;;
+    ls|list)           cmd_host list "$@" ;;
+    check)             cmd_check upstream "$@" ;;
+    nginx)             cmd_nginx "$@" ;;
+    *)
+      die "domain <add|rm|ls|check|nginx>"
+      ;;
+  esac
+}
+
+cmd_support() {
+  local sub="${1:-}"; shift || true
+  case "${sub,,}" in
+    ""|help|-h|--help) die "support <open|bundle|notify|ui>" ;;
+    open)              cmd_open "$@" ;;
+    bundle)            cmd_bundle "$@" ;;
+    notify)            cmd_notify "$@" ;;
+    ui)                cmd_ui "$@" ;;
+    *)
+      die "support <open|bundle|notify|ui>"
+      ;;
+  esac
+}
+
+# Minimal support bundle (shareable diagnostics zip)
+# Modes:
+#   --redact : remove secrets-like env lines from captured env/config outputs (best-effort)
+#   --full   : include more logs/inspect output (can be large)
+cmd_bundle() {
+  local mode="redact"
+  local out="${1:-}"
+  while [[ "${1:-}" ]]; do
+    case "$1" in
+      --redact) mode="redact"; shift ;;
+      --full)   mode="full"; shift ;;
+      *.zip)    out="$1"; shift ;;
+      *) break ;;
+    esac
+  done
+
+  need zip
+  local ts; ts="$(date +%Y%m%d_%H%M%S)"
+  local project; project="$(lds_project)"
+  local tmp; tmp="$(mktemp -d "${TMPDIR:-/tmp}/lds_bundle.XXXXXX")"
+  local base="lds_bundle_${project}_${ts}"
+  [[ -n "$out" ]] || out="$PWD/${base}.zip"
+
+  cleanup_bundle() { rm -rf "$tmp" 2>/dev/null || true; }
+  trap cleanup_bundle RETURN
+
+  {
+    echo "project=$project"
+    echo "dir=$DIR"
+    echo "time=$ts"
+    echo "mode=$mode"
+  } >"$tmp/meta.txt"
+
+  # compose config (effective)
+  {
+    echo "# docker compose config"
+    docker_compose config 2>&1 || true
+  } >"$tmp/compose.config.txt"
+
+  # ps + networks
+  docker_compose ps >"$tmp/compose.ps.txt" 2>&1 || true
+  docker network ls >"$tmp/docker.networks.txt" 2>&1 || true
+
+  # container list + inspect (scoped)
+  docker ps --filter "label=com.docker.compose.project=$project" --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}' \
+    >"$tmp/docker.ps.txt" 2>&1 || true
+
+  if [[ "$mode" == "full" ]]; then
+    docker inspect $(docker ps -q --filter "label=com.docker.compose.project=$project" 2>/dev/null) \
+      >"$tmp/docker.inspect.json" 2>/dev/null || true
+  fi
+
+  # recent logs (tail)
+  docker_compose logs --no-color --tail 400 >"$tmp/compose.logs.txt" 2>&1 || true
+
+  # vhost configs
+  if [[ -d "$DIR/configuration/nginx" ]]; then
+    mkdir -p "$tmp/nginx"
+    cp -a "$DIR/configuration/nginx/." "$tmp/nginx/" 2>/dev/null || true
+  fi
+
+  # env files (redacted best-effort)
+  mkdir -p "$tmp/env"
+  if [[ -r "$ENV_MAIN" ]]; then
+    if [[ "$mode" == "redact" ]]; then
+      sed -E 's/^([A-Za-z0-9_]+)=.*/\1=REDACTED/' "$ENV_MAIN" >"$tmp/env/.env"
+    else
+      cp -a "$ENV_MAIN" "$tmp/env/.env" 2>/dev/null || true
+    fi
+  fi
+  if [[ -r "$ENV_DOCKER" ]]; then
+    if [[ "$mode" == "redact" ]]; then
+      sed -E 's/^([A-Za-z0-9_]+)=.*/\1=REDACTED/' "$ENV_DOCKER" >"$tmp/env/docker.env"
+    else
+      cp -a "$ENV_DOCKER" "$tmp/env/docker.env" 2>/dev/null || true
+    fi
+  fi
+
+  # tools-side quick diagnostics (inside network)
+  {
+    echo "# ip r / ip a / ss"
+    _tools_exec "ip r; echo; ip a; echo; ss -tulpen 2>/dev/null || true"
+  } >"$tmp/tools.net.txt" 2>&1 || true
+
+  # pack
+  (cd "$tmp" && zip -qr "$out" .) || die "Failed to write bundle: $out"
+  ok "Bundle created: $out"
+}
+
 cmd_help() {
+
+  if [[ "${1:-}" == "--markdown" ]]; then
+    cat <<'MD'
+# LocalDevStack (lds) — Command Reference
+
+## Stack (compose + runtime)
+- `lds stack up`  *(aliases: `up`)*
+- `lds stack up`  *(aliases: `start`)*
+- `lds stack down [--volumes --yes]`  *(aliases: `down`, `stop`)*
+- `lds stack restart [svc]`  *(aliases: `restart`, `reboot`)*
+- `lds stack reload`
+- `lds stack status [--json] [--quiet]`  *(alias: `status`)*
+- `lds stack ps`  *(alias: `ps`)*
+- `lds stack logs [svc] [--follow] [--since <dur>] [--grep <pattern>]`  *(alias: `logs`)*
+- `lds stack exec <svc> [cmd…]`  *(alias: `exec`)*
+- `lds stack stats [svc]`  *(alias: `stats`)*
+- `lds stack events [--since <dur>]`  *(alias: `events`)*
+- `lds stack clean --yes [--volumes]`  *(alias: `clean`)*
+- `lds stack verify`  *(alias: `verify`)*
+- `lds stack disk` / `lds stack du`  *(aliases: `disk`, `du`)*
+
+## Domain (vhost lifecycle + routing)
+- `lds domain add …`
+- `lds domain rm …`
+- `lds domain ls`
+- `lds domain check <domain>`
+- `lds domain nginx <domain>`
+
+Legacy alias: `lds host …` → same subcommands as `domain`.
+
+## Certificates (TLS)
+- `lds cert status [domain|all]`
+- `lds cert regen [domain|all] [--yes]`
+- `lds cert diagnose <domain>`
+- `lds certificate install`
+- `lds certificate uninstall [--all]`
+
+## Diagnostics
+- `lds diag dns <domain>`
+- `lds diag net`
+- `lds diag tcp <host> <port>`
+- `lds diag http <url>` *(alias: `sniff <url>`)*
+- `lds diag tls <domain>`
+
+## Config
+- `lds config show [--json]`
+- `lds config services`
+- `lds config profiles`
+- `lds config env-used`
+- `lds config validate`
+
+## Doctor
+- `lds doctor` / `lds doctor run`
+- `lds doctor lint`
+- `lds doctor scan-logs`
+- `lds doctor fix`
+
+## Support
+- `lds support open <mail|db|redis|kibana|domain>`
+- `lds support bundle [--redact|--full]`
+- `lds support notify …`
+- `lds support ui`
+
+Shortcuts: `open`, `bundle`, `notify`, `ui` map to `support …`.
+
+## Secrets / Env (senv)
+- `lds secrets …`
+- `lds env …`
+
+## Tools (SERVER_TOOLS)
+- `lds tools sh`
+- `lds tools exec "<cmd>"`
+- `lds tools file <path>`
+- `lds lzd` / `lds lazydocker`
+
+## Setup
+- `lds setup init|permissions|domain|profiles`
+
+## Runner (ad‑hoc Dockerfile runner)
+- `lds run` (+ `ps|logs|stop|rm|open` and flags: `--publish|-p`, `--no-keepalive`, `--mount`, `--sock`)
+
+## Runtime awareness
+- `lds runtime php|node`
+
+## Other
+- `lds nginx <domain>`
+- `lds rebuild [all|<svc…>]`
+- `lds core [domain]`
+
+## Short client wrappers
+- `lds php|composer|node|npm|npx …`
+- `lds my|mysql|mysqldump …`
+- `lds maria|mariadb|mariadb-dump …`
+- `lds pg|psql|pg_dump|pg_restore …`
+- `lds redis|redis-cli …`
+MD
+    return 0
+  fi
+
   cat <<EOF
-${CYAN}Usage:${NC}
-  lds [--verbose|-v] <command> [args...]
-  lds <shortcut> [args...]                # php/composer/node/npm/npx, my/mysql, maria, pg/psql, redis-cli
+${BOLD}LocalDevStack (lds)${NC}
 
-${CYAN}Global:${NC}
-  -v, --verbose     Show docker pull/build progress + extra logs
-  -q, --quiet       Quiet mode (default)
+${CYAN}Stack (compose + runtime):${NC}
+  stack up|start|down|restart|reload|status|ps|logs|exec|stats|events|clean|verify|disk|du|config
+  up                               Alias of: stack up
+  start                            Alias of: stack start
+  down|stop                        Alias of: stack down
+  restart|reboot                   Alias of: stack restart
+  status|ps|logs|exec|stats|events Alias of: stack <...>
+  clean|verify|disk|du             Alias of: stack <...>
 
-${CYAN}Core stack:${NC}
-  up                         Start stack (quiet pull by default)
-  start                      Alias of up
-  stop                       Stop stack (docker compose down)
-  down                       Alias of stop
-  reload                     Alias of start (recreate) + HTTP reload
-  restart                    Stop + up + HTTP reload
-  reboot                     Alias of restart
-  rebuild [all|<svc...>]     Pull/build selected services without full down (fast iteration)
-  config                     Print resolved compose config (uses extras + env-file)
-  http reload                Reload HTTP (Nginx/Apache) inside the LB container
-  tools                      Shell into SERVER_TOOLS container
-  lzd | lazydocker            Open LazyDocker inside SERVER_TOOLS
-  core [domain]              Open shell in the container for a domain (or core service)
+${CYAN}Domain (vhosts + routing):${NC}
+  domain add|rm|ls|check|nginx
+  host add|rm|list|check|nginx     Legacy alias of: domain <...>
 
-${CYAN}Domains / hosts:${NC}
-  setup domain               Run mkhost wizard, update COMPOSE_PROFILES, up + HTTP reload
-  delhost <domain>           Remove a domain host entry + HTTP reload
+${CYAN}Certificates (TLS):${NC}
+  cert status|regen|diagnose
+  certificate install|uninstall [--all]
 
-${CYAN}Setup:${NC}
-  setup init                 Create required files (.env, docker/.env, php.ini, etc.)
-  setup permissions          Fix permissions for data/logs/config/bin (Linux/macOS; no-op on Windows)
-  setup profile|profiles     Configure service profiles (selection menu; writes defaults into docker/.env)
+${CYAN}Diagnostics:${NC}
+  diag dns|net|tcp|http|tls
+  sniff <url>                      Alias of: diag http <url>
 
-${CYAN}Certificates:${NC}
-  certificate install         Install local rootCA (Linux trust store / Windows CurrentUser\\Root)
-  certificate uninstall [--all]
-                              Remove local rootCA (use --all to remove from known anchor paths)
+${CYAN}Config:${NC}
+  config show|services|profiles|env-used|validate
 
 ${CYAN}Doctor:${NC}
-  doctor                     Host diagnostics (docker/compose, config validity, ports 80/443, disk, WSL on Windows)
+  doctor [run]                     Full environment checks
+  doctor lint                       shellcheck (inside SERVER_TOOLS)
+  doctor scan-logs [pattern]        rg scan (recent logs)
+  doctor fix                        Safe auto-fixes (when available)
 
-${CYAN}VPN:${NC}
-  vpn-fix                    Allow Docker bridge networks to use the active VPN routes (IPv4 + best-effort IPv6)
+${CYAN}Support:${NC}
+  support open <mail|db|redis|kibana|domain>
+  support bundle [--redact|--full]
+  support notify ...
+  support ui
+  open|bundle|notify|ui             Shortcuts → support <...>
 
-${CYAN}Notify:${NC}
-  notify watch [container]    Stream notifications from SERVER_TOOLS (desktop popups)
-  notify test "Title" "Body"  Send a test notification to SERVER_TOOLS
+${CYAN}Secrets / Env:${NC}
+  secrets <senv-args...>
+  env <senv-args...>
 
-${CYAN}Run (ad-hoc Dockerfile runner):${NC}
-  run                         Build+start+exec container for current directory (Dockerfile required)
-  run ps|logs|stop|rm          Manage the ad-hoc container for current directory
-  run open [port]             Open published port URL (best-effort)
-  run --publish|-p A:B         Publish ports (repeatable)
-  run --keepalive              Keep container running (exec later)
-  run --sock                   Mount /var/run/docker.sock into container (DinD style)
+${CYAN}Tools (SERVER_TOOLS):${NC}
+  tools sh|exec|file
+  lzd|lazydocker
 
-${CYAN}Shortcuts:${NC}
-  php|composer <args...>
-  my|mysql|mysqldump <args...>
-  maria|mariadb|mariadb-dump <args...>
-  pg|psql|pg_dump|pg_restore <args...>
-  redis|redis-cli <args...>
+${CYAN}Setup:${NC}
+  setup init|permissions|domain|profiles
 
-${CYAN}Examples:${NC}
-  lds setup init
-  lds setup profiles
-  lds up
-  lds http reload
-  lds certificate install
-  lds vpn-fix
-  lds run --publish 8025:8025
+${CYAN}Runner (ad-hoc Dockerfile runner):${NC}
+  run [ps|logs|stop|rm|open] [--publish|-p A:B] [--no-keepalive] [--mount HOST[:CONT]] [--sock]
+
+${CYAN}Other:${NC}
+  runtime php|node
+  nginx <domain>
+  rebuild [all|<svc…>]
+  core [domain]
+
+${CYAN}Help:${NC}
+  help [--markdown]
+
 EOF
 }
+
 
 ###############################################################################
 # 7. MAIN
