@@ -30,12 +30,6 @@ _realpath() {
     return 0
   fi
 
-  # python fallback
-  if command -v python3 >/dev/null 2>&1; then
-    python3 -c 'import os,sys;print(os.path.realpath(sys.argv[1]))' "$p"
-    return 0
-  fi
-
   # last resort: absolute physical dir + basename
   local d b
   d="$(cd -P -- "$(dirname -- "$p")" 2>/dev/null && pwd -P)" || return 1
@@ -73,7 +67,6 @@ say()  { echo -e "$*"; }
 ok()   { say "${GREEN}$*${NC}"; }
 warn() { say "${YELLOW}$*${NC}"; }
 err()  { say "${RED}$*${NC}"; }
-
 
 # Default behavior: QUIET
 VERBOSE=0
@@ -171,9 +164,6 @@ load_extras() {
 
 docker_compose() {
   load_extras
-  local __LDS_DC_BIN
-
-  # Cache compose binary selection once (v2 preferred)
   if [[ -z "${__LDS_DC_BIN:-}" ]]; then
     if docker compose version >/dev/null 2>&1; then
       __LDS_DC_BIN=(docker compose)
@@ -183,8 +173,7 @@ docker_compose() {
   fi
 
   # Build -f list (stable order; later overrides earlier)
-  local -a extra_f=()
-  local f
+  local -a extra_f=() f
   for f in "${__EXTRA_FILES[@]:-}"; do
     [[ -f "$f" ]] || continue
     case "$f" in
@@ -192,14 +181,12 @@ docker_compose() {
     esac
   done
 
-
-  # If you already have `name:` in YAML, you can remove COMPOSE_PROJECT_NAME entirely.
-    "${__LDS_DC_BIN[@]}" \
-    --project-directory "$DIR" \
-    -f "$COMPOSE_FILE" \
-    "${extra_f[@]}" \
-    --env-file "$ENV_DOCKER" \
-    "$@"
+  "${__LDS_DC_BIN[@]}" \
+  --project-directory "$DIR" \
+  -f "$COMPOSE_FILE" \
+  "${extra_f[@]}" \
+  --env-file "$ENV_DOCKER" \
+  "$@"
 }
 
 # helper: print project name
@@ -3129,274 +3116,6 @@ cmd_run() {
   esac
 }
 
-cmd_vpn-fix() {
-  set -euo pipefail
-
-  local dry_run=0 rollback=0 debug=0
-  while [[ "${1:-}" ]]; do
-    case "$1" in
-    --dry-run)
-      dry_run=1
-      shift
-      ;;
-    --rollback)
-      rollback=1
-      shift
-      ;;
-    --debug)
-      debug=1
-      shift
-      ;;
-    *) break ;;
-    esac
-  done
-
-  local SUDO=""
-  if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
-    command -v sudo >/dev/null 2>&1 || {
-      echo "Error: need root or sudo"
-      return 1
-    }
-    SUDO="sudo"
-  fi
-
-  command -v ip >/dev/null 2>&1 || {
-    echo "Error: ip not found"
-    return 1
-  }
-  command -v iptables >/dev/null 2>&1 || {
-    echo "Error: iptables not found"
-    return 1
-  }
-
-  local TAG="lds:vpn-fix"
-  local CISCO_CHAIN="ciscovpn"
-
-  _run() {
-    if ((dry_run)); then
-      printf '[dry-run] %q ' "$@"
-      echo
-    else
-      "$@"
-    fi
-  }
-
-  _sysctl_set() {
-    local key="$1" val="$2"
-    if ((dry_run)); then
-      echo "[dry-run] sysctl -w $key=$val"
-      return 0
-    fi
-    $SUDO sysctl -w "$key=$val" >/dev/null 2>&1 || true
-  }
-
-  _chain_exists() { $SUDO iptables -S "$1" >/dev/null 2>&1; }
-  _chain_exists_t() { $SUDO iptables -t "$1" -S "$2" >/dev/null 2>&1; }
-
-  # ---------------------------
-  # docker bridges: docker0 + br-*
-  # ---------------------------
-  local br_ifs=()
-  while IFS= read -r ifc; do br_ifs+=("$ifc"); done < <(
-    ip -o link show 2>/dev/null |
-      awk -F': ' '{n=$2; sub(/ .*/,"",n); sub(/@.*/,"",n); print n}' |
-      grep -E '^(docker0|br-[0-9a-f]{12})$' |
-      LC_ALL=C sort -u || true
-  )
-  ((${#br_ifs[@]})) || {
-    echo "Error: no docker bridges found (docker0 / br-*)."
-    return 3
-  }
-
-  declare -A BR_CIDRS=()
-  local brif
-  for brif in "${br_ifs[@]}"; do
-    local cidrs
-    cidrs="$(ip -o -4 addr show dev "$brif" 2>/dev/null | awk '{print $4}' | xargs || true)"
-    [[ -n "$cidrs" ]] && BR_CIDRS["$brif"]="$cidrs"
-  done
-
-  # ---------------------------
-  # VPN iface detection
-  # ---------------------------
-  local vpnif=""
-  vpnif="$(ip -o link show 2>/dev/null | awk -F': ' '/cscotun[0-9]+/ {print $2}' | head -n1 | awk '{print $1}' | sed 's/@.*//' || true)"
-  if [[ -z "$vpnif" ]]; then
-    vpnif="$(ip -o link show 2>/dev/null |
-      awk -F': ' '/<[^>]*UP[^>]*>/ { n=$2; sub(/ .*/,"",n); sub(/@.*/,"",n); print n }' |
-      grep -E '^(tun|tap|wg|ppp|utun|tailscale|zt|nordlynx|proton|vpn)[0-9A-Za-z._-]*$' |
-      head -n1 || true)"
-  fi
-  [[ -n "$vpnif" ]] || {
-    echo "Error: no VPN interface detected."
-    return 4
-  }
-
-  local vpn_ip_cidr vpn_ip
-  vpn_ip_cidr="$(ip -o -4 addr show dev "$vpnif" 2>/dev/null | awk '{print $4}' | head -n1 || true)"
-  vpn_ip="${vpn_ip_cidr%%/*}"
-  [[ -n "$vpn_ip" ]] || {
-    echo "Error: VPN iface '$vpnif' has no IPv4 address."
-    return 5
-  }
-
-  # VPN-routed subnets (split tunnel routes)
-  local -a vpn_subnets=()
-  while IFS= read -r s; do [[ -n "$s" ]] && vpn_subnets+=("$s"); done < <(
-    ip -4 route show dev "$vpnif" 2>/dev/null |
-      awk '{print $1}' |
-      grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+$' |
-      LC_ALL=C sort -u || true
-  )
-  ((${#vpn_subnets[@]})) || {
-    echo "Error: no IPv4 routes found via '$vpnif' (split-tunnel list empty)."
-    return 6
-  }
-
-  # Cisco mode if chain exists AND interface looks like Cisco (cscotun*)
-  local mode="universal"
-  if [[ "$vpnif" =~ ^cscotun[0-9]+$ ]] && _chain_exists "$CISCO_CHAIN"; then
-    mode="cisco"
-  fi
-
-  # decide which "forward allow" chain to use for universal
-  # prefer DOCKER-USER if exists, else fallback to FORWARD
-  local FW_CHAIN="FORWARD"
-  if _chain_exists "DOCKER-USER"; then
-    FW_CHAIN="DOCKER-USER"
-  fi
-
-  if ((debug)); then
-    echo "DEBUG: mode=$mode"
-    echo "DEBUG: vpnif=$vpnif"
-    echo "DEBUG: vpn_ip=$vpn_ip"
-    echo "DEBUG: vpn_subnets=${vpn_subnets[*]}"
-    echo "DEBUG: br_ifs=${br_ifs[*]}"
-    echo "DEBUG: fw_chain=$FW_CHAIN"
-    for brif in "${br_ifs[@]}"; do
-      echo "DEBUG: br_cidrs[$brif]=${BR_CIDRS[$brif]:-}"
-    done
-  fi
-
-  # sysctls that commonly break tunnel forwarding
-  [[ -r /proc/sys/net/ipv4/ip_forward ]] && _sysctl_set net.ipv4.ip_forward 1
-  _sysctl_set "net.ipv4.conf.${vpnif}.rp_filter" 0
-  for brif in "${br_ifs[@]}"; do _sysctl_set "net.ipv4.conf.${brif}.rp_filter" 0; done
-
-  # iptables helpers: insert/append idempotently
-  _ipt_ins() {
-    local table="$1"
-    shift
-    local chain="$1"
-    shift
-    local pos="$1"
-    shift
-    if $SUDO iptables -t "$table" -C "$chain" "$@" >/dev/null 2>&1; then return 0; fi
-    _run $SUDO iptables -t "$table" -I "$chain" "$pos" "$@"
-  }
-  _ipt_add() {
-    local table="$1"
-    shift
-    local chain="$1"
-    shift
-    if $SUDO iptables -t "$table" -C "$chain" "$@" >/dev/null 2>&1; then return 0; fi
-    _run $SUDO iptables -t "$table" -A "$chain" "$@"
-  }
-
-  # rollback = remove our tagged rules (best-effort) from all possible chains
-  if ((rollback)); then
-    local ch line
-
-    # filter: Cisco chain (if exists)
-    if _chain_exists "$CISCO_CHAIN"; then
-      while IFS= read -r line; do
-        _run $SUDO iptables ${line/-A /-D } || true
-      done < <($SUDO iptables -S "$CISCO_CHAIN" | grep -F -- "$TAG" || true)
-    fi
-
-    # filter: DOCKER-USER (if exists)
-    if _chain_exists "DOCKER-USER"; then
-      while IFS= read -r line; do
-        _run $SUDO iptables ${line/-A /-D } || true
-      done < <($SUDO iptables -S DOCKER-USER | grep -F -- "$TAG" || true)
-    fi
-
-    # filter: FORWARD (fallback universal inserts can go here)
-    while IFS= read -r line; do
-      _run $SUDO iptables ${line/-A /-D } || true
-    done < <($SUDO iptables -S FORWARD | grep -F -- "$TAG" || true)
-
-    # mangle clamp rules
-    while IFS= read -r line; do
-      _run $SUDO iptables -t mangle ${line/-A /-D } || true
-    done < <($SUDO iptables -t mangle -S FORWARD | grep -F -- "$TAG" || true)
-
-    # nat SNAT rules
-    while IFS= read -r line; do
-      _run $SUDO iptables -t nat ${line/-A /-D } || true
-    done < <($SUDO iptables -t nat -S POSTROUTING | grep -F -- "$TAG" || true)
-
-    echo "OK: vpn-fix rolled back ($TAG)."
-    return 0
-  fi
-
-  # ---------------------------
-  # APPLY RULES
-  # ---------------------------
-  local subnet cidr
-  for subnet in "${vpn_subnets[@]}"; do
-    for brif in "${br_ifs[@]}"; do
-      for cidr in ${BR_CIDRS[$brif]:-}; do
-        [[ -n "$cidr" ]] || continue
-
-        # (C) Clamp MSS on SYN into VPN (helps low MTU tunnels)
-        _ipt_add mangle FORWARD -i "$brif" -o "$vpnif" -p tcp --tcp-flags SYN,RST SYN \
-          -j TCPMSS --clamp-mss-to-pmtu -m comment --comment "$TAG" || true
-
-        # (D) Whitelist-safe SNAT: force source to the VPN assigned IP
-        # Only when going to VPN subnets, not the whole internet.
-        _ipt_add nat POSTROUTING -s "$cidr" -o "$vpnif" -d "$subnet" \
-          -j SNAT --to-source "$vpn_ip" -m comment --comment "$TAG"
-
-        if [[ "$mode" == "cisco" ]]; then
-          # (A) Let docker -> vpn pass Cisco firewall chain
-          # IMPORTANT: insert at top so it wins before "-o cscotun0 DROP"
-          _ipt_ins filter "$CISCO_CHAIN" 1 \
-            -i "$brif" -o "$vpnif" -s "$cidr" -d "$subnet" \
-            -j ACCEPT -m comment --comment "$TAG"
-
-          # (B) Let vpn -> docker reply packets through (Cisco chain)
-          _ipt_ins filter "$CISCO_CHAIN" 1 \
-            -i "$vpnif" -o "$brif" -s "$subnet" -d "$cidr" \
-            -m conntrack --ctstate ESTABLISHED,RELATED \
-            -j ACCEPT -m comment --comment "$TAG"
-        else
-          # UNIVERSAL (non-Cisco):
-          # allow docker -> vpn subnets via VPN interface (in DOCKER-USER if available, else FORWARD)
-          # Insert at top for maximum precedence (esp. if FORWARD policy is DROP)
-          _ipt_ins filter "$FW_CHAIN" 1 \
-            -i "$brif" -o "$vpnif" -s "$cidr" -d "$subnet" \
-            -j ACCEPT -m comment --comment "$TAG"
-
-          # allow return traffic vpn -> docker for established flows
-          _ipt_ins filter "$FW_CHAIN" 1 \
-            -i "$vpnif" -o "$brif" -s "$subnet" -d "$cidr" \
-            -m conntrack --ctstate ESTABLISHED,RELATED \
-            -j ACCEPT -m comment --comment "$TAG"
-        fi
-      done
-    done
-  done
-
-  echo "OK: vpn-fix applied ($TAG)."
-  echo "Mode: $mode"
-  echo "VPN interface: $vpnif ($vpn_ip)"
-  echo "VPN routes: ${#vpn_subnets[@]} subnets"
-  echo "Docker bridges: ${br_ifs[*]}"
-  ((dry_run)) && echo "Note: dry-run mode, nothing changed."
-}
-
-
 ###############################################################################
 # 6x. GROUPED COMMAND ROUTERS (stack/domain/support) + backward-compatible aliases
 ###############################################################################
@@ -3633,7 +3352,6 @@ Shortcuts: `open`, `bundle`, `notify`, `ui` map to `support …`.
 - `lds runtime php|node`
 
 ## Other
-- `lds vpn-fix`
 - `lds nginx <domain>`
 - `lds rebuild [all|<svc…>]`
 - `lds core [domain]`
@@ -3704,7 +3422,6 @@ ${CYAN}Runner (ad-hoc Dockerfile runner):${NC}
 
 ${CYAN}Other:${NC}
   runtime php|node
-  vpn-fix
   nginx <domain>
   rebuild [all|<svc…>]
   core [domain]
