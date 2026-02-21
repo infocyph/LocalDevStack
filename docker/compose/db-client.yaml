@@ -67,8 +67,7 @@ services:
     <<: *db-client-service
     container_name: KIBANA
     hostname: kibana
-    image: kibana:${ELASTICSEARCH_VERSION:-9.2.4}
-    profiles: [elasticsearch]
+    image: kibana:${ELASTICSEARCH_VERSION:-9.3.0}
     depends_on:
       - elasticsearch
     environment:
@@ -82,3 +81,20 @@ services:
         ipv4_address: 172.30.0.153
       frontend:
         ipv4_address: 172.28.0.153
+
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:${ELASTICSEARCH_VERSION:-9.3.0}
+    container_name: FILEBEAT
+    restart: unless-stopped
+    depends_on:
+      - elasticsearch
+    volumes:
+      - ../conf/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      - ../../logs:/global/log:ro
+      - ../../data/filebeat:/usr/share/filebeat/data
+    command: ["--strict.perms=false"]
+    networks:
+      datastore:
+        ipv4_address: 172.30.0.154
+      frontend:
+        ipv4_address: 172.28.0.154

@@ -371,7 +371,7 @@ fix_perms() {
   chmod 2777 "$DIR/data"
   mkdir -p "$DIR/data/cloudbeaver" "$DIR/data/mysql" "$DIR/data/postgresql" "$DIR/data/mongo" \
     "$DIR/data/mariadb" "$DIR/data/elasticsearch" "$DIR/data/redis" "$DIR/data/mailpit" \
-    "$DIR/data/redis-insight" "$DIR/data/kibana"
+    "$DIR/data/redis-insight" "$DIR/data/kibana" "$DIR/data/filebeat"
   find "$DIR/data" -mindepth 1 -maxdepth 1 -type d -exec chmod 2777 {} +
   find "$DIR/data" -type f -exec chmod 666 {} +
 
@@ -461,7 +461,6 @@ declare -A SERVICES=(
   [POSTGRESQL]="postgresql"
   [MYSQL]="mysql"
   [MARIADB]="mariadb"
-  [ELASTICSEARCH]="elasticsearch"
   [MONGODB]="mongodb"
   [REDIS]="redis"
 )
@@ -469,7 +468,6 @@ declare -A SERVICES=(
 declare -a SERVICE_ORDER=(POSTGRESQL MYSQL MARIADB ELASTICSEARCH MONGODB REDIS)
 
 declare -A PROFILE_ENV=(
-  [elasticsearch]="ELASTICSEARCH_VERSION=9.2.4"
   [mysql]="MYSQL_VERSION=latest MYSQL_ROOT_PASSWORD=12345 MYSQL_USER=infocyph MYSQL_PASSWORD=12345 MYSQL_DATABASE=localdb"
   [mariadb]="MARIADB_VERSION=latest MARIADB_ROOT_PASSWORD=12345 MARIADB_USER=infocyph MARIADB_PASSWORD=12345 MARIADB_DATABASE=localdb"
   [mongodb]="MONGODB_VERSION=latest MONGODB_ROOT_USERNAME=root MONGODB_ROOT_PASSWORD=12345"

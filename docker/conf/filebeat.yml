@@ -1,0 +1,23 @@
+filebeat.inputs:
+  - type: filestream
+    id: lds-global-logs
+    enabled: true
+    paths:
+      - /global/log/*/*.log
+      - /global/log/*/*/*.log
+    exclude_files: ['-\d{8}(\.gz)?$']
+    processors:
+      - dissect:
+          tokenizer: "/global/log/%{service}/%{file}"
+          field: "log.file.path"
+          target_prefix: ""
+      - convert:
+          fields:
+            - {from: "service", to: "service", type: "string"}
+          ignore_missing: true
+          fail_on_error: false
+output.elasticsearch:
+  hosts: ["http://elasticsearch:9200"]
+  index: "lds-%{[service]}-%{+yyyyMMdd}"
+setup.kibana:
+  host: "http://kibana:5601"
