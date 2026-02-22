@@ -23,5 +23,9 @@ setup.template.enabled: true
 setup.template.name: "lds"
 setup.template.pattern: "lds-*-*"
 setup.template.overwrite: false
+setup.dashboards.enabled: true
+setup.dashboards.retry.enabled: true
+setup.dashboards.retry.interval: 10s
+setup.dashboards.retry.maximum: 30
 setup.kibana:
   host: "http://kibana:5601"
