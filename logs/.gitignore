@@ -4,5 +4,13 @@
 !nginx
 !mariadb
 !mysql
+!cloudbeaver
+!kibana
+!mongo-express
+!redis-insight
+!elasticsearch
+!mongodb
+!postgresql
+!redis
 !olds
 !.gitignore

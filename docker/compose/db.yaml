@@ -12,6 +12,7 @@ services:
     profiles: [redis]
     volumes:
       - ../../data/redis:/data
+      - ../../logs/redis:/var/log/redis
     environment:
       - TZ=${TZ:-}
       - REDIS_ARGS=--save 10 1 --appendonly yes
@@ -37,6 +38,7 @@ services:
       - POSTGRES_DB=${POSTGRES_DATABASE:-postgres}
     volumes:
       - ../../data/postgresql:/var/lib/postgresql
+      - ../../logs/postgresql:/var/log/postgresql
       - ../conf/pg_hba.conf:/etc/postgresql/pg_hba.conf
 #      - ../conf/postgresql.conf:/etc/postgresql/postgresql.conf
     command:
@@ -94,6 +96,7 @@ services:
       - MONGO_INITDB_ROOT_PASSWORD=${MONGODB_ROOT_PASSWORD:-12345}
     volumes:
       - ../../data/mongo:/data/db
+      - ../../logs/mongodb:/var/log/mongodb
     healthcheck:
       test:
         [
@@ -135,7 +138,7 @@ services:
     <<: *db-service
     container_name: ELASTICSEARCH
     hostname: elasticsearch
-    image: elasticsearch:${ELASTICSEARCH_VERSION:-9.2.4}
+    image: elasticsearch:${ELASTICSEARCH_VERSION:-9.3.0}
     profiles: [elasticsearch]
     environment:
       - TZ=${TZ:-}
@@ -145,6 +148,7 @@ services:
       - "node.name=elasticsearch-node-single"
     volumes:
       - ../../data/elasticsearch:/usr/share/elasticsearch/data
+      - ../../logs/elasticsearch:/usr/share/elasticsearch/logs
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
       interval: 30s
