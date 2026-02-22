@@ -115,6 +115,33 @@ need() {
   done
 }
 
+
+# Stream search helper: prefers ripgrep (rg) when available, falls back to grep.
+# Reads from stdin, prints matching lines with line numbers.
+text_grep() {
+  local ins=0
+  if [[ "${1:-}" == "-i" ]]; then
+    ins=1
+    shift || true
+  fi
+
+  local pat="${1:-}"
+  [[ -n "$pat" ]] || return 0
+
+  if command -v rg >/dev/null 2>&1; then
+    if ((ins)); then
+      rg -n -i -- "$pat"
+    else
+      rg -n -- "$pat"
+    fi
+  else
+    if ((ins)); then
+      grep -ni -- "$pat"
+    else
+      grep -n -- "$pat"
+    fi
+  fi
+}
 ensure_files_exist() {
   local rel abs dir
   for rel in "$@"; do
@@ -193,29 +220,27 @@ docker_compose() {
 lds_project() { printf '%s' "${__LDS_PROJECT:-$(basename -- "$DIR")}"; }
 
 # (QUIET by default) ────────────────────────────────
-dc_up() {
-  if ((VERBOSE)); then
-    docker_compose up "$@"
-  else
-    docker_compose up --quiet-pull "$@"
+# Centralize quiet/verbose handling for compose subcommands.
+# Usage: dc_cmd <up|pull|build> [args...]
+dc_cmd() {
+  local sub="${1:-}"
+  shift || true
+
+  local -a quiet=()
+  if ((VERBOSE == 0)); then
+    case "$sub" in
+      up)    quiet+=(--quiet-pull) ;;
+      pull)  quiet+=(-q) ;;
+      build) quiet+=(--quiet) ;;
+    esac
   fi
+
+  docker_compose "$sub" "${quiet[@]}" "$@"
 }
 
-dc_pull() {
-  if ((VERBOSE)); then
-    docker_compose pull "$@"
-  else
-    docker_compose pull -q "$@"
-  fi
-}
-
-dc_build() {
-  if ((VERBOSE)); then
-    docker_compose build "$@"
-  else
-    docker_compose build --quiet "$@"
-  fi
-}
+dc_up()    { dc_cmd up "$@"; }
+dc_pull()  { dc_cmd pull "$@"; }
+dc_build() { dc_cmd build "$@"; }
 
 # helper for our own minimal logging (still shows in quiet mode)
 logv() { ((VERBOSE)) && printf "%b[%s]%b %s\n" "$CYAN" "${1:-info}" "$NC" "${2:-}" >&2 || true; }
@@ -1216,15 +1241,6 @@ compose_has_build() {
       jq -e --arg s "$svc" '.services[$s].build != null' >/dev/null <<<"$json"
       return $?
     fi
-    if command -v python3 >/dev/null 2>&1; then
-      COMPOSE_CFG_JSON="$json" python3 - "$svc" <<'PY'
-import json, os, sys
-svc = sys.argv[1]
-cfg = json.loads(os.environ.get("COMPOSE_CFG_JSON", "") or "{}")
-sys.exit(0 if cfg.get("services", {}).get(svc, {}).get("build") is not None else 1)
-PY
-      return $?
-    fi
   fi
 
   compose_cfg_yaml | awk -v s="$svc" '
@@ -1242,15 +1258,6 @@ compose_image_for_service() {
   if [[ -n "$json" ]]; then
     if command -v jq >/dev/null 2>&1; then
       jq -r --arg s "$svc" '.services[$s].image // empty' <<<"$json"
-      return 0
-    fi
-    if command -v python3 >/dev/null 2>&1; then
-      COMPOSE_CFG_JSON="$json" python3 - "$svc" <<'PY'
-import json, os, sys
-svc = sys.argv[1]
-cfg = json.loads(os.environ.get("COMPOSE_CFG_JSON", "") or "{}")
-print(cfg.get("services", {}).get(svc, {}).get("image", "") or "")
-PY
       return 0
     fi
   fi
@@ -1607,13 +1614,13 @@ cmd_logs() {
     local s; s="$(resolve_service "$svc" || true)"
     [[ -n "$s" ]] || die "Unknown service: $svc"
     if [[ -n "$grep_pat" ]]; then
-      docker_compose logs "${args[@]}" "$s" 2>&1 | rg -n -- "$grep_pat"
+      docker_compose logs "${args[@]}" "$s" 2>&1 | text_grep "$grep_pat"
     else
       docker_compose logs "${args[@]}" "$s"
     fi
   else
     if [[ -n "$grep_pat" ]]; then
-      docker_compose logs "${args[@]}" 2>&1 | rg -n -- "$grep_pat"
+      docker_compose logs "${args[@]}" 2>&1 | text_grep "$grep_pat"
     else
       docker_compose logs "${args[@]}"
     fi
@@ -1978,7 +1985,8 @@ cmd_rebuild() {
   # accepts: "all" or "1,3,5-7" or mix with names "nginx,2,5-6"
   # -----------------------------
   _pick_targets_interactive() {
-    mapfile -t all_svcs < <(docker_compose config --services 2>/dev/null)
+    compose_services_load
+    all_svcs=("${__COMPOSE_SVCS[@]}")
     [[ ${#all_svcs[@]} -gt 0 ]] || die "No services found (docker compose config --services failed?)"
 
     echo
@@ -2051,7 +2059,8 @@ cmd_rebuild() {
   if (($# == 0)); then
     _pick_targets_interactive
   elif [[ "${1,,}" == "all" ]]; then
-    mapfile -t targets < <(docker_compose config --services 2>/dev/null)
+    compose_services_load
+    targets=("${__COMPOSE_SVCS[@]}")
     [[ ${#targets[@]} -gt 0 ]] || die "No services found (docker compose config --services failed?)"
   else
     for arg in "$@"; do
@@ -2307,8 +2316,8 @@ cmd_doctor() {
     shift || true
     local pat="${1:-error|failed|panic|segfault|permission denied|fatal}"
     local project; project="$(lds_project)"
-    # tail recent logs from compose services and grep with rg
-    docker_compose logs --since 30m 2>&1 | rg -n -i -- "$pat" || true
+    # tail recent logs from compose services and search (rg/grep)
+    docker_compose logs --since 30m 2>&1 | text_grep -i "$pat" || true
     return 0
   fi
 
@@ -3396,7 +3405,7 @@ ${CYAN}Config:${NC}
 ${CYAN}Doctor:${NC}
   doctor [run]                     Full environment checks
   doctor lint                       shellcheck (inside SERVER_TOOLS)
-  doctor scan-logs [pattern]        rg scan (recent logs)
+  doctor scan-logs [pattern]        log scan (recent logs)
   doctor fix                        Safe auto-fixes (when available)
 
 ${CYAN}Support:${NC}
