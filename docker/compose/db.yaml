@@ -139,6 +139,7 @@ services:
     container_name: ELASTICSEARCH
     hostname: elasticsearch
     image: elasticsearch:${ELASTICSEARCH_VERSION:-9.3.0}
+    profiles: [elasticsearch]
     environment:
       - TZ=${TZ:-}
       - "discovery.type=single-node"

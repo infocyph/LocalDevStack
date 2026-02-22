@@ -23,6 +23,8 @@ services:
     networks:
       backend:
         ipv4_address: 172.29.0.10
+      datastore:
+        ipv4_address: 172.30.0.10
 
   runner:
     container_name: RUNNER

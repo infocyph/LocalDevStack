@@ -68,6 +68,7 @@ services:
     container_name: KIBANA
     hostname: kibana
     image: kibana:${ELASTICSEARCH_VERSION:-9.3.0}
+    profiles: [elasticsearch]
     depends_on:
       - elasticsearch
     environment:
@@ -87,6 +88,7 @@ services:
     container_name: FILEBEAT
     restart: unless-stopped
     user: root
+    profiles: [elasticsearch]
     depends_on:
       - elasticsearch
     volumes:
@@ -97,5 +99,3 @@ services:
     networks:
       datastore:
         ipv4_address: 172.30.0.154
-      frontend:
-        ipv4_address: 172.28.0.154
