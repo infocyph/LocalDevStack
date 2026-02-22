@@ -1324,18 +1324,91 @@ cmd_ps() {
   fi
 }
 
-cmd_stats() {
+# Internal: stats table (service optional)
+_status_show_stats() {
   local svc="${1:-}"
-  local project; project="$(lds_project)"
+  # docker stats does not reliably support --filter across versions;
+  # pass container names derived from compose itself.
+  local -a names=()
   if [[ -n "$svc" ]]; then
-    # accept service or container name
-    local s; s="$(resolve_service "$svc" || true)"
-    if [[ -n "$s" ]]; then
-      docker stats --no-stream --format 'table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.NetIO}}\t{{.BlockIO}}' --filter "name=${project}_${s}"
-      return 0
+    local s; s="$(resolve_service "$svc" 2>/dev/null || true)"
+    [[ -n "$s" ]] || { printf "(no matching containers)\n"; return 0; }
+    mapfile -t names < <(docker_compose ps "$s" --format '{{.Name}}' 2>/dev/null | sed '/^[[:space:]]*$/d')
+  else
+    mapfile -t names < <(docker_compose ps --format '{{.Name}}' 2>/dev/null | sed '/^[[:space:]]*$/d')
+  fi
+
+  if (( ${#names[@]} )); then
+    docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.NetIO}}\t{{.BlockIO}}" "${names[@]}"
+  else
+    printf "(no matching containers)\n"
+  fi
+}
+
+# Internal: compact checks for `status` (2 groups: System + Project)
+_status_checks() {
+  _has() { command -v "$1" >/dev/null 2>&1; }
+
+  local -a sys_ok=() sys_bad=() proj_ok=() proj_bad=()
+
+  # System group
+  [[ -t 0 ]] && sys_ok+=(stdin) || sys_bad+=(stdin)
+  [[ -t 1 ]] && sys_ok+=(stdout) || sys_bad+=(stdout)
+  [[ -r /dev/tty ]] && sys_ok+=(tty) || sys_bad+=(tty)
+
+  local c
+  for c in awk sed grep find sort; do
+    _has "$c" && sys_ok+=("$c") || sys_bad+=("$c")
+  done
+
+  if _has docker || _has docker.exe; then
+    sys_ok+=(docker)
+  else
+    sys_bad+=(docker)
+  fi
+
+  if docker_compose version >/dev/null 2>&1; then sys_ok+=(compose); else sys_bad+=(compose); fi
+  _has openssl && sys_ok+=(openssl) || sys_bad+=(openssl)
+  (_has curl || _has wget) && sys_ok+=(http) || sys_bad+=(http)
+  _has jq && sys_ok+=(jq) || sys_bad+=(jq)
+
+  # Project group
+  [[ -f "$ENV_DOCKER" ]] && proj_ok+=(env) || proj_bad+=(env)
+  [[ -d "$DIR/docker" ]] && proj_ok+=(docker_dir) || proj_bad+=(docker_dir)
+  [[ -d "$DIR/configuration" ]] && proj_ok+=(config_dir) || proj_bad+=(config_dir)
+  [[ -d "$DIR/data" ]] && proj_ok+=(data_dir) || proj_bad+=(data_dir)
+  [[ -d "$DIR/logs" ]] && proj_ok+=(logs_dir) || proj_bad+=(logs_dir)
+  [[ -f "$DIR/configuration/rootCA/rootCA.pem" ]] && proj_ok+=(rootCA) || proj_bad+=(rootCA)
+
+  if [[ -f "$DIR/lds" ]]; then
+    if grep -U $"\r" "$DIR/lds" >/dev/null 2>&1; then
+      proj_bad+=(crlf)
+    else
+      proj_ok+=(lf)
     fi
   fi
-  docker stats --no-stream --format 'table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.NetIO}}\t{{.BlockIO}}'     --filter "label=com.docker.compose.project=$project"
+
+  # Print exactly two lines (tab separated)
+  printf "%bSystem%b\t" "$CYAN" "$NC"
+  if (( ${#sys_bad[@]} )); then
+    printf "%b!%b %s" "$YELLOW" "$NC" "${sys_bad[*]}"
+    if (( ${#sys_ok[@]} )); then printf "%b | %b" "$DIM" "$NC"; fi
+  fi
+  (( ${#sys_ok[@]} )) && printf "%b✓%b %s" "$GREEN" "$NC" "${sys_ok[*]}"
+  printf "\n"
+
+  printf "%bProject%b\t" "$CYAN" "$NC"
+  if (( ${#proj_bad[@]} )); then
+    printf "%b!%b %s" "$YELLOW" "$NC" "${proj_bad[*]}"
+    if (( ${#proj_ok[@]} )); then printf "%b | %b" "$DIM" "$NC"; fi
+  fi
+  (( ${#proj_ok[@]} )) && printf "%b✓%b %s" "$GREEN" "$NC" "${proj_ok[*]}"
+  printf "\n"
+}
+_status_show_disk() {
+  docker system df
+  printf "\n%bProject data:%b\n" "$CYAN" "$NC"
+  du -sh "$DIR/data" 2>/dev/null || true
 }
 
 _status_urls() {
@@ -1386,15 +1459,9 @@ _status_health_line() {
   fi
 }
 
-cmd_status() {
-  local json=0 quiet=0
-  while [[ "${1:-}" ]]; do
-    case "$1" in
-    --json) json=1; shift ;;
-    --quiet|-q) quiet=1; shift ;;
-    *) break ;;
-    esac
-  done
+# Internal: main status output (containers/urls/json)
+_status_core() {
+  local json="$1" quiet="$2"
 
   local project; project="$(lds_project)"
 
@@ -1449,7 +1516,7 @@ cmd_status() {
     esac
   }
 
-  # NEW: health icon (✓, !, ×) - safe + simple
+  # health icon (✓, !, ×)
   _health_icon() {
     local h="$1"
     if [[ -z "$h" || "$h" == "null" || "$h" == "-" ]]; then
@@ -1463,7 +1530,7 @@ cmd_status() {
     fi
   }
 
-  # NEW: running/total summary
+  # running/total summary
   local total running
   total=${#ctrs[@]}
   running=0
@@ -1490,7 +1557,7 @@ cmd_status() {
       first=0
 
       local health_disp="${health:-}"
-      [[ -z "$health_disp" || "$health_disp" == "null" ]] && health_disp="-"
+      [[ -z "$health_disp" || "$health_disp" == "null" ]] && health_disp='-'
 
       printf '{'
       printf '"name":"%s",'   "$(_json_escape "$name")"
@@ -1528,13 +1595,11 @@ cmd_status() {
   printf "%bProject:%b %s\n" "$CYAN" "$NC" "$project"
   [[ -n "$profiles" ]] && printf "%bProfiles:%b %s\n" "$CYAN" "$NC" "$profiles"
 
-  # UPDATED: Containers line shows running/total summary
   printf "%bContainers:%b %b(%s/%s running)%b\n" "$CYAN" "$NC" "$DIM" "$running" "$total" "$NC"
 
   if ((${#ctrs[@]} == 0)); then
     printf "  (none)\n"
   else
-    # column widths
     local w_name=4 w_svc=7
     local line name svc state health
     for line in "${ctrs[@]}"; do
@@ -1545,14 +1610,12 @@ cmd_status() {
     (( w_name > 34 )) && w_name=34
     (( w_svc  > 18 )) && w_svc=18
 
-    # header
     printf "  %b%-*s%b  %b%-*s%b  %b%-10s%b  %b%s%b\n" \
       "$BOLD" "$w_name" "NAME" "$NC" \
       "$BOLD" "$w_svc"  "SERVICE" "$NC" \
       "$BOLD" "STATE" "$NC" \
       "$BOLD" "HEALTH" "$NC"
 
-    # rows
     for line in "${ctrs[@]}"; do
       IFS=$'\t' read -r name svc state health <<<"$line"
 
@@ -1565,15 +1628,14 @@ cmd_status() {
       hc="$(_health_color "${health:-}")"
 
       local health_disp="${health:-}"
-      [[ -z "$health_disp" || "$health_disp" == "null" ]] && health_disp="-"
+      [[ -z "$health_disp" || "$health_disp" == "null" ]] && health_disp='-'
 
-      # NEW: icon prefix
       local hi; hi="$(_health_icon "$health_disp")"
 
       printf "  %-*s  %-*s  %b%-10s%b  %b%s %s%b\n" \
         "$w_name" "$name_disp" \
         "$w_svc"  "$svc_disp" \
-        "$stc" "${state:-"-"}" "$NC" \
+        "$stc" "${state:-'-'}" "$NC" \
         "$hc" "$hi" "$health_disp" "$NC"
     done
   fi
@@ -1592,6 +1654,31 @@ cmd_status() {
   fi
 }
 
+cmd_status() {
+  local json=0 quiet=0
+  while [[ "${1:-}" ]]; do
+    case "$1" in
+    --json) json=1; shift ;;
+    --quiet|-q) quiet=1; shift ;;
+    *) break ;;
+    esac
+  done
+
+  # JSON output is intentionally scoped to core stack info only.
+  _status_core "$json" "$quiet"
+  if (( json )) || (( quiet )); then
+    return 0
+  fi
+
+  printf "\n%bStats:%b\n" "$CYAN" "$NC"
+  _status_show_stats "${1:-}" || true
+
+  printf "\n%bDisk:%b\n" "$CYAN" "$NC"
+  _status_show_disk || true
+
+  printf "\n%bChecks:%b\n" "$CYAN" "$NC"
+  _status_checks || true
+}
 # ─────────────────────────────────────────────────────────────────────────────
 # 6b. LOGS / OPEN
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1894,16 +1981,6 @@ cmd_verify() {
     _tools_exec "curl -skI "https://$d" | head -n 1"
   done < <(shopt -s nullglob; for f in "$DIR/configuration/nginx/"*.conf; do basename -- "$f" .conf; done; shopt -u nullglob)
 }
-
-cmd_disk() {
-  docker system df
-  printf "
-%bProject data:%b
-" "$CYAN" "$NC"
-  du -sh "$DIR/data" 2>/dev/null || true
-}
-
-cmd_du() { cmd_disk; }
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 6g. NGINX INTROSPECTION
@@ -2295,10 +2372,9 @@ cmd_certificate() {
 }
 
 cmd_doctor() {
-  # Optional focused modes
+  # Focused modes stay on doctor (status uses the full run only).
   if [[ "${1:-}" == "--lint" ]]; then
     shift || true
-    # Run shellcheck inside SERVER_TOOLS against lds + bin scripts (if present)
     docker exec -i SERVER_TOOLS sh -lc '
       set -e
       command -v shellcheck >/dev/null 2>&1 || { echo "shellcheck not found in SERVER_TOOLS"; exit 1; }
@@ -2315,14 +2391,16 @@ cmd_doctor() {
   if [[ "${1:-}" == "--scan-logs" ]]; then
     shift || true
     local pat="${1:-error|failed|panic|segfault|permission denied|fatal}"
-    local project; project="$(lds_project)"
-    # tail recent logs from compose services and search (rg/grep)
     docker_compose logs --since 30m 2>&1 | text_grep -i "$pat" || true
     return 0
   fi
 
+  _doctor_run
+}
+
+_doctor_run() {
   local os_id os_like
-  IFS='|' read -r os_id os_like < <(detect_os_family)
+  IFS="|" read -r os_id os_like < <(detect_os_family)
 
   local is_win=0
   [[ "${OSTYPE:-}" =~ (msys|cygwin|win32) ]] && is_win=1
@@ -2335,259 +2413,52 @@ cmd_doctor() {
   _warn() { printf "  %b!%b %s\n" "$YELLOW" "$NC" "$*"; }
   _bad() { printf "  %b✘%b %s\n" "$RED" "$NC" "$*"; }
   _has() { command -v "$1" >/dev/null 2>&1; }
-  _first() {
-    local c
-    for c in "$@"; do _has "$c" && {
-      echo "$c"
-      return 0
-    }; done
-    return 1
-  }
 
-  # ────────────────────────────────────────────────────────────────────────────
-  # TTY sanity (prompt/menus)
-  # ────────────────────────────────────────────────────────────────────────────
+  # TTY sanity
   [[ -t 0 ]] && _ok "stdin: ok" || _warn "stdin: not a TTY"
   [[ -t 1 ]] && _ok "stdout: ok" || _warn "stdout: not a TTY"
   [[ -r /dev/tty ]] && _ok "tty: ok" || _warn "tty: not readable"
 
-  # ────────────────────────────────────────────────────────────────────────────
-  # Required base tools
-  # ────────────────────────────────────────────────────────────────────────────
+  # Shell tool availability (grouped)
+  local -a avail=() miss=()
   local c
   for c in awk sed grep find sort; do
-    _has "$c" && _ok "$c: ok" || _bad "$c: missing"
+    if _has "$c"; then avail+=("$c"); else miss+=("$c"); fi
   done
+  printf "  %bAvailable%b\t%s\n" "$GREEN" "$NC" "${avail[*]:- -}"
+  printf "  %bUnavailable%b\t%s\n" "$RED" "$NC" "${miss[*]:- -}"
 
-  # ────────────────────────────────────────────────────────────────────────────
-  # Windows essentials
-  # ────────────────────────────────────────────────────────────────────────────
-  if ((is_win)); then
-    _has powershell.exe && _ok "powershell.exe: ok" || _bad "powershell.exe: missing"
-    _has cygpath && _ok "cygpath: ok" || _bad "cygpath: missing"
-    _has git.exe && _ok "git.exe: ok" || _warn "git.exe: missing"
-    _has bash && _ok "bash: ok" || _bad "bash: missing"
-  fi
-
-  # ────────────────────────────────────────────────────────────────────────────
-  # Docker CLI + daemon + context
-  # ────────────────────────────────────────────────────────────────────────────
-  local docker_cmd
-  docker_cmd="$(_first docker docker.exe || true)"
-
+  # Docker + daemon
+  local docker_cmd=""
+  if _has docker; then docker_cmd=docker; elif _has docker.exe; then docker_cmd=docker.exe; fi
   if [[ -n "$docker_cmd" ]]; then
     _ok "docker: $($docker_cmd --version 2>/dev/null || echo ok)"
-
-    if $docker_cmd context show >/dev/null 2>&1; then
-      _ok "docker context: $($docker_cmd context show 2>/dev/null)"
-    else
-      _warn "docker context: unavailable"
-    fi
-
-    if $docker_cmd info >/dev/null 2>&1; then
-      _ok "docker daemon: ok"
-    else
-      _bad "docker daemon: not reachable"
-      ((is_win)) && _warn "hint: start Docker Desktop; enable WSL2 engine"
-    fi
+    if $docker_cmd info >/dev/null 2>&1; then _ok "docker daemon: ok"; else _bad "docker daemon: not reachable"; fi
   else
     _bad "docker: missing"
   fi
 
-  # Compose presence (doctor should NOT print compose file path)
-  if docker_compose version >/dev/null 2>&1; then
-    _ok "compose: ok"
-  else
-    _bad "compose: missing"
-  fi
+  # Compose
+  if docker_compose version >/dev/null 2>&1; then _ok "compose: ok"; else _bad "compose: missing"; fi
+  if docker_compose config -q >/dev/null 2>&1; then _ok "compose config: ok"; else _bad "compose config: invalid (run: lds config)"; fi
 
-  # Compose config validation (reuse your wrapper; keep quiet)
-  if docker_compose config -q >/dev/null 2>&1; then
-    _ok "compose config: ok"
-  else
-    _bad "compose config: invalid (run: lds config)"
-  fi
-
-  # ────────────────────────────────────────────────────────────────────────────
-  # Optional tools (high-signal only)
-  # ────────────────────────────────────────────────────────────────────────────
+  # Optional tools (quiet)
   _has openssl && _ok "openssl: ok" || _warn "openssl: missing"
-  (_has wget || _has curl) && _ok "http client: ok" || _warn "http client: missing (curl/wget)"
+  (_has curl || _has wget) && _ok "http client: ok" || _warn "http client: missing (curl/wget)"
   _has jq && _ok "jq: ok" || _warn "jq: missing"
 
-  # ────────────────────────────────────────────────────────────────────────────
   # File/dir sanity (only show path when NOT ok)
-  # ────────────────────────────────────────────────────────────────────────────
   [[ -f "$ENV_DOCKER" ]] && _ok "env: ok" || _warn "env: missing ($ENV_DOCKER)"
   [[ -d "$DIR/docker" ]] && _ok "docker dir: ok" || _bad "docker dir: missing ($DIR/docker)"
   [[ -d "$DIR/configuration" ]] && _ok "configuration dir: ok" || _bad "configuration dir: missing ($DIR/configuration)"
   [[ -d "$DIR/data" ]] && _ok "data dir: ok" || _warn "data dir: missing ($DIR/data)"
   [[ -d "$DIR/logs" ]] && _ok "logs dir: ok" || _warn "logs dir: missing ($DIR/logs)"
 
-  # Writable checks (mount stability)
-  if [[ -d "$DIR/data" ]]; then
-    [[ -w "$DIR/data" ]] && _ok "data writable: ok" || _bad "data writable: no ($DIR/data)"
-  fi
-  if [[ -d "$DIR/logs" ]]; then
-    [[ -w "$DIR/logs" ]] && _ok "logs writable: ok" || _bad "logs writable: no ($DIR/logs)"
-  fi
+  [[ -f "$DIR/configuration/rootCA/rootCA.pem" ]] && _ok "rootCA.pem: ok" || _warn "rootCA.pem: missing ($DIR/configuration/rootCA/rootCA.pem)"
 
-  # Cert input (needed by your cert commands)
-  [[ -f "$DIR/configuration/rootCA/rootCA.pem" ]] &&
-    _ok "rootCA.pem: ok" ||
-    _warn "rootCA.pem: missing ($DIR/configuration/rootCA/rootCA.pem)"
-
-  # CRLF risk (bash scripts break)
   if [[ -f "$DIR/lds" ]]; then
-    if grep -U $'\r' "$DIR/lds" >/dev/null 2>&1; then
-      _warn "line endings: CRLF detected ($DIR/lds)"
-    else
-      _ok "line endings: ok"
-    fi
+    if grep -U $"\r" "$DIR/lds" >/dev/null 2>&1; then _warn "line endings: CRLF detected ($DIR/lds)"; else _ok "line endings: ok"; fi
   fi
-
-  # ────────────────────────────────────────────────────────────────────────────
-  # More checks (requested)
-  # ────────────────────────────────────────────────────────────────────────────
-  printf "\n%bMore checks%b\n" "$CYAN" "$NC"
-
-  # Ports availability — only public ports: 80/443
-  doctor_port_in_use() {
-    local p="$1"
-    if ((is_win)); then
-      netstat -ano 2>/dev/null | awk '{print $2}' | grep -Eq ":${p}\$" && return 0 || return 1
-    else
-      if _has ss; then
-        ss -lnt 2>/dev/null | awk '{print $4}' | grep -Eq "[:.]${p}\$" && return 0 || return 1
-      elif _has lsof; then
-        lsof -nP -iTCP:"$p" -sTCP:LISTEN >/dev/null 2>&1 && return 0 || return 1
-      else
-        return 2
-      fi
-    fi
-  }
-
-  local ports=(80 443)
-  local any_unknown=0 p
-  for p in "${ports[@]}"; do
-    if doctor_port_in_use "$p"; then
-      _warn "port $p: in use"
-    else
-      local rc=$?
-      if [[ $rc -eq 2 ]]; then
-        any_unknown=1
-      else
-        _ok "port $p: ok"
-      fi
-    fi
-  done
-  ((any_unknown)) && _warn "port scan: limited (install ss or lsof)"
-
-  # Disk space (warn only if low)
-  if df -Pk "$DIR" >/dev/null 2>&1; then
-    local avail_kb
-    avail_kb="$(df -Pk "$DIR" | awk 'NR==2{print $4}')"
-    if [[ -n "$avail_kb" ]] && ((avail_kb < 5 * 1024 * 1024)); then
-      _warn "disk: low (<5GiB free)"
-    else
-      _ok "disk: ok"
-    fi
-  else
-    _warn "disk: unable to check"
-  fi
-
-  # WSL detection (Windows)
-  if ((is_win)); then
-    if _has wsl.exe; then
-      if wsl.exe -l -q >/dev/null 2>&1; then
-        _ok "WSL: ok"
-      else
-        _warn "WSL: present but not configured"
-      fi
-    else
-      _warn "WSL: not found"
-    fi
-  fi
-
-  # Compose profiles sanity (.env vs supported profiles)
-  doctor_list_enabled_profiles() {
-    [[ -f "$ENV_DOCKER" ]] || return 0
-    local line
-    line="$(grep -E '^(COMPOSE_PROFILES|PROFILES)=' "$ENV_DOCKER" 2>/dev/null | tail -n 1 || true)"
-    [[ -n "$line" ]] || return 0
-    line="${line#*=}"
-    line="${line%\"}"
-    line="${line#\"}"
-    line="${line%\'}"
-    line="${line#\'}"
-    echo "$line" | tr ', ' '\n' | awk 'NF{print}'
-  }
-
-  local -A valid_profiles=()
-  local key slug
-  for key in "${SERVICE_ORDER[@]}"; do
-    slug="${SERVICES[$key]}"
-    [[ -n "$slug" ]] && valid_profiles["$slug"]=1
-  done
-
-  local seen_any=0 bad_any=0 prof
-  while IFS= read -r prof; do
-    [[ -n "$prof" ]] || continue
-    seen_any=1
-    if [[ -n "${valid_profiles[$prof]:-}" ]]; then
-      _ok "profiles: '$prof' ok"
-    else
-      bad_any=1
-      _warn "profiles: unknown '$prof'"
-    fi
-  done < <(doctor_list_enabled_profiles || true)
-
-  ((seen_any == 0)) && _warn "profiles: none set (COMPOSE_PROFILES=...)"
-  ((bad_any)) && _warn "profiles: sync COMPOSE_PROFILES with supported services"
-
-  # ────────────────────────────────────────────────────────────────────────────
-  # Tips
-  # ────────────────────────────────────────────────────────────────────────────
-  printf "\n%bTips%b\n" "$CYAN" "$NC"
-  printf "  - Use: %blds certificate uninstall --all%b if you switched distros/paths.\n" "$BLUE" "$NC"
-  printf "  - Use: %blds config%b to inspect full resolved compose config.\n" "$BLUE" "$NC"
-
-  # ────────────────────────────────────────────────────────────────────────────
-  # Install hints (bottom)
-  # ────────────────────────────────────────────────────────────────────────────
-  printf "\n%bInstall hints%b\n" "$CYAN" "$NC"
-
-  if ((is_win)); then
-    printf "  - Install Docker Desktop (WSL2 engine recommended)\n"
-    printf "  - Install Git for Windows (Git Bash)\n"
-    printf "  - Ensure docker.exe is on PATH and Docker Desktop is running\n"
-    printf "  - (Optional) Install WSL: wsl --install\n"
-  elif _has apt-get; then
-    printf "  - Debian/Ubuntu:\n"
-    printf "      sudo apt-get update && sudo apt-get install -y ca-certificates curl wget openssl p11-kit jq\n"
-    printf "      sudo apt-get install -y docker-compose-plugin\n"
-  elif _has dnf; then
-    printf "  - Fedora/RHEL (dnf):\n"
-    printf "      sudo dnf install -y ca-certificates curl wget openssl p11-kit-trust jq\n"
-  elif _has yum; then
-    printf "  - RHEL/CentOS (yum):\n"
-    printf "      sudo yum install -y ca-certificates curl wget openssl p11-kit-trust jq\n"
-  elif _has pacman; then
-    printf "  - Arch:\n"
-    printf "      sudo pacman -Syu --noconfirm ca-certificates curl wget openssl p11-kit jq\n"
-  elif _has apk; then
-    printf "  - Alpine:\n"
-    printf "      sudo apk add --no-cache ca-certificates curl wget openssl p11-kit jq\n"
-    printf "      sudo update-ca-certificates\n"
-  elif _has zypper; then
-    printf "  - SUSE:\n"
-    printf "      sudo zypper install -y ca-certificates curl wget openssl p11-kit jq\n"
-  else
-    printf "  - Install: docker + compose + ca-certificates + openssl + p11-kit (+ jq optional)\n"
-  fi
-
-  # Extra feature: show quick “where to go next” suggestion only if env missing
-  [[ -f "$ENV_DOCKER" ]] || _warn "next: run 'lds setup init' to generate env defaults"
 }
 
 ###############################################################################
@@ -3142,16 +3013,13 @@ cmd_stack() {
     ps)                cmd_ps "$@" ;;
     logs)              cmd_logs "$@" ;;
     exec)              cmd_exec "$@" ;;
-    stats)             cmd_stats "$@" ;;
     events)            cmd_events "$@" ;;
     clean)             cmd_clean "$@" ;;
     verify)            cmd_verify "$@" ;;
-    disk)              cmd_disk "$@" ;;
-    du)                cmd_du "$@" ;;
     config)            cmd_config "$@" ;;
     http)              cmd_http "$@" ;;
     *)
-      die "stack <up|down|restart|reload|status|ps|logs|exec|stats|events|clean|verify|disk|du|config|http>"
+      die "stack <up|down|restart|reload|status|ps|logs|exec|events|clean|verify|config|http>"
       ;;
   esac
 }
@@ -3283,7 +3151,7 @@ cmd_help() {
 
 ## Stack (compose + runtime)
 - `lds stack up`  *(aliases: `up`)*
-- `lds stack up`  *(aliases: `start`)*
+- `lds stack start`  *(aliases: `start`)*
 - `lds stack down [--volumes --yes]`  *(aliases: `down`, `stop`)*
 - `lds stack restart [svc]`  *(aliases: `restart`, `reboot`)*
 - `lds stack reload`
@@ -3291,11 +3159,11 @@ cmd_help() {
 - `lds stack ps`  *(alias: `ps`)*
 - `lds stack logs [svc] [--follow] [--since <dur>] [--grep <pattern>]`  *(alias: `logs`)*
 - `lds stack exec <svc> [cmd…]`  *(alias: `exec`)*
-- `lds stack stats [svc]`  *(alias: `stats`)*
+- `lds stack status` also includes live `docker stats`, disk usage, and doctor summary.
 - `lds stack events [--since <dur>]`  *(alias: `events`)*
 - `lds stack clean --yes [--volumes]`  *(alias: `clean`)*
 - `lds stack verify`  *(alias: `verify`)*
-- `lds stack disk` / `lds stack du`  *(aliases: `disk`, `du`)*
+
 
 ## Domain (vhost lifecycle + routing)
 - `lds domain add …`
@@ -3379,13 +3247,13 @@ MD
 ${BOLD}LocalDevStack (lds)${NC}
 
 ${CYAN}Stack (compose + runtime):${NC}
-  stack up|start|down|restart|reload|status|ps|logs|exec|stats|events|clean|verify|disk|du|config
+  stack up|start|down|restart|reload|status|ps|logs|exec|events|clean|verify|config
   up                               Alias of: stack up
   start                            Alias of: stack start
   down|stop                        Alias of: stack down
   restart|reboot                   Alias of: stack restart
-  status|ps|logs|exec|stats|events Alias of: stack <...>
-  clean|verify|disk|du             Alias of: stack <...>
+  status|ps|logs|exec|events       Alias of: stack <...>
+  clean|verify                     Alias of: stack <...>
 
 ${CYAN}Domain (vhosts + routing):${NC}
   domain add|rm|ls|check|nginx
