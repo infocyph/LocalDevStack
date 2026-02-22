@@ -1284,7 +1284,6 @@ cmd_start() {
   http_reload
 }
 
-cmd_reload() { cmd_start "$@"; }
 
 cmd_stop() { docker_compose down; }
 
@@ -1883,7 +1882,7 @@ cmd_host() {
   esac
 }
 
-cmd_ui() { cmd_lzd; }
+cmd_ui() { docker exec -it SERVER_TOOLS lazydocker; }
 
 cmd_runtime() {
   local which="${1:-}"; [[ -n "$which" ]] || die "runtime <php|node>"
@@ -2211,8 +2210,6 @@ cmd_tools() {
     ;;
   esac
 }
-cmd_lzd() { docker exec -it SERVER_TOOLS lazydocker; }
-cmd_lazydocker() { cmd_lzd; }
 cmd_http() { [[ ${1:-} == reload ]] && http_reload; }
 cmd_cli() {
   local ctr="${1:-}"
@@ -3008,7 +3005,6 @@ cmd_stack() {
     start)          cmd_start "$@" ;;
     down|stop)         cmd_down "$@" ;;
     restart|reboot)    cmd_restart "$@" ;;
-    reload)            cmd_reload "$@" ;;
     status)            cmd_status "$@" ;;
     ps)                cmd_ps "$@" ;;
     logs)              cmd_logs "$@" ;;
@@ -3019,7 +3015,7 @@ cmd_stack() {
     config)            cmd_config "$@" ;;
     http)              cmd_http "$@" ;;
     *)
-      die "stack <up|down|restart|reload|status|ps|logs|exec|events|clean|verify|config|http>"
+      die "stack <up|down|restart|status|ps|logs|exec|events|clean|verify|config|http>"
       ;;
   esac
 }
@@ -3154,7 +3150,6 @@ cmd_help() {
 - `lds stack start`  *(aliases: `start`)*
 - `lds stack down [--volumes --yes]`  *(aliases: `down`, `stop`)*
 - `lds stack restart [svc]`  *(aliases: `restart`, `reboot`)*
-- `lds stack reload`
 - `lds stack status [--json] [--quiet]`  *(alias: `status`)*
 - `lds stack ps`  *(alias: `ps`)*
 - `lds stack logs [svc] [--follow] [--since <dur>] [--grep <pattern>]`  *(alias: `logs`)*
@@ -3217,7 +3212,6 @@ Shortcuts: `open`, `bundle`, `notify`, `ui` map to `support …`.
 - `lds tools sh`
 - `lds tools exec "<cmd>"`
 - `lds tools file <path>`
-- `lds lzd` / `lds lazydocker`
 
 ## Setup
 - `lds setup init|permissions|domain|profiles`
@@ -3247,7 +3241,7 @@ MD
 ${BOLD}LocalDevStack (lds)${NC}
 
 ${CYAN}Stack (compose + runtime):${NC}
-  stack up|start|down|restart|reload|status|ps|logs|exec|events|clean|verify|config
+  stack up|start|down|restart|status|ps|logs|exec|events|clean|verify|config
   up                               Alias of: stack up
   start                            Alias of: stack start
   down|stop                        Alias of: stack down
@@ -3289,7 +3283,6 @@ ${CYAN}Secrets / Env:${NC}
 
 ${CYAN}Tools (SERVER_TOOLS):${NC}
   tools sh|exec|file
-  lzd|lazydocker
 
 ${CYAN}Setup:${NC}
   setup init|permissions|domain|profiles
