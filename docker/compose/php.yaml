@@ -10,7 +10,7 @@ x-php-service: &php-service
     datastore: {}
   volumes:
     - "${PROJECT_DIR:-./../../../application}:/app"
-    - ../conf/www.conf:/usr/local/etc/php-fpm.d/www.conf
+    - ../conf/www-php.conf:/usr/local/etc/php-fpm.d/www.conf
     - ../conf/openssl.cnf:/etc/ssl/openssl.cnf
     - ../../configuration/php/php.ini:/usr/local/etc/php/conf.d/99-overrides.ini
     - "../../configuration/ssh:/home/${USER}/.ssh:ro"
