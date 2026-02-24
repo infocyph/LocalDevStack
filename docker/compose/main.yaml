@@ -24,6 +24,13 @@ networks:
       config:
         - subnet: 172.30.0.0/24
           gateway: 172.30.0.1
+volumes:
+  php_fpm_run:
+    name: FPMStore
+    labels:
+      com.infocyph.lds: "1"
+      com.infocyph.stack: "LocalDevStack"
+      com.infocyph.purpose: "php-fpm sockets"
 
 include:
   - docker/compose/companion.yaml
