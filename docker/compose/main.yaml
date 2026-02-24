@@ -25,7 +25,7 @@ networks:
         - subnet: 172.30.0.0/24
           gateway: 172.30.0.1
 volumes:
-  php_fpm_run:
+  lds_fpm_sock:
     name: FPMStore
     labels:
       com.infocyph.lds: "1"
