@@ -26,11 +26,35 @@ networks:
           gateway: 172.30.0.1
 volumes:
   lds_fpm_sock:
-    name: FPMStore
+    name: FPMSocks
     labels:
       com.infocyph.lds: "1"
       com.infocyph.stack: "LocalDevStack"
-      com.infocyph.purpose: "php-fpm sockets"
+      com.infocyph.purpose: "PHP-FPM Sockets"
+  lds_fpm_pools:
+    name: FPMPools
+    labels:
+      com.infocyph.lds: "1"
+      com.infocyph.stack: "LocalDevStack"
+      com.infocyph.purpose: "PHP-FPM Pools"
+  lds_nginx_host:
+    name: NginxHosts
+    labels:
+      com.infocyph.lds: "1"
+      com.infocyph.stack: "LocalDevStack"
+      com.infocyph.purpose: "Nginx Host Configs"
+  lds_apache_host:
+    name: ApacheHosts
+    labels:
+      com.infocyph.lds: "1"
+      com.infocyph.stack: "LocalDevStack"
+      com.infocyph.purpose: "Apache Host Configs"
+  lds_ssl:
+    name: SSLKeys
+    labels:
+      com.infocyph.lds: "1"
+      com.infocyph.stack: "LocalDevStack"
+      com.infocyph.purpose: "SSL Keys"
 
 include:
   - docker/compose/companion.yaml
