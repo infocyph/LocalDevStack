@@ -16,6 +16,8 @@ x-php-service: &php-service
     - "../../configuration/ssh:/home/${USER}/.ssh:ro"
     - "${HOME}/.gitconfig:/home/${USER}/.gitconfig:ro"
     - ../../configuration/rootCA:/etc/share/rootCA:ro
+    - php_fpm_run:/run/php-fpm
+    - ../../configuration/php/pools:/usr/local/etc/php-fpm.domains:ro
   depends_on:
     - server-tools
   healthcheck:

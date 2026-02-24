@@ -1,11 +1,15 @@
 filebeat.inputs:
+  # 1) Global logs (everything), but EXCLUDE php-fpm so we can handle it separately with multiline, etc.
   - type: filestream
     id: lds-global-logs
     enabled: true
     paths:
       - /global/log/*/*.log
       - /global/log/*/*/*.log
-    exclude_files: ['-\d{8}(\.gz)?$']
+    exclude_files:
+      - '-\d{8}(\.gz)?$'
+      - '^/global/log/php-fpm/.*\.error\.log$'
+      - '^/global/log/php-fpm/.*\.access\.log$'
     processors:
       - dissect:
           tokenizer: "/global/log/%{service}/%{file}"
@@ -16,16 +20,70 @@ filebeat.inputs:
             - {from: "service", to: "service", type: "string"}
           ignore_missing: true
           fail_on_error: false
+
+  # 2) PHP-FPM ERROR logs (multiline)
+  - type: filestream
+    id: php-fpm-error
+    enabled: true
+    paths:
+      - /global/log/php-fpm/*.error.log
+    exclude_files: ['-\d{8}(\.gz)?$']
+    parsers:
+      - multiline:
+          type: pattern
+          # PHP error lines usually start: [23-Feb-2026 12:54:42] ...
+          pattern: '^\[[0-9]{2}-[A-Za-z]{3}-[0-9]{4} '
+          negate: true
+          match: after
+    processors:
+      - dissect:
+          tokenizer: "/global/log/%{service}/%{file}"
+          field: "log.file.path"
+          target_prefix: ""
+      - dissect:
+          tokenizer: "%{domain}.%{log_kind}.log"
+          field: "file"
+          target_prefix: ""
+      - add_fields:
+          target: ""
+          fields:
+            log_kind: "error"
+
+  # 3) PHP-FPM ACCESS logs
+  - type: filestream
+    id: php-fpm-access
+    enabled: true
+    paths:
+      - /global/log/php-fpm/*.access.log
+    exclude_files: ['-\d{8}(\.gz)?$']
+    processors:
+      - dissect:
+          tokenizer: "/global/log/%{service}/%{file}"
+          field: "log.file.path"
+          target_prefix: ""
+      - dissect:
+          # filename: <domain>.access.log
+          tokenizer: "%{domain}.%{log_kind}.log"
+          field: "file"
+          target_prefix: ""
+      - add_fields:
+          target: ""
+          fields:
+            log_kind: "access"
+
 output.elasticsearch:
   hosts: ["http://elasticsearch:9200"]
   index: "lds-%{[service]}-%{+yyyyMMdd}"
+
 setup.template.enabled: true
 setup.template.name: "lds"
 setup.template.pattern: "lds-*-*"
 setup.template.overwrite: false
+
 setup.dashboards.enabled: true
 setup.dashboards.retry.enabled: true
 setup.dashboards.retry.interval: 10s
 setup.dashboards.retry.maximum: 30
+
 setup.kibana:
   host: "http://kibana:5601"

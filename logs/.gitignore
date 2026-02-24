@@ -12,5 +12,6 @@
 !mongodb
 !postgresql
 !redis
+!php-fpm
 !olds
 !.gitignore
