@@ -1,5 +1,4 @@
 filebeat.inputs:
-  # 1) Global logs (everything), but EXCLUDE php-fpm so we can handle it separately with multiline, etc.
   - type: filestream
     id: lds-global-logs
     enabled: true
@@ -15,13 +14,25 @@ filebeat.inputs:
           tokenizer: "/global/log/%{service}/%{file}"
           field: "log.file.path"
           target_prefix: ""
+      # Try: domain.access.log / domain.error.log / anything.<kind>.log
+      - dissect:
+          tokenizer: "%{stem}.%{log_kind}.log"
+          field: "file"
+          target_prefix: ""
+          ignore_failure: true
+      # Fallback for logs that don't match "<something>.<kind>.log" (e.g. mysql.log)
+      - add_fields:
+          when:
+            not:
+              has_fields: ["log_kind"]
+          target: ""
+          fields:
+            log_kind: "app"
       - convert:
           fields:
             - {from: "service", to: "service", type: "string"}
           ignore_missing: true
           fail_on_error: false
-
-  # 2) PHP-FPM ERROR logs (multiline)
   - type: filestream
     id: php-fpm-error
     enabled: true
@@ -44,12 +55,12 @@ filebeat.inputs:
           tokenizer: "%{domain}.%{log_kind}.log"
           field: "file"
           target_prefix: ""
+          ignore_failure: true
       - add_fields:
           target: ""
           fields:
             log_kind: "error"
 
-  # 3) PHP-FPM ACCESS logs
   - type: filestream
     id: php-fpm-access
     enabled: true
@@ -62,10 +73,10 @@ filebeat.inputs:
           field: "log.file.path"
           target_prefix: ""
       - dissect:
-          # filename: <domain>.access.log
           tokenizer: "%{domain}.%{log_kind}.log"
           field: "file"
           target_prefix: ""
+          ignore_failure: true
       - add_fields:
           target: ""
           fields:
@@ -73,11 +84,11 @@ filebeat.inputs:
 
 output.elasticsearch:
   hosts: ["http://elasticsearch:9200"]
-  index: "lds-%{[service]}-%{+yyyyMMdd}"
+  index: "lds-%{[service]}-%{[log_kind]}-%{+yyyyMMdd}"
 
 setup.template.enabled: true
 setup.template.name: "lds"
-setup.template.pattern: "lds-*-*"
+setup.template.pattern: "lds-*-*-*"
 setup.template.overwrite: false
 
 setup.dashboards.enabled: true
