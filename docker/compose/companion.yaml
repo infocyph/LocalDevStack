@@ -21,7 +21,10 @@ services:
       - "${SOP_REPO:-./../../../sops-repo}:/etc/share/vhosts/sops"
       - "${HOME}/.gitconfig:/home/root/.gitconfig:ro"
       - ../../configuration/php/pools:/etc/share/vhosts/fpm
+      - ../../logs:/global/log:ro
     networks:
+      frontend:
+        ipv4_address: 172.28.0.13
       backend:
         ipv4_address: 172.29.0.10
       datastore:
