@@ -7,98 +7,138 @@ if [ -z "${BASH_VERSION:-}" ]; then exec /usr/bin/env bash "$0" "$@"; fi
 set -euo pipefail
 
 ###############################################################################
-# 1. COMMON / IO HELPERS
+# 0. CORE / BOOTSTRAP-SAFE HELPERS (no Docker required)
 ###############################################################################
+
+# Color defaults (overridden later by init_colors); keep safe under set -u
+BOLD="${BOLD:-}"; DIM="${DIM:-}"
+RED="${RED:-}"; GREEN="${GREEN:-}"; CYAN="${CYAN:-}"; YELLOW="${YELLOW:-}"
+BLUE="${BLUE:-}"; MAGENTA="${MAGENTA:-}"; NC="${NC:-}"
+
 die() {
-  printf "%bError:%b %s\n" "$RED" "$NC" "$*"
+  printf "%bError:%b %s\n" "${RED:-}" "${NC:-}" "$*" >&2
   exit 1
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Tool proxy (enabled only when LDS_PROXY_TOOLS=1)
-# ─────────────────────────────────────────────────────────────────────────────
+###############################################################################
+# Command presence + tool proxy rules
+# - Host-only commands MUST exist on host (e.g. docker)
+# - Proxy-safe tools may run from SERVER_TOOLS when LDS_PROXY_TOOLS=1 and container is up
+# - Anything inside `docker exec ... sh -lc '...'` must continue to use `command -v`
+###############################################################################
+
+# Cached executable lookup (host binaries only; ignores shell functions/aliases)
+declare -A __LDS_HAS_BIN=()
+
+# Back-compat: treat has_cmd as 'host binary exists' (functions/aliases do not count).
+has_cmd() { has_bin "$@"; }
+
+has_bin() {
+  local c="${1:-}"
+  [[ -n "$c" ]] || return 1
+  if [[ -n "${__LDS_HAS_BIN[$c]+x}" ]]; then
+    return "${__LDS_HAS_BIN[$c]}"
+  fi
+  type -P -- "$c" >/dev/null 2>&1
+  __LDS_HAS_BIN[$c]=$?
+  return "${__LDS_HAS_BIN[$c]}"
+}
+
+bin_path() { type -P -- "${1:?}"; }
+
+need_bin() {
+  local c="${1:-}" hint="${2:-}"
+  has_bin "$c" && return 0
+  die "Missing required command: $c${hint:+ ($hint)}"
+}
+
+# Commands that must NEVER be proxied to SERVER_TOOLS (host control plane / privileged / filesystem)
+_is_host_only_cmd() {
+  case "${1:-}" in
+    docker|sudo|su|systemctl|service|ip|iptables|nft|sysctl|mount|umount|modprobe|insmod|rmmod|rm|mv|cp|chmod|chown)
+      return 0 ;;
+  esac
+  return 1
+}
+
+_server_tools_running() {
+  has_bin docker || return 1
+  "$(bin_path docker)" inspect -f '{{.State.Running}}' SERVER_TOOLS 2>/dev/null | grep -qx true
+}
+
+_server_tools_has() {
+  local c="${1:-}"
+  [[ -n "$c" ]] || return 1
+  _server_tools_running || return 1
+  "$(bin_path docker)" exec SERVER_TOOLS sh -lc "command -v \"$c\" >/dev/null 2>&1" >/dev/null 2>&1
+}
+
+# Unified command runner for proxy-safe tools
+# Resolution order (your rule-set):
+# 1) if cmd exists on host -> run host binary
+# 2) if host-only and missing -> error
+# 3) if proxy-safe and LDS_PROXY_TOOLS=1 and SERVER_TOOLS up and cmd exists there -> run via docker exec
+# 4) otherwise -> error
 lds_tools_cmd() {
   local cmd="${1:-}"
   shift || true
   [[ -n "$cmd" ]] || { echo "lds_tools_cmd: missing command" >&2; return 2; }
 
-  local -a flags=()
-  [[ -t 0 ]] && flags+=(-i)
-  [[ -t 1 ]] && flags+=(-t)
-
-  # if command exists on host
-  if has_cmd "$cmd"; then
-    command "$cmd" "$@"
+  # 1) host binary wins
+  if has_bin "$cmd"; then
+    local p; p="$(bin_path "$cmd")"
+    "$p" "$@"
     return $?
   fi
 
-  # If SERVER_TOOLS is running
-  if docker inspect -f '{{.State.Running}}' SERVER_TOOLS 2>/dev/null | grep -qx true; then
-    if docker exec "${flags[@]}" SERVER_TOOLS "$cmd" "$@"; then
-      return 0
-    fi
+  # 2) host-only commands must be present on host
+  if _is_host_only_cmd "$cmd"; then
+    echo "Error: '$cmd' is required on host but was not found" >&2
+    return 127
   fi
 
-  echo "Error: '$cmd' not available (SERVER_TOOLS not running and host command missing)" >&2
+  # 3) proxy-safe tools from SERVER_TOOLS (opt-in)
+  if ((${LDS_PROXY_TOOLS:-0})); then
+    if ! has_bin docker; then
+      echo "Error: '$cmd' not available on host; tool proxy requires host 'docker'" >&2
+      return 127
+    fi
+    if ! _server_tools_running; then
+      echo "Error: '$cmd' not available on host and SERVER_TOOLS is not running (set LDS_PROXY_TOOLS=1 and start the stack)" >&2
+      return 127
+    fi
+    if ! _server_tools_has "$cmd"; then
+      echo "Error: '$cmd' not found on host nor inside SERVER_TOOLS" >&2
+      return 127
+    fi
+
+    local -a flags=()
+    [[ -t 0 ]] && flags+=(-i)
+    [[ -t 1 ]] && flags+=(-t)
+    "$(bin_path docker)" exec "${flags[@]}" SERVER_TOOLS "$cmd" "$@"
+    return $?
+  fi
+
+  # 4) not found and proxy not enabled
+  echo "Error: '$cmd' not available on host (set LDS_PROXY_TOOLS=1 to proxy via SERVER_TOOLS)" >&2
   return 127
 }
 
-if ((${LDS_PROXY_TOOLS:-0})); then
-  jq() { lds_tools_cmd jq "$@"; }
-  yq() { lds_tools_cmd yq "$@"; }
-  rg() { lds_tools_cmd rg "$@"; }
-  fd() { lds_tools_cmd fd "$@"; }
-  shellcheck() { lds_tools_cmd shellcheck "$@"; }
-  tree() { lds_tools_cmd tree "$@"; }
-fi
-# ─────────────────────────────────────────────────────────────────────────────
-# Command presence (cached) + Safe Tool proxy integration
-# - has_cmd: fast cached command lookup
-# - need_cmd: hard requirement (host-only)
-# - need_tool: requirement that may be satisfied via SERVER_TOOLS when LDS_PROXY_TOOLS=1
-# ─────────────────────────────────────────────────────────────────────────────
-declare -A __LDS_HAS_CMD=()
+# Convenience wrappers for common proxy-safe tools
+jq() { lds_tools_cmd jq "$@"; }
+yq() { lds_tools_cmd yq "$@"; }
+rg() { lds_tools_cmd rg "$@"; }
+fd() { lds_tools_cmd fd "$@"; }
+tree() { lds_tools_cmd tree "$@"; }
+shellcheck() { lds_tools_cmd shellcheck "$@"; }
 
-# Fast cached host-side command existence check
-has_cmd() {
-  local c="${1:-}"
-  [[ -n "$c" ]] || return 1
-  if [[ -n "${__LDS_HAS_CMD[$c]+x}" ]]; then
-    return "${__LDS_HAS_CMD[$c]}"
-  fi
-  command -v "$c" >/dev/null 2>&1
-  __LDS_HAS_CMD[$c]=$?
-  return "${__LDS_HAS_CMD[$c]}"
-}
-
-need_cmd() {
-  local c="${1:-}" hint="${2:-}"
-  has_cmd "$c" && return 0
-  die "Missing required command: $c${hint:+ ($hint)}"
-}
-
-# Commands that must NEVER be proxied to SERVER_TOOLS (host control plane / privileged)
-_is_host_only_cmd() {
-  case "${1:-}" in
-  docker|sudo|su|systemctl|service|ip|iptables|nft|sysctl|mount|umount|modprobe|insmod|rmmod|rm|mv|cp|chmod|chown)
-    return 0 ;;
-  esac
-  return 1
-}
-
-# Check if a tool exists either on host OR (when enabled and safe) inside SERVER_TOOLS
+# Tool availability checks (host binary OR proxy-available)
 has_tool() {
   local c="${1:-}"
-  has_cmd "$c" && return 0
-
-  ((${LDS_PROXY_TOOLS:-0})) || return 1
+  has_bin "$c" && return 0
   _is_host_only_cmd "$c" && return 1
-
-  # proxy needs host docker to interrogate SERVER_TOOLS
-  has_cmd docker || return 1
-  docker inspect -f '{{.State.Running}}' SERVER_TOOLS 2>/dev/null | grep -qx true || return 1
-
-  docker exec SERVER_TOOLS sh -lc "command -v "$c" >/dev/null 2>&1" >/dev/null 2>&1
+  ((${LDS_PROXY_TOOLS:-0})) || return 1
+  _server_tools_has "$c"
 }
 
 need_tool() {
@@ -107,16 +147,17 @@ need_tool() {
   die "Missing required command: $c${hint:+ ($hint)}"
 }
 
+###############################################################################
+# Misc helpers used across the script
+###############################################################################
+
 need() {
   local group found cmd
   for group in "$@"; do
     IFS='|,' read -ra alts <<<"$group"
     found=0
     for cmd in "${alts[@]}"; do
-      has_cmd "$cmd" && {
-        found=1
-        break
-      }
+      has_bin "$cmd" && { found=1; break; }
     done
     ((found)) && continue
     local miss=${alts[*]}
@@ -125,8 +166,7 @@ need() {
   done
 }
 
-
-# Stream search helper: prefers ripgrep (rg) when available, falls back to grep.
+# Stream search helper: prefers ripgrep (rg) when available (host or proxied), falls back to grep.
 # Reads from stdin, prints matching lines with line numbers.
 text_grep() {
   local ins=0
@@ -138,20 +178,13 @@ text_grep() {
   local pat="${1:-}"
   [[ -n "$pat" ]] || return 0
 
-  if has_cmd rg; then
-    if ((ins)); then
-      rg -n -i -- "$pat"
-    else
-      rg -n -- "$pat"
-    fi
+  if has_tool rg; then
+    if ((ins)); then rg -n -i -- "$pat"; else rg -n -- "$pat"; fi
   else
-    if ((ins)); then
-      grep -ni -- "$pat"
-    else
-      grep -n -- "$pat"
-    fi
+    if ((ins)); then grep -ni -- "$pat"; else grep -n -- "$pat"; fi
   fi
 }
+
 ensure_files_exist() {
   local rel abs dir
   for rel in "$@"; do
@@ -160,27 +193,28 @@ ensure_files_exist() {
 
     if [[ ! -d $dir ]]; then
       if mkdir -p "$dir" 2>/dev/null; then
-        printf "%b- Created directory %s%b\n" "$YELLOW" "$dir" "$NC"
+        printf "%b- Created directory %s%b\n" "${YELLOW:-}" "$dir" "${NC:-}"
       else
         printf "%b- Warning:%b cannot create directory %s (permissions?)\n" \
-          "$YELLOW" "$NC" "$dir"
+          "${YELLOW:-}" "${NC:-}" "$dir"
         continue
       fi
     elif [[ ! -w $dir ]]; then
-      printf "%b- Warning:%b directory not writable: %s\n" "$YELLOW" "$NC" "$dir"
+      printf "%b- Warning:%b directory not writable: %s\n" "${YELLOW:-}" "${NC:-}" "$dir"
     fi
 
     if [[ -e $abs ]]; then
-      [[ -w $abs ]] || printf "%b- Warning:%b file not writable: %s\n" "$YELLOW" "$NC" "$abs"
+      [[ -w $abs ]] || printf "%b- Warning:%b file not writable: %s\n" "${YELLOW:-}" "${NC:-}" "$abs"
     else
       if : >"$abs" 2>/dev/null; then
-        printf "%b- Created file %s%b\n" "$YELLOW" "$abs" "$NC"
+        printf "%b- Created file %s%b\n" "${YELLOW:-}" "$abs" "${NC:-}"
       else
-        printf "%b- Error:%b cannot create file %s (permissions?)\n" "$RED" "$NC" "$abs"
+        printf "%b- Error:%b cannot create file %s (permissions?)\n" "${RED:-}" "${NC:-}" "$abs"
       fi
     fi
   done
 }
+
 ###############################################################################
 # 0. BOOTSTRAP / PATHS / CONSTANTS
 ###############################################################################
@@ -1386,7 +1420,7 @@ compose_has_build() {
   local svc="$1" json
   json="$(compose_cfg_json)"
   if [[ -n "$json" ]]; then
-    if has_cmd jq; then
+    if has_tool jq; then
       jq -e --arg s "$svc" '.services[$s].build != null' >/dev/null <<<"$json"
       return $?
     fi
@@ -1405,7 +1439,7 @@ compose_image_for_service() {
   local svc="$1" json
   json="$(compose_cfg_json)"
   if [[ -n "$json" ]]; then
-    if has_cmd jq; then
+    if has_tool jq; then
       jq -r --arg s "$svc" '.services[$s].image // empty' <<<"$json"
       return 0
     fi
@@ -3267,7 +3301,7 @@ cmd_stack_diff() {
   declare -A desired_df=()
 
   if [[ -n "$cfg_json" ]]; then
-    if has_cmd jq; then
+    if has_tool jq; then
       while IFS= read -r line; do
         local svc="${line%%|*}"
         local img="${line#*|}"
@@ -3295,7 +3329,7 @@ cmd_stack_diff() {
 
   # Build result object
   if ((json)); then
-    if has_cmd jq; then
+    if has_tool jq; then
       # assemble in bash -> jq
       local tmp; tmp="$(mktemp)"
       {
@@ -3430,14 +3464,14 @@ cmd_domain_export() {
   printf '\n] }\n' >>"$tmp"
 
   if [[ -n "$out" ]]; then
-    if ((pretty)) && has_cmd jq; then
+    if ((pretty)) && has_tool jq; then
       cat "$tmp" | jq . >"$out"
     else
       cat "$tmp" >"$out"
     fi
     ok "[ok] domain export: $out\n"
   else
-    if ((pretty)) && has_cmd jq; then
+    if ((pretty)) && has_tool jq; then
       cat "$tmp" | jq .
     else
       cat "$tmp"
@@ -3455,7 +3489,7 @@ cmd_domain_import() {
   local dir_ng="$DIR/configuration/nginx"
   mkdir -p "$dir_ng" 2>/dev/null || true
 
-  has_cmd jq || die "jq required for domain import"
+  need_tool jq "required for domain import"
 
   local count=0
   while IFS= read -r dom; do
