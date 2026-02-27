@@ -7,13 +7,188 @@ if [ -z "${BASH_VERSION:-}" ]; then exec /usr/bin/env bash "$0" "$@"; fi
 set -euo pipefail
 
 ###############################################################################
+# 1. COMMON / IO HELPERS
+###############################################################################
+die() {
+  printf "%bError:%b %s\n" "$RED" "$NC" "$*"
+  exit 1
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tool proxy (enabled only when LDS_PROXY_TOOLS=1)
+# ─────────────────────────────────────────────────────────────────────────────
+lds_tools_cmd() {
+  local cmd="${1:-}"
+  shift || true
+  [[ -n "$cmd" ]] || { echo "lds_tools_cmd: missing command" >&2; return 2; }
+
+  local -a flags=()
+  [[ -t 0 ]] && flags+=(-i)
+  [[ -t 1 ]] && flags+=(-t)
+
+  # if command exists on host
+  if has_cmd "$cmd"; then
+    command "$cmd" "$@"
+    return $?
+  fi
+
+  # If SERVER_TOOLS is running
+  if docker inspect -f '{{.State.Running}}' SERVER_TOOLS 2>/dev/null | grep -qx true; then
+    if docker exec "${flags[@]}" SERVER_TOOLS "$cmd" "$@"; then
+      return 0
+    fi
+  fi
+
+  echo "Error: '$cmd' not available (SERVER_TOOLS not running and host command missing)" >&2
+  return 127
+}
+
+if ((${LDS_PROXY_TOOLS:-0})); then
+  jq() { lds_tools_cmd jq "$@"; }
+  yq() { lds_tools_cmd yq "$@"; }
+  rg() { lds_tools_cmd rg "$@"; }
+  fd() { lds_tools_cmd fd "$@"; }
+  shellcheck() { lds_tools_cmd shellcheck "$@"; }
+  tree() { lds_tools_cmd tree "$@"; }
+fi
+# ─────────────────────────────────────────────────────────────────────────────
+# Command presence (cached) + Safe Tool proxy integration
+# - has_cmd: fast cached command lookup
+# - need_cmd: hard requirement (host-only)
+# - need_tool: requirement that may be satisfied via SERVER_TOOLS when LDS_PROXY_TOOLS=1
+# ─────────────────────────────────────────────────────────────────────────────
+declare -A __LDS_HAS_CMD=()
+
+# Fast cached host-side command existence check
+has_cmd() {
+  local c="${1:-}"
+  [[ -n "$c" ]] || return 1
+  if [[ -n "${__LDS_HAS_CMD[$c]+x}" ]]; then
+    return "${__LDS_HAS_CMD[$c]}"
+  fi
+  command -v "$c" >/dev/null 2>&1
+  __LDS_HAS_CMD[$c]=$?
+  return "${__LDS_HAS_CMD[$c]}"
+}
+
+need_cmd() {
+  local c="${1:-}" hint="${2:-}"
+  has_cmd "$c" && return 0
+  die "Missing required command: $c${hint:+ ($hint)}"
+}
+
+# Commands that must NEVER be proxied to SERVER_TOOLS (host control plane / privileged)
+_is_host_only_cmd() {
+  case "${1:-}" in
+  docker|sudo|su|systemctl|service|ip|iptables|nft|sysctl|mount|umount|modprobe|insmod|rmmod|rm|mv|cp|chmod|chown)
+    return 0 ;;
+  esac
+  return 1
+}
+
+# Check if a tool exists either on host OR (when enabled and safe) inside SERVER_TOOLS
+has_tool() {
+  local c="${1:-}"
+  has_cmd "$c" && return 0
+
+  ((${LDS_PROXY_TOOLS:-0})) || return 1
+  _is_host_only_cmd "$c" && return 1
+
+  # proxy needs host docker to interrogate SERVER_TOOLS
+  has_cmd docker || return 1
+  docker inspect -f '{{.State.Running}}' SERVER_TOOLS 2>/dev/null | grep -qx true || return 1
+
+  docker exec SERVER_TOOLS sh -lc "command -v "$c" >/dev/null 2>&1" >/dev/null 2>&1
+}
+
+need_tool() {
+  local c="${1:-}" hint="${2:-}"
+  has_tool "$c" && return 0
+  die "Missing required command: $c${hint:+ ($hint)}"
+}
+
+need() {
+  local group found cmd
+  for group in "$@"; do
+    IFS='|,' read -ra alts <<<"$group"
+    found=0
+    for cmd in "${alts[@]}"; do
+      has_cmd "$cmd" && {
+        found=1
+        break
+      }
+    done
+    ((found)) && continue
+    local miss=${alts[*]}
+    miss=${miss// / or }
+    die "Missing command(s): $miss"
+  done
+}
+
+
+# Stream search helper: prefers ripgrep (rg) when available, falls back to grep.
+# Reads from stdin, prints matching lines with line numbers.
+text_grep() {
+  local ins=0
+  if [[ "${1:-}" == "-i" ]]; then
+    ins=1
+    shift || true
+  fi
+
+  local pat="${1:-}"
+  [[ -n "$pat" ]] || return 0
+
+  if has_cmd rg; then
+    if ((ins)); then
+      rg -n -i -- "$pat"
+    else
+      rg -n -- "$pat"
+    fi
+  else
+    if ((ins)); then
+      grep -ni -- "$pat"
+    else
+      grep -n -- "$pat"
+    fi
+  fi
+}
+ensure_files_exist() {
+  local rel abs dir
+  for rel in "$@"; do
+    abs="${DIR}${rel}"
+    dir="${abs%/*}"
+
+    if [[ ! -d $dir ]]; then
+      if mkdir -p "$dir" 2>/dev/null; then
+        printf "%b- Created directory %s%b\n" "$YELLOW" "$dir" "$NC"
+      else
+        printf "%b- Warning:%b cannot create directory %s (permissions?)\n" \
+          "$YELLOW" "$NC" "$dir"
+        continue
+      fi
+    elif [[ ! -w $dir ]]; then
+      printf "%b- Warning:%b directory not writable: %s\n" "$YELLOW" "$NC" "$dir"
+    fi
+
+    if [[ -e $abs ]]; then
+      [[ -w $abs ]] || printf "%b- Warning:%b file not writable: %s\n" "$YELLOW" "$NC" "$abs"
+    else
+      if : >"$abs" 2>/dev/null; then
+        printf "%b- Created file %s%b\n" "$YELLOW" "$abs" "$NC"
+      else
+        printf "%b- Error:%b cannot create file %s (permissions?)\n" "$RED" "$NC" "$abs"
+      fi
+    fi
+  done
+}
+###############################################################################
 # 0. BOOTSTRAP / PATHS / CONSTANTS
 ###############################################################################
 # Resolve script directory portably (Linux/macOS/WSL)
 _realpath() {
   local p="$1"
 
-  if command -v realpath >/dev/null 2>&1; then
+  if has_cmd realpath; then
     realpath "$p"
     return 0
   fi
@@ -25,7 +200,7 @@ _realpath() {
   fi
 
   # macOS with coreutils
-  if command -v greadlink >/dev/null 2>&1; then
+  if has_cmd greadlink; then
     greadlink -f "$p"
     return 0
   fi
@@ -123,89 +298,6 @@ on_error() {
   fi
   printf "\n" >&2
   exit "$code"
-}
-
-###############################################################################
-# 1. COMMON / IO HELPERS
-###############################################################################
-die() {
-  printf "%bError:%b %s\n" "$RED" "$NC" "$*"
-  exit 1
-}
-
-need() {
-  local group found cmd
-  for group in "$@"; do
-    IFS='|,' read -ra alts <<<"$group"
-    found=0
-    for cmd in "${alts[@]}"; do
-      command -v "$cmd" &>/dev/null && {
-        found=1
-        break
-      }
-    done
-    ((found)) && continue
-    local miss=${alts[*]}
-    miss=${miss// / or }
-    die "Missing command(s): $miss"
-  done
-}
-
-
-# Stream search helper: prefers ripgrep (rg) when available, falls back to grep.
-# Reads from stdin, prints matching lines with line numbers.
-text_grep() {
-  local ins=0
-  if [[ "${1:-}" == "-i" ]]; then
-    ins=1
-    shift || true
-  fi
-
-  local pat="${1:-}"
-  [[ -n "$pat" ]] || return 0
-
-  if command -v rg >/dev/null 2>&1; then
-    if ((ins)); then
-      rg -n -i -- "$pat"
-    else
-      rg -n -- "$pat"
-    fi
-  else
-    if ((ins)); then
-      grep -ni -- "$pat"
-    else
-      grep -n -- "$pat"
-    fi
-  fi
-}
-ensure_files_exist() {
-  local rel abs dir
-  for rel in "$@"; do
-    abs="${DIR}${rel}"
-    dir="${abs%/*}"
-
-    if [[ ! -d $dir ]]; then
-      if mkdir -p "$dir" 2>/dev/null; then
-        printf "%b- Created directory %s%b\n" "$YELLOW" "$dir" "$NC"
-      else
-        printf "%b- Warning:%b cannot create directory %s (permissions?)\n" \
-          "$YELLOW" "$NC" "$dir"
-        continue
-      fi
-    elif [[ ! -w $dir ]]; then
-      printf "%b- Warning:%b directory not writable: %s\n" "$YELLOW" "$NC" "$dir"
-    fi
-
-    if [[ -e $abs ]]; then
-      [[ -w $abs ]] || printf "%b- Warning:%b file not writable: %s\n" "$YELLOW" "$NC" "$abs"
-    else
-      if : >"$abs" 2>/dev/null; then
-        printf "%b- Created file %s%b\n" "$YELLOW" "$abs" "$NC"
-      else
-        printf "%b- Error:%b cannot create file %s (permissions?)\n" "$RED" "$NC" "$abs"
-      fi
-    fi
-  done
 }
 
 ###############################################################################
@@ -405,7 +497,7 @@ http_reload() {
 ###############################################################################
 add_to_windows_path() {
   [[ "$OSTYPE" =~ (msys|cygwin) ]] || return 0
-  command -v cygpath >/dev/null 2>&1 || return 0
+  has_cmd cygpath || return 0
 
   # Only add if lds.bat exists where we think it is
   [[ -f "$DIR/lds.bat" ]] || return 0
@@ -805,13 +897,13 @@ conf_node_container() {
 # 5. ENVIRONMENT + CERT / CA
 ###############################################################################
 detect_timezone() {
-  if command -v timedatectl &>/dev/null; then
+  if has_cmd timedatectl; then
     timedatectl show -p Timezone --value
   elif [[ -n ${TZ-} ]]; then
     printf '%s' "$TZ"
   elif [[ -r /etc/timezone ]]; then
     </etc/timezone
-  elif command -v powershell.exe &>/dev/null; then
+  elif has_cmd powershell.exe; then
     powershell.exe -NoProfile -Command "[System.TimeZoneInfo]::Local.Id" 2>/dev/null | tr -d '\r'
   else
     date +%Z
@@ -865,7 +957,7 @@ detect_os_family() {
     . /etc/os-release || true
     id="${ID:-unknown}"
     like="${ID_LIKE:-unknown}"
-  elif command -v uname >/dev/null 2>&1; then
+  elif has_cmd uname; then
     # fallback for macOS / other unix
     case "$(uname -s 2>/dev/null || true)" in
     Darwin)
@@ -912,14 +1004,14 @@ is_windows_shell() {
 }
 
 need_windows_tools() {
-  command -v cygpath >/dev/null 2>&1 || die "Windows certificate install needs 'cygpath' (Git Bash)."
-  command -v powershell.exe >/dev/null 2>&1 || die "Windows certificate install needs 'powershell.exe' on PATH."
+  has_cmd cygpath || die "Windows certificate install needs 'cygpath' (Git Bash)."
+  has_cmd powershell.exe || die "Windows certificate install needs 'powershell.exe' on PATH."
 }
 
 # Import CA into the invoking user's NSS DB (Chrome/Chromium/Firefox on many Linux setups)
 install_ca_nss_user() {
   local ca_file="$1"
-  command -v certutil >/dev/null 2>&1 || return 0
+  has_cmd certutil || return 0
 
   local user="${SUDO_USER:-}"
   [[ -n "$user" && "$user" != "root" ]] || return 0
@@ -996,7 +1088,7 @@ install_ca() {
 
   case "$family" in
   debian | alpine)
-    if command -v update-ca-certificates >/dev/null 2>&1; then
+    if has_cmd update-ca-certificates; then
       printf "%bUpdating trust store%b (update-ca-certificates)…\n" "$CYAN" "$NC"
       if update-ca-certificates; then
         printf "%b✔ Trust store updated%b\n" "$GREEN" "$NC"
@@ -1009,7 +1101,7 @@ install_ca() {
     fi
 
     # Optional p11-kit sync: best-effort only (can be missing helper on minimal installs)
-    if command -v trust >/dev/null 2>&1; then
+    if has_cmd trust; then
       printf "%bSyncing p11-kit%b (trust extract-compat)…\n" "$CYAN" "$NC"
       if trust extract-compat >/dev/null 2>&1; then
         printf "%b✔ p11-kit trust synced%b\n" "$GREEN" "$NC"
@@ -1021,7 +1113,7 @@ install_ca() {
     fi
     ;;
   rhel)
-    if command -v update-ca-trust >/dev/null 2>&1; then
+    if has_cmd update-ca-trust; then
       printf "%bUpdating trust store%b (update-ca-trust extract)…\n" "$CYAN" "$NC"
       if update-ca-trust extract; then
         printf "%b✔ Trust store updated%b\n" "$GREEN" "$NC"
@@ -1033,7 +1125,7 @@ install_ca() {
     fi
     ;;
   arch)
-    if command -v trust >/dev/null 2>&1; then
+    if has_cmd trust; then
       printf "%bUpdating trust store%b (trust extract-compat)…\n" "$CYAN" "$NC"
       if trust extract-compat >/dev/null 2>&1; then
         printf "%b✔ Trust store updated%b\n" "$GREEN" "$NC"
@@ -1093,7 +1185,7 @@ uninstall_ca_windows() {
 }
 
 uninstall_ca_nss_user() {
-  command -v certutil >/dev/null 2>&1 || return 0
+  has_cmd certutil || return 0
   local user="${SUDO_USER:-}"
   [[ -n "$user" && "$user" != "root" ]] || return 0
 
@@ -1160,20 +1252,20 @@ uninstall_ca() {
 
   case "$family" in
   debian | alpine)
-    if command -v update-ca-certificates >/dev/null 2>&1; then
+    if has_cmd update-ca-certificates; then
       printf "%bUpdating trust store%b (update-ca-certificates)…\n" "$CYAN" "$NC"
       update-ca-certificates || printf "%bWARN%b: update-ca-certificates failed.\n" "$YELLOW" "$NC" >&2
     else
       printf "%bWARN%b: update-ca-certificates not found; trust store not refreshed.\n" "$YELLOW" "$NC" >&2
     fi
 
-    if command -v trust >/dev/null 2>&1; then
+    if has_cmd trust; then
       printf "%bSyncing p11-kit%b (trust extract-compat)…\n" "$CYAN" "$NC"
       trust extract-compat >/dev/null 2>&1 || printf "%bWARN%b: trust extract-compat failed. Skipping.\n" "$YELLOW" "$NC" >&2
     fi
     ;;
   rhel)
-    if command -v update-ca-trust >/dev/null 2>&1; then
+    if has_cmd update-ca-trust; then
       printf "%bUpdating trust store%b (update-ca-trust extract)…\n" "$CYAN" "$NC"
       update-ca-trust extract || printf "%bWARN%b: update-ca-trust extract failed.\n" "$YELLOW" "$NC" >&2
     else
@@ -1181,7 +1273,7 @@ uninstall_ca() {
     fi
     ;;
   arch)
-    if command -v trust >/dev/null 2>&1; then
+    if has_cmd trust; then
       printf "%bUpdating trust store%b (trust extract-compat)…\n" "$CYAN" "$NC"
       trust extract-compat >/dev/null 2>&1 || printf "%bWARN%b: trust extract-compat failed.\n" "$YELLOW" "$NC" >&2
     else
@@ -1189,15 +1281,15 @@ uninstall_ca() {
     fi
     ;;
   *)
-    if command -v update-ca-certificates >/dev/null 2>&1; then
+    if has_cmd update-ca-certificates; then
       printf "%bUpdating trust store%b (update-ca-certificates)…\n" "$CYAN" "$NC"
       update-ca-certificates || true
     fi
-    if command -v update-ca-trust >/dev/null 2>&1; then
+    if has_cmd update-ca-trust; then
       printf "%bUpdating trust store%b (update-ca-trust extract)…\n" "$CYAN" "$NC"
       update-ca-trust extract || true
     fi
-    if command -v trust >/dev/null 2>&1; then
+    if has_cmd trust; then
       printf "%bSyncing p11-kit%b (trust extract-compat)…\n" "$CYAN" "$NC"
       trust extract-compat >/dev/null 2>&1 || true
     fi
@@ -1294,7 +1386,7 @@ compose_has_build() {
   local svc="$1" json
   json="$(compose_cfg_json)"
   if [[ -n "$json" ]]; then
-    if command -v jq >/dev/null 2>&1; then
+    if has_cmd jq; then
       jq -e --arg s "$svc" '.services[$s].build != null' >/dev/null <<<"$json"
       return $?
     fi
@@ -1313,7 +1405,7 @@ compose_image_for_service() {
   local svc="$1" json
   json="$(compose_cfg_json)"
   if [[ -n "$json" ]]; then
-    if command -v jq >/dev/null 2>&1; then
+    if has_cmd jq; then
       jq -r --arg s "$svc" '.services[$s].image // empty' <<<"$json"
       return 0
     fi
@@ -1403,7 +1495,7 @@ _status_show_stats() {
 
 # Internal: compact checks for `status` (2 groups: System + Project)
 _status_checks() {
-  _has() { command -v "$1" >/dev/null 2>&1; }
+  _has() { has_cmd "$1"; }
 
   local -a sys_ok=() sys_bad=() proj_ok=() proj_bad=()
 
@@ -2466,7 +2558,7 @@ _doctor_run() {
   _ok() { printf "  %b✔%b %s\n" "$GREEN" "$NC" "$*"; }
   _warn() { printf "  %b!%b %s\n" "$YELLOW" "$NC" "$*"; }
   _bad() { printf "  %b✘%b %s\n" "$RED" "$NC" "$*"; }
-  _has() { command -v "$1" >/dev/null 2>&1; }
+  _has() { has_cmd "$1"; }
 
   # TTY sanity
   [[ -t 0 ]] && _ok "stdin: ok" || _warn "stdin: not a TTY"
@@ -2532,7 +2624,7 @@ notify_watch() {
     local timeout="${1:-2500}" urgency="${2:-normal}" title="${3:-Notification}" body="${4:-}"
 
     # Linux desktop (or WSLg)
-    if command -v notify-send >/dev/null 2>&1; then
+    if has_cmd notify-send; then
       (env DISPLAY="${_disp-}" DBUS_SESSION_BUS_ADDRESS="${_dbus-}" \
         setsid -f notify-send -u "$urgency" -t "$timeout" "$title" "$body" \
         >/dev/null 2>&1 || true) &
@@ -2540,7 +2632,7 @@ notify_watch() {
     fi
 
     # Windows toast (Git Bash) / WSL-on-Windows
-    if command -v powershell.exe >/dev/null 2>&1; then
+    if has_cmd powershell.exe; then
       # Pass values as args to avoid quoting issues entirely.
       # Note: urgency/timeout not used by toast api here; kept for parity.
       powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \
@@ -2591,7 +2683,7 @@ notify_watch() {
   trap _watcher_int_term INT TERM
 
   local grep_cmd=(grep -a --line-buffered -E "^${prefix}([[:space:]]|$)")
-  command -v stdbuf >/dev/null 2>&1 && grep_cmd=(stdbuf -oL -eL "${grep_cmd[@]}")
+  has_cmd stdbuf && grep_cmd=(stdbuf -oL -eL "${grep_cmd[@]}")
 
   printf "%bNotify Watch:%b monitoring is active. Ctrl+C to stop.\n" "$GREEN" "$NC"
 
@@ -2667,25 +2759,25 @@ open_url() {
 
   # WSL/Windows helpers first when available
   if grep -qi microsoft /proc/version 2>/dev/null; then
-    if command -v powershell.exe >/dev/null 2>&1; then
+    if has_cmd powershell.exe; then
       powershell.exe -NoProfile -Command "Start-Process '$url'" >/dev/null 2>&1 || true
       return 0
     fi
-    if command -v cmd.exe >/dev/null 2>&1; then
+    if has_cmd cmd.exe; then
       cmd.exe /c start "" "$url" >/dev/null 2>&1 || true
       return 0
     fi
   fi
 
-  if command -v xdg-open >/dev/null 2>&1; then
+  if has_cmd xdg-open; then
     (xdg-open "$url" >/dev/null 2>&1 &)
     return 0
   fi
-  if command -v open >/dev/null 2>&1; then
+  if has_cmd open; then
     (open "$url" >/dev/null 2>&1 &)
     return 0
   fi
-  if command -v powershell >/dev/null 2>&1; then
+  if has_cmd powershell; then
     (powershell -NoProfile -Command "Start-Process '$url'" >/dev/null 2>&1 &)
     return 0
   fi
@@ -2698,9 +2790,9 @@ open_url() {
 ###############################################################################
 hash_short() {
   local s="$1"
-  if command -v sha1sum >/dev/null 2>&1; then
+  if has_cmd sha1sum; then
     printf '%s' "$s" | sha1sum | cut -c1-8
-  elif command -v shasum >/dev/null 2>&1; then
+  elif has_cmd shasum; then
     printf '%s' "$s" | shasum -a 1 | cut -c1-8
   else
     # POSIX fallback; stable (not cryptographic)
@@ -2811,7 +2903,7 @@ run_start() {
       fi
 
       # If user provided Windows path (E:\...), convert to POSIX for existence check
-      if [[ "$host" =~ ^[A-Za-z]:[\\/].* ]] && command -v cygpath >/dev/null 2>&1; then
+      if [[ "$host" =~ ^[A-Za-z]:[\\/].* ]] && has_cmd cygpath; then
         host="$(cygpath -u "$host")"
       fi
 
@@ -2950,7 +3042,7 @@ cmd_run() {
   if is_windows_shell; then
     export MSYS_NO_PATHCONV=1
     export MSYS2_ARG_CONV_EXCL='*'
-    if command -v cygpath >/dev/null 2>&1; then
+    if has_cmd cygpath; then
       dir_docker="$(cygpath -w "$dir_posix")"
     fi
   fi
@@ -3175,7 +3267,7 @@ cmd_stack_diff() {
   declare -A desired_df=()
 
   if [[ -n "$cfg_json" ]]; then
-    if command -v jq >/dev/null 2>&1; then
+    if has_cmd jq; then
       while IFS= read -r line; do
         local svc="${line%%|*}"
         local img="${line#*|}"
@@ -3203,7 +3295,7 @@ cmd_stack_diff() {
 
   # Build result object
   if ((json)); then
-    if command -v jq >/dev/null 2>&1; then
+    if has_cmd jq; then
       # assemble in bash -> jq
       local tmp; tmp="$(mktemp)"
       {
@@ -3338,14 +3430,14 @@ cmd_domain_export() {
   printf '\n] }\n' >>"$tmp"
 
   if [[ -n "$out" ]]; then
-    if ((pretty)) && command -v jq >/dev/null 2>&1; then
+    if ((pretty)) && has_cmd jq; then
       cat "$tmp" | jq . >"$out"
     else
       cat "$tmp" >"$out"
     fi
     ok "[ok] domain export: $out\n"
   else
-    if ((pretty)) && command -v jq >/dev/null 2>&1; then
+    if ((pretty)) && has_cmd jq; then
       cat "$tmp" | jq .
     else
       cat "$tmp"
@@ -3363,7 +3455,7 @@ cmd_domain_import() {
   local dir_ng="$DIR/configuration/nginx"
   mkdir -p "$dir_ng" 2>/dev/null || true
 
-  command -v jq >/dev/null 2>&1 || die "jq required for domain import"
+  has_cmd jq || die "jq required for domain import"
 
   local count=0
   while IFS= read -r dom; do
@@ -3392,8 +3484,8 @@ cmd_support_trace() {
     _tools_exec "dig +short $(_shq "$dom") || true; getent hosts $(_shq "$dom") 2>/dev/null || true"
   else
     printf "\n%b[DNS]%b\n" "$DIM" "$NC"
-    (command -v dig >/dev/null 2>&1 && dig +short "$dom") || true
-    (command -v getent >/dev/null 2>&1 && getent hosts "$dom") || true
+    (has_cmd dig && dig +short "$dom") || true
+    (has_cmd getent && getent hosts "$dom") || true
   fi
 
   # 2) TLS certificate
