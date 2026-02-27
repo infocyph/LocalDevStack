@@ -7,7 +7,7 @@ if [ -z "${BASH_VERSION:-}" ]; then exec /usr/bin/env bash "$0" "$@"; fi
 set -euo pipefail
 
 ###############################################################################
-# 0. PATHS & CONSTANTS
+# 0. BOOTSTRAP / PATHS / CONSTANTS
 ###############################################################################
 # Resolve script directory portably (Linux/macOS/WSL)
 _realpath() {
@@ -72,7 +72,7 @@ err()  { say "${RED}$*${NC}"; }
 VERBOSE=0
 
 #───────────────────────────────────────────────────────────────────────────────
-# 0. GLOBAL ERROR HANDLER
+# 0a. GLOBAL ERROR HANDLER
 #───────────────────────────────────────────────────────────────────────────────
 command_not_found_handle() {
   local unknown="$1"
@@ -90,7 +90,7 @@ on_error() {
 }
 
 ###############################################################################
-# 1. COMMON HELPERS
+# 1. COMMON / IO HELPERS
 ###############################################################################
 die() {
   printf "%bError:%b %s\n" "$RED" "$NC" "$*"
@@ -172,6 +172,10 @@ ensure_files_exist() {
   done
 }
 
+###############################################################################
+# 1a. DOCKER COMPOSE WRAPPER
+###############################################################################
+
 # ── compose extras (docker/extras/*.y{a,}ml) ────────────────────────────────
 __EXTRAS_LOADED=0
 declare -a __EXTRA_FILES=()
@@ -245,6 +249,10 @@ dc_build() { dc_cmd build "$@"; }
 # helper for our own minimal logging (still shows in quiet mode)
 logv() { ((VERBOSE)) && printf "%b[%s]%b %s\n" "$CYAN" "${1:-info}" "$NC" "${2:-}" >&2 || true; }
 logq() { printf "%b[%s]%b %s\n" "$CYAN" "${1:-info}" "$NC" "${2:-}" >&2; }
+
+###############################################################################
+# 1b. PROMPTS + DOTENV HELPERS
+###############################################################################
 
 # Unified prompt helper (used by env_init + profiles)
 tty_readline() {
@@ -340,6 +348,10 @@ update_env() {
   fi
 }
 
+###############################################################################
+# 1c. HTTP / WEB SERVER HELPERS
+###############################################################################
+
 http_reload() {
   printf "%bReloading HTTP...%b" "$MAGENTA" "$NC"
   docker ps -qf name=NGINX &>/dev/null && docker exec NGINX nginx -s reload &>/dev/null || true
@@ -348,7 +360,7 @@ http_reload() {
 }
 
 ###############################################################################
-# 2. PERMISSIONS FIX-UP
+# 2. INSTALL / PERMISSIONS (HOST)
 ###############################################################################
 add_to_windows_path() {
   [[ "$OSTYPE" =~ (msys|cygwin) ]] || return 0
@@ -412,7 +424,7 @@ fix_perms() {
 }
 
 ###############################################################################
-# 3. DOMAIN & PROFILE UTILITIES
+# 3. DOMAIN / PROFILE INTEGRATION
 ###############################################################################
 mkhost() { docker exec SERVER_TOOLS mkhost "$@"; }
 delhost() { docker exec SERVER_TOOLS delhost "$@"; }
@@ -481,6 +493,10 @@ modify_profiles() {
 # ─────────────────────────────────────────────────────────────────────────────
 # Profiles
 # ─────────────────────────────────────────────────────────────────────────────
+
+###############################################################################
+# 3a. PROFILES: DEFINITIONS + SETUP FLOW
+###############################################################################
 
 declare -A SERVICES=(
   [POSTGRESQL]="postgresql"
@@ -647,7 +663,7 @@ process_all() {
 }
 
 ###############################################################################
-# 4a. LAUNCH PHP CONTAINER INSIDE DOCROOT
+# 4. CONTAINER SHELL HELPERS (PHP / NODE)
 ###############################################################################
 launch_php() {
   local domain=$1 suffix
@@ -678,9 +694,9 @@ launch_php() {
   docker exec -it "$php" bash --login -c "cd '$docroot' && exec bash"
 }
 
-###############################################################################
-# 4b. LAUNCH NODE CONTAINER (always /app)
-###############################################################################
+# -----------------------------------------------------------------------------
+# Node shell (always /app)
+# -----------------------------------------------------------------------------
 launch_node() {
   local domain="${1:-}"
   [[ -n "$domain" ]] || die "Usage: lds core <domain>"
@@ -745,7 +761,7 @@ conf_node_container() {
 }
 
 ###############################################################################
-# 5. ENV + CERT
+# 5. ENVIRONMENT + CERT / CA
 ###############################################################################
 detect_timezone() {
   if command -v timedatectl &>/dev/null; then
@@ -1275,7 +1291,7 @@ compose_image_for_service() {
 }
 
 ###############################################################################
-# 6. COMMANDS
+# 6. STACK COMMANDS (CLI)
 ###############################################################################
 cmd_up() { dc_up "$@"; }
 
@@ -2676,7 +2692,16 @@ run_find_container() {
 
 run_build() {
   local tag="$1" dir="$2"
-  printf "%b[run]%b Building image %b%s%b from %s\n" "$CYAN" "$NC" "$BLUE" "$tag" "$NC" "$dir"
+
+  # Build only if the image doesn't already exist.
+  if docker image inspect "$tag" >/dev/null 2>&1; then
+    printf "%b[run]%b Image exists, skipping build: %b%s%b
+" "$CYAN" "$NC" "$BLUE" "$tag" "$NC"
+    return 0
+  fi
+
+  printf "%b[run]%b Building image %b%s%b from %s
+" "$CYAN" "$NC" "$BLUE" "$tag" "$NC" "$dir"
   docker build -t "$tag" "$dir"
 }
 
@@ -2809,14 +2834,18 @@ run_exec_shell() {
 }
 
 cmd_run() {
-  local action="shell" dir="$PWD" name="" tag="" nobuild=0 keepalive=1 sock=0
+  local action="*" dir="$PWD" name="" tag="" nobuild=0 keepalive=1 sock=0
   local -a publish=() mounts=()
   local open_port="" open_path="/" open_proto="http"
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
-    stop | rm | ps | shell | logs | open)
+    stop | rm | ps | shell | logs | open | "*")
       action="$1"
+      shift
+      ;;
+    build)
+      action="*"
       shift
       ;;
     --name)
@@ -2888,7 +2917,17 @@ cmd_run() {
   # Plan/name/tag should be based on the real project identity (POSIX dir)
   IFS='|' read -r def_name def_tag _def_dir < <(run_plan "$dir_posix")
   name="${name:-$def_name}"
-  tag="${tag:-$def_tag}"
+
+  # Tag rules:
+  # - Default tag is ":local" (from run_plan)
+  # - If user passes --tag without ":", append ":local"
+  if [[ -n "${tag:-}" ]]; then
+    if [[ "$tag" != *:* ]]; then
+      tag="${tag}:local"
+    fi
+  else
+    tag="$def_tag"
+  fi
 
   _find_for_dir() {
     local found
@@ -2902,6 +2941,32 @@ cmd_run() {
       return 0
     fi
     return 1
+  }
+
+  _run_summary() {
+    local img="$1" build_dir="$2" cname="$3"
+    local tag_only="${img##*:}"
+
+    printf "\n%b[run]%b Summary\n" "$CYAN" "$NC"
+    printf "  %bImage:%b     %s\n" "$BOLD" "$NC" "$img"
+    printf "  %bTag:%b       %s\n" "$BOLD" "$NC" "$tag_only"
+    printf "  %bDir:%b       %s\n" "$BOLD" "$NC" "$build_dir"
+    printf "  %bName:%b      %s\n" "$BOLD" "$NC" "$cname"
+    printf "  %bKeepalive:%b %s\n" "$BOLD" "$NC" "$keepalive"
+    printf "  %bSock:%b      %s\n" "$BOLD" "$NC" "$sock"
+
+    if ((${#publish[@]})); then
+      printf "  %bPublish:%b   %s\n" "$BOLD" "$NC" "${publish[*]}"
+    else
+      printf "  %bPublish:%b   (none)\n" "$BOLD" "$NC"
+    fi
+
+    if ((${#mounts[@]})); then
+      printf "  %bMounts:%b    %s\n" "$BOLD" "$NC" "${mounts[*]}"
+    else
+      printf "  %bMounts:%b    (none)\n" "$BOLD" "$NC"
+    fi
+    printf "\n"
   }
 
   case "$action" in
@@ -2967,13 +3032,15 @@ cmd_run() {
     fi
     return 0
     ;;
-  shell | *)
+  shell | "*")
     if ((nobuild == 0)); then
       # Build needs docker.exe-friendly path on Windows
       run_build "$tag" "$dir_docker"
     else
       printf "%b[run]%b Skipping build (--no-build)\n" "$YELLOW" "$NC"
     fi
+
+    _run_summary "$tag" "$dir_posix" "$name"
 
     if docker inspect -f '{{.State.Running}}' "$name" 2>/dev/null | grep -q true; then
       printf "%b[run]%b Container already running: %s\n" "$GREEN" "$NC" "$name"
@@ -2988,7 +3055,14 @@ cmd_run() {
         "${publish[@]}" -- "${mounts[@]}"
     fi
 
-    run_exec_shell "$name"
+    # "shell" enters the container; "*" / "build" does not.
+    if [[ "$action" == "shell" ]]; then
+      run_exec_shell "$name"
+    else
+      printf "%b[run]%b Built/started. Use %blds run shell%b to enter, %blds run logs%b to follow logs.\n" \
+        "$GREEN" "$NC" "$BLUE" "$NC" "$BLUE" "$NC"
+      return 0
+    fi
     ;;
   esac
 }
@@ -3217,7 +3291,7 @@ Shortcuts: `open`, `bundle`, `notify`, `ui` map to `support …`.
 - `lds setup init|permissions|domain|profiles`
 
 ## Runner (ad‑hoc Dockerfile runner)
-- `lds run` (+ `ps|logs|stop|rm|open` and flags: `--publish|-p`, `--no-keepalive`, `--mount`, `--sock`)
+- `lds run` *(default: build+start only)* / `lds run shell` *(build+start+enter)* / `lds run *` *(same as default)* (+ `ps|logs|stop|rm|open` and flags: `--publish|-p`, `--no-keepalive`, `--mount`, `--sock`, `--tag`, `--name`)
 
 ## Runtime awareness
 - `lds runtime php|node`
