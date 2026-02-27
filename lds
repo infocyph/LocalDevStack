@@ -53,20 +53,42 @@ COLOR() { printf '[%sm' "$1"; }
 ###############################################################################
 # Colors + UI (higher contrast; aligned with mkhost.sh)
 ###############################################################################
-BOLD=$'[1m'
-DIM=$'[2m'
-RED=$'[1;31m'
-GREEN=$'[1;32m'
-CYAN=$'[1;36m'
-YELLOW=$'[1;33m'
-BLUE=$'[1;34m'
-MAGENTA=$'[1;35m'
-NC=$'[0m'
+# Color control:
+# - If stdout isn't a TTY, disable colors by default.
+# - If NO_COLOR is set, disable colors.
+# - Set LDS_FORCE_COLOR=1 to force colors.
+_is_tty() { [[ -t 1 ]]; }
 
-say()  { echo -e "$*"; }
-ok()   { say "${GREEN}$*${NC}"; }
-warn() { say "${YELLOW}$*${NC}"; }
-err()  { say "${RED}$*${NC}"; }
+_use_color=1
+if [[ "${LDS_FORCE_COLOR:-0}" != "1" ]]; then
+  if [[ -n "${NO_COLOR:-}" ]] || ! _is_tty; then
+    _use_color=0
+  fi
+fi
+
+if ((_use_color)); then
+  BOLD=$'\033[1m'
+  DIM=$'\033[2m'
+  RED=$'\033[1;31m'
+  GREEN=$'\033[1;32m'
+  CYAN=$'\033[1;36m'
+  YELLOW=$'\033[1;33m'
+  BLUE=$'\033[1;34m'
+  MAGENTA=$'\033[1;35m'
+  NC=$'\033[0m'
+else
+  BOLD='' DIM='' RED='' GREEN='' CYAN='' YELLOW='' BLUE='' MAGENTA='' NC=''
+fi
+
+# Output control:
+# - --quiet suppresses non-error output
+QUIET=0
+
+say()  { ((QUIET)) || printf '%b\n' "$*"; }
+ok()   { ((QUIET)) || printf '%b\n' "${GREEN}$*${NC}"; }
+warn() { ((QUIET)) || printf '%b\n' "${YELLOW}$*${NC}"; }
+err()  { printf '%b\n' "${RED}$*${NC}" >&2; }
+
 
 # Default behavior: QUIET
 VERBOSE=0
@@ -84,9 +106,23 @@ command_not_found_handle() {
 
 trap 'on_error $? $LINENO "$BASH_COMMAND"' ERR
 on_error() {
-  printf "\n%bError:%b '%s' failed at line %d (exit %d)\n\n" \
-    "$RED" "$NC" "$3" "$2" "$1"
-  exit "$1"
+  local code="$1" line="$2" cmd="$3"
+  local fn="${FUNCNAME[1]:-main}"
+  local src="${BASH_SOURCE[1]:-$0}"
+
+  printf "\n%bError:%b %s:%s in %s() (exit %d)\n"     "$RED" "$NC" "$src" "$line" "$fn" "$code" >&2
+  printf "%bCommand:%b %s\n" "$RED" "$NC" "$cmd" >&2
+
+  if ((VERBOSE)); then
+    printf "%bStack:%b\n" "$DIM" "$NC" >&2
+    local i=1
+    while caller "$i" >/dev/null 2>&1; do
+      caller "$i" >&2
+      i=$((i+1))
+    done
+  fi
+  printf "\n" >&2
+  exit "$code"
 }
 
 ###############################################################################
@@ -181,20 +217,25 @@ __EXTRAS_LOADED=0
 declare -a __EXTRA_FILES=()
 
 load_extras() {
+  # Set LDS_EXTRAS_RELOAD=1 (or global --reload-extras) to re-scan templates every call.
+  if [[ "${LDS_EXTRAS_RELOAD:-0}" == "1" ]]; then
+    __EXTRAS_LOADED=0
+  fi
+
   ((__EXTRAS_LOADED)) && return 0
   __EXTRAS_LOADED=1
 
   [[ -d "$EXTRAS_DIR" ]] || return 0
 
   mapfile -t __EXTRA_FILES < <(
-    find "$EXTRAS_DIR" -maxdepth 1 -type f \( -name '*.yaml' -o -name '*.yml' \) -print 2>/dev/null \
-      | sort \
-      | sed '/^[[:space:]]*$/d'
+    find "$EXTRAS_DIR" -maxdepth 1 -type f \( -name '*.yaml' -o -name '*.yml' \) -print 2>/dev/null       | sort       | sed '/^[[:space:]]*$/d'
   )
 }
 
 docker_compose() {
   load_extras
+  # Create required runtime files only when docker/compose operations are invoked.
+  ((EUID == 0)) || ensure_files_exist "/docker/.env" "/configuration/php/php.ini" "/.env"
   if [[ -z "${__LDS_DC_BIN:-}" ]]; then
     if docker compose version >/dev/null 2>&1; then
       __LDS_DC_BIN=(docker compose)
@@ -2943,11 +2984,11 @@ cmd_run() {
     return 1
   }
 
-  _run_summary() {
+  _run_build_summary() {
     local img="$1" build_dir="$2" cname="$3"
     local tag_only="${img##*:}"
 
-    printf "\n%b[run]%b Summary\n" "$CYAN" "$NC"
+    printf "\n%b[run]%b Build summary\n" "$CYAN" "$NC"
     printf "  %bImage:%b     %s\n" "$BOLD" "$NC" "$img"
     printf "  %bTag:%b       %s\n" "$BOLD" "$NC" "$tag_only"
     printf "  %bDir:%b       %s\n" "$BOLD" "$NC" "$build_dir"
@@ -2965,6 +3006,26 @@ cmd_run() {
       printf "  %bMounts:%b    %s\n" "$BOLD" "$NC" "${mounts[*]}"
     else
       printf "  %bMounts:%b    (none)\n" "$BOLD" "$NC"
+    fi
+    printf "\n"
+  }
+
+  _run_runtime_summary() {
+    local cname="$1"
+    local id img state ports
+    id="$(docker inspect -f '{{.Id}}' "$cname" 2>/dev/null | cut -c1-12 || true)"
+    img="$(docker inspect -f '{{.Config.Image}}' "$cname" 2>/dev/null || true)"
+    state="$(docker inspect -f '{{.State.Status}}' "$cname" 2>/dev/null || true)"
+    ports="$(docker port "$cname" 2>/dev/null | sed '/^[[:space:]]*$/d' | tr '\n' '; ' | sed 's/; $//' || true)"
+
+    printf "%b[run]%b Runtime summary\n" "$CYAN" "$NC"
+    printf "  %bContainer:%b %s\n" "$BOLD" "$NC" "${cname}${id:+ ($id)}"
+    [[ -n "$img" ]] && printf "  %bImage:%b     %s\n" "$BOLD" "$NC" "$img"
+    [[ -n "$state" ]] && printf "  %bState:%b     %s\n" "$BOLD" "$NC" "$state"
+    if [[ -n "$ports" ]]; then
+      printf "  %bPorts:%b     %s\n" "$BOLD" "$NC" "$ports"
+    else
+      printf "  %bPorts:%b     (none published)\n" "$BOLD" "$NC"
     fi
     printf "\n"
   }
@@ -3040,7 +3101,7 @@ cmd_run() {
       printf "%b[run]%b Skipping build (--no-build)\n" "$YELLOW" "$NC"
     fi
 
-    _run_summary "$tag" "$dir_posix" "$name"
+    _run_build_summary "$tag" "$dir_posix" "$name"
 
     if docker inspect -f '{{.State.Running}}' "$name" 2>/dev/null | grep -q true; then
       printf "%b[run]%b Container already running: %s\n" "$GREEN" "$NC" "$name"
@@ -3055,7 +3116,9 @@ cmd_run() {
         "${publish[@]}" -- "${mounts[@]}"
     fi
 
-    # "shell" enters the container; "*" / "build" does not.
+        _run_runtime_summary "$name"
+
+# "shell" enters the container; "*" / "build" does not.
     if [[ "$action" == "shell" ]]; then
       run_exec_shell "$name"
     else
@@ -3381,45 +3444,57 @@ EOF
 # 7. MAIN
 ###############################################################################
 main() {
-  need docker
-  ((EUID == 0)) || ensure_files_exist "/docker/.env" "/configuration/php/php.ini" "/.env"
-
-  [[ $# -gt 0 ]] || {
-    cmd_help
-    exit 1
-  }
+  [[ $# -gt 0 ]] || { cmd_help; exit 1; }
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
-    -v | --verbose)
+    -v|--verbose)
       VERBOSE=1
+      QUIET=0
       shift
       ;;
-    -q | --quiet)
+    -q|--quiet)
+      QUIET=1
       VERBOSE=0
+      shift
+      ;;
+    --reload-extras)
+      export LDS_EXTRAS_RELOAD=1
       shift
       ;;
     --)
       shift
       break
       ;;
+    -h|--help)
+      cmd_help
+      exit 0
+      ;;
     -*) die "Unknown global option: $1" ;;
     *) break ;;
     esac
   done
 
-  [[ $# -gt 0 ]] || {
-    cmd_help
-    exit 1
-  }
+  [[ $# -gt 0 ]] || { cmd_help; exit 1; }
 
-  case "${1,,}" in
-  php | composer | node | npm | npx) exec "$DIR/bin/$1" "${@:2}" ;;
-  pg | pg_restore | pg-restore | pgrestore | pg_dump | pgdump | pg-dump | psql) exec "$DIR/bin/pg" "${@:2}" ;;
-  maria | mariadb | mariadbdump | mariadb-dump | mariadb_dump) exec "$DIR/bin/maria" "${@:2}" ;;
-  my | mysql | mysqldump | mysql-dump | mysql_dump) exec "$DIR/bin/my" "${@:2}" ;;
-  redis | redis-cli) exec "$DIR/bin/redis-cli" "${@:2}" ;;
-  *) cmd_"${1,,}" "${@:2}" ;;
+  local cmd="${1,,}"
+  shift || true
+
+  if [[ "$cmd" == "help" ]]; then
+    cmd_help "$@"
+    exit 0
+  fi
+
+  # Do not require docker for pure help output; everything else expects the stack.
+  need docker
+
+  case "$cmd" in
+    php|composer|node|npm|npx) exec "$DIR/bin/$cmd" "$@" ;;
+    pg|pg_restore|pg-restore|pgrestore|pg_dump|pgdump|pg-dump|psql) exec "$DIR/bin/pg" "$@" ;;
+    maria|mariadb|mariadbdump|mariadb-dump|mariadb_dump) exec "$DIR/bin/maria" "$@" ;;
+    my|mysql|mysqldump|mysql-dump|mysql_dump) exec "$DIR/bin/my" "$@" ;;
+    redis|redis-cli) exec "$DIR/bin/redis-cli" "$@" ;;
+    *) "cmd_$cmd" "$@" ;;
   esac
 }
 
