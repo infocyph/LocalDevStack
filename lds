@@ -3130,6 +3130,311 @@ cmd_run() {
   esac
 }
 
+
+###############################################################################
+# 6w. NEW FEATURES: stack diff | domain export/import | support trace
+###############################################################################
+
+# stack diff: show what would run (compose) vs what's running (docker)
+cmd_stack_diff() {
+  local json=0
+  local show_config=0
+  while [[ "${1:-}" ]]; do
+    case "$1" in
+      --json) json=1; shift ;;
+      --config) show_config=1; shift ;;
+      *) break ;;
+    esac
+  done
+
+  local project; project="$(lds_project)"
+  local cfg_json=""
+
+  if docker_compose config --format json >/dev/null 2>&1; then
+    cfg_json="$(docker_compose config --format json)"
+  else
+    # fallback: best-effort text config
+    cfg_json=""
+  fi
+
+  # running: service -> image
+  declare -A running=()
+  local line
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    local svc="${line%%|*}"
+    local img="${line#*|}"
+    running["$svc"]="$img"
+  done < <(docker ps \
+        --filter "label=com.docker.compose.project=$project" \
+        --format '{{index .Labels "com.docker.compose.service"}}|{{.Image}}' 2>/dev/null || true)
+
+  # desired: service -> image/build context (best-effort)
+  declare -A desired_img=()
+  declare -A desired_ctx=()
+  declare -A desired_df=()
+
+  if [[ -n "$cfg_json" ]]; then
+    if command -v jq >/dev/null 2>&1; then
+      while IFS= read -r line; do
+        local svc="${line%%|*}"
+        local img="${line#*|}"
+        desired_img["$svc"]="$img"
+      done < <(printf '%s' "$cfg_json" | jq -r '.services | to_entries[] | "\(.key)|\(.value.image // "")"')
+      while IFS= read -r line; do
+        local svc="${line%%|*}"
+        local ctx="${line#*|}"
+        desired_ctx["$svc"]="$ctx"
+      done < <(printf '%s' "$cfg_json" | jq -r '.services | to_entries[] | "\(.key)|\(.value.build.context // "")"')
+      while IFS= read -r line; do
+        local svc="${line%%|*}"
+        local df="${line#*|}"
+        desired_df["$svc"]="$df"
+      done < <(printf '%s' "$cfg_json" | jq -r '.services | to_entries[] | "\(.key)|\(.value.build.dockerfile // "")"')
+    else
+      # try via SERVER_TOOLS jq
+      while IFS= read -r line; do
+        local svc="${line%%|*}"
+        local img="${line#*|}"
+        desired_img["$svc"]="$img"
+      done < <(_tools_exec "printf %q \"$cfg_json\" | jq -r '.services | to_entries[] | \"\\(.key)|\\(.value.image // \\\"\\\")\"' " 2>/dev/null || true)
+    fi
+  fi
+
+  # Build result object
+  if ((json)); then
+    if command -v jq >/dev/null 2>&1; then
+      # assemble in bash -> jq
+      local tmp; tmp="$(mktemp)"
+      {
+        printf '{'
+        printf '"project":%s,' "$(printf '%s' "$project" | jq -Rsa .)"
+        printf '"compose_file":%s,' "$(printf '%s' "$COMPOSE_FILE" | jq -Rsa .)"
+        printf '"running":{'
+        local first=1 k
+        for k in "${!running[@]}"; do
+          ((first)) || printf ','
+          first=0
+          printf '%s:%s' "$(printf '%s' "$k" | jq -R .)" "$(printf '%s' "${running[$k]}" | jq -R .)"
+        done
+        printf '},'
+        printf '"desired":{'
+        first=1
+        for k in "${!desired_img[@]}"; do
+          ((first)) || printf ','
+          first=0
+          printf '%s:%s' "$(printf '%s' "$k" | jq -R .)" "$(printf '%s' "${desired_img[$k]}" | jq -R .)"
+        done
+        printf '},'
+        printf '"diff":['
+        first=1
+        # union keys
+        declare -A seen=()
+        for k in "${!running[@]}"; do seen["$k"]=1; done
+        for k in "${!desired_img[@]}"; do seen["$k"]=1; done
+        for k in "${!seen[@]}"; do
+          local r="${running[$k]:-}"
+          local d="${desired_img[$k]:-}"
+          if [[ "$r" != "$d" ]]; then
+            ((first)) || printf ','
+            first=0
+            printf '{"service":%s,"running":%s,"desired":%s}' \
+              "$(printf '%s' "$k" | jq -R .)" \
+              "$(printf '%s' "$r" | jq -R .)" \
+              "$(printf '%s' "$d" | jq -R .)"
+          fi
+        done
+        printf ']'
+        printf '}\n'
+      } >"$tmp"
+      cat "$tmp" | jq .
+      rm -f "$tmp"
+    else
+      die "jq required for --json (or run inside SERVER_TOOLS)"
+    fi
+    return 0
+  fi
+
+  printf "%bStack diff%b (project=%s)\n" "$CYAN" "$NC" "$project"
+  printf "%bCompose file:%b %s\n" "$DIM" "$NC" "$COMPOSE_FILE"
+
+  if ((show_config)); then
+    if [[ -n "$cfg_json" ]]; then
+      printf "\n%bEffective compose config (json):%b\n" "$DIM" "$NC"
+      printf '%s\n' "$cfg_json"
+    else
+      printf "\n%bEffective compose config:%b\n" "$DIM" "$NC"
+      docker_compose config || true
+    fi
+  fi
+
+  # union services
+  declare -A all=()
+  local svc
+  for svc in "${!running[@]}"; do all["$svc"]=1; done
+  for svc in "${!desired_img[@]}"; do all["$svc"]=1; done
+
+  printf "\n%-22s  %-40s  %-40s  %s\n" "SERVICE" "RUNNING" "DESIRED" "STATUS"
+  printf "%-22s  %-40s  %-40s  %s\n" "------" "-------" "-------" "------"
+  for svc in $(printf '%s\n' "${!all[@]}" | sort); do
+    local r="${running[$svc]:-}"
+    local d="${desired_img[$svc]:-}"
+    local st
+    if [[ -z "$r" ]]; then st="(not running)"
+    elif [[ -z "$d" ]]; then st="(not in config)"
+    elif [[ "$r" == "$d" ]]; then st="OK"
+    else st="DIFF"
+    fi
+    printf "%-22s  %-40.40s  %-40.40s  %s\n" "$svc" "$r" "$d" "$st"
+  done
+
+  printf "\n%bNotes:%b\n" "$DIM" "$NC"
+  printf "  - Desired image is derived from 'docker compose config'. If a service uses only 'build:' and no 'image:', desired may be empty.\n"
+  printf "  - Use: lds stack diff --config  (to print resolved compose config)\n"
+}
+
+# domain export: dump nginx vhosts (and a few inferred properties) to JSON
+cmd_domain_export() {
+  local out="" pretty=1
+  while [[ "${1:-}" ]]; do
+    case "$1" in
+      --out) out="${2:-}"; shift 2 ;;
+      --compact) pretty=0; shift ;;
+      *) break ;;
+    esac
+  done
+
+  local dir_ng="$DIR/configuration/nginx"
+  [[ -d "$dir_ng" ]] || die "nginx vhost dir not found: $dir_ng"
+
+  local tmp; tmp="$(mktemp)"
+  printf '{ "version": 1, "exported_at": "%s", "root": "%s", "domains": [' "$(date -Iseconds)" "$DIR" >"$tmp"
+
+  local first=1 f dom typ upstream cmb
+  shopt -s nullglob
+  for f in "$dir_ng"/*.conf; do
+    dom="$(basename -- "$f" .conf)"
+    typ="static"
+    upstream=""
+    cmb=""
+    if grep -q 'fastcgi_pass' "$f"; then
+      typ="php"
+      upstream="$(grep -Eo 'fastcgi_pass[[:space:]]+[^;]+' "$f" | awk '{print $2}' | head -n1 || true)"
+    elif grep -q 'proxy_pass' "$f"; then
+      typ="proxy"
+      upstream="$(grep -m1 -Eo 'proxy_pass[[:space:]]+http[s]?://[^;]+' "$f" | awk '{print $2}' | head -n1 || true)"
+    fi
+    cmb="$(grep -m1 -Eo 'client_max_body_size[[:space:]]+[^;]+' "$f" | awk '{print $2}' | head -n1 || true)"
+
+    ((first)) || printf ',' >>"$tmp"
+    first=0
+    # include raw conf as base64 so import can restore exactly
+    local b64
+    b64="$(base64 -w0 <"$f" 2>/dev/null || base64 <"$f" | tr -d '\n')"
+    printf '\n{ "domain": "%s", "type": "%s", "upstream": "%s", "client_max_body_size": "%s", "files": { "nginx_conf": "%s" } }' \
+      "$dom" "$typ" "$upstream" "$cmb" "$b64" >>"$tmp"
+  done
+  shopt -u nullglob
+  printf '\n] }\n' >>"$tmp"
+
+  if [[ -n "$out" ]]; then
+    if ((pretty)) && command -v jq >/dev/null 2>&1; then
+      cat "$tmp" | jq . >"$out"
+    else
+      cat "$tmp" >"$out"
+    fi
+    ok "[ok] domain export: $out\n"
+  else
+    if ((pretty)) && command -v jq >/dev/null 2>&1; then
+      cat "$tmp" | jq .
+    else
+      cat "$tmp"
+    fi
+  fi
+  rm -f "$tmp"
+}
+
+# domain import: restore nginx vhosts from JSON created by domain export
+cmd_domain_import() {
+  local in="${1:-}"
+  [[ -n "$in" ]] || die "domain import <file.json>"
+  [[ -r "$in" ]] || die "cannot read: $in"
+
+  local dir_ng="$DIR/configuration/nginx"
+  mkdir -p "$dir_ng" 2>/dev/null || true
+
+  command -v jq >/dev/null 2>&1 || die "jq required for domain import"
+
+  local count=0
+  while IFS= read -r dom; do
+    local b64
+    b64="$(jq -r --arg d "$dom" '.domains[] | select(.domain==$d) | .files.nginx_conf' "$in")"
+    [[ -n "$b64" && "$b64" != "null" ]] || continue
+    printf '%s' "$b64" | base64 -d >"$dir_ng/$dom.conf"
+    count=$((count+1))
+  done < <(jq -r '.domains[].domain' "$in")
+
+  ok "[ok] domain import: restored $count nginx vhost(s) into $dir_ng\n"
+  warn "[info] Next steps: run 'lds stack restart nginx' (or 'lds stack up') to apply changes.\n"
+}
+
+# support trace: quick end-to-end trace for a domain
+cmd_support_trace() {
+  local dom="${1:-}"
+  [[ -n "$dom" ]] || die "support trace <domain>"
+
+  local nconf="$DIR/configuration/nginx/$dom.conf"
+  printf "%bTrace%b: %s\n" "$CYAN" "$NC" "$dom"
+
+  # 1) DNS
+  if docker inspect -f '{{.State.Running}}' SERVER_TOOLS 2>/dev/null | grep -qx true; then
+    printf "\n%b[DNS]%b\n" "$DIM" "$NC"
+    _tools_exec "dig +short $(_shq "$dom") || true; getent hosts $(_shq "$dom") 2>/dev/null || true"
+  else
+    printf "\n%b[DNS]%b\n" "$DIM" "$NC"
+    (command -v dig >/dev/null 2>&1 && dig +short "$dom") || true
+    (command -v getent >/dev/null 2>&1 && getent hosts "$dom") || true
+  fi
+
+  # 2) TLS certificate
+  printf "\n%b[TLS]%b\n" "$DIM" "$NC"
+  if docker inspect -f '{{.State.Running}}' SERVER_TOOLS 2>/dev/null | grep -qx true; then
+    _tools_exec "echo | openssl s_client -connect $(_shq "$dom"):443 -servername $(_shq "$dom") -showcerts 2>/dev/null | openssl x509 -noout -subject -issuer -dates 2>/dev/null || true"
+  else
+    echo | openssl s_client -connect "${dom}:443" -servername "$dom" -showcerts 2>/dev/null | openssl x509 -noout -subject -issuer -dates 2>/dev/null || true
+  fi
+
+  # 3) HTTP probe (timings)
+  printf "\n%b[HTTP]%b\n" "$DIM" "$NC"
+  if docker inspect -f '{{.State.Running}}' SERVER_TOOLS 2>/dev/null | grep -qx true; then
+    _tools_exec "curl -sk -o /dev/null -D - -w 'time_namelookup=%{time_namelookup}\ntime_connect=%{time_connect}\ntime_appconnect=%{time_appconnect}\ntime_starttransfer=%{time_starttransfer}\ntime_total=%{time_total}\nhttp_code=%{http_code}\n' https://$(_shq "$dom") | sed -n '1,30p'"
+  else
+    curl -sk -o /dev/null -D - -w $'time_namelookup=%{time_namelookup}\ntime_connect=%{time_connect}\ntime_appconnect=%{time_appconnect}\ntime_starttransfer=%{time_starttransfer}\ntime_total=%{time_total}\nhttp_code=%{http_code}\n' "https://$dom" | sed -n '1,30p'
+  fi
+
+  # 4) Upstream inference from nginx conf (if exists)
+  printf "\n%b[Upstream]%b\n" "$DIM" "$NC"
+  if [[ -r "$nconf" ]]; then
+    if grep -q fastcgi_pass "$nconf"; then
+      local php; php="$(grep -Eo 'fastcgi_pass[[:space:]]+[^;]+' "$nconf" | awk '{print $2}' | head -n1 || true)"
+      printf "type=php\nfastcgi_pass=%s\n" "${php:-unknown}"
+    elif grep -q proxy_pass "$nconf"; then
+      local up; up="$(grep -m1 -Eo 'proxy_pass[[:space:]]+http[s]?://[^;]+' "$nconf" | awk '{print $2}' | head -n1 || true)"
+      printf "type=proxy\nproxy_pass=%s\n" "${up:-unknown}"
+    else
+      printf "type=static\n"
+    fi
+  else
+    printf "nginx_conf=%s (missing)\n" "$nconf"
+  fi
+
+  # 5) Recent nginx logs (compose)
+  printf "\n%b[Recent nginx logs]%b\n" "$DIM" "$NC"
+  docker_compose logs --no-color --tail 120 nginx 2>/dev/null | text_grep -i "$dom" || docker_compose logs --no-color --tail 120 nginx 2>/dev/null || true
+
+  printf "\n%bDone.%b If this still looks wrong, run: lds doctor run  |  lds diag tls %s\n" "$GREEN" "$NC" "$dom"
+}
+
 ###############################################################################
 # 6x. GROUPED COMMAND ROUTERS (stack/domain/support) + backward-compatible aliases
 ###############################################################################
@@ -3149,7 +3454,8 @@ cmd_stack() {
     events)            cmd_events "$@" ;;
     clean)             cmd_clean "$@" ;;
     verify)            cmd_verify "$@" ;;
-    config)            cmd_config "$@" ;;
+    config)            cmd_config "$@" ;;    diff)              cmd_stack_diff "$@" ;;
+
     http)              cmd_http "$@" ;;
     *)
       die "stack <up|down|restart|status|ps|logs|exec|events|clean|verify|config|http>"
@@ -3161,14 +3467,16 @@ cmd_stack() {
 cmd_domain() {
   local sub="${1:-}"; shift || true
   case "${sub,,}" in
-    ""|help|-h|--help) die "domain <add|rm|ls|check|nginx>" ;;
+    ""|help|-h|--help) die "domain <add|rm|ls|export|import|check|nginx>" ;;
     add)               cmd_host add "$@" ;;
     rm|remove|del|delete) cmd_host rm "$@" ;;
     ls|list)           cmd_host list "$@" ;;
+    export)            cmd_domain_export "$@" ;;
+    import)            cmd_domain_import "$@" ;;
     check)             cmd_check upstream "$@" ;;
     nginx)             cmd_nginx "$@" ;;
     *)
-      die "domain <add|rm|ls|check|nginx>"
+      die "domain <add|rm|ls|export|import|check|nginx>"
       ;;
   esac
 }
@@ -3176,13 +3484,13 @@ cmd_domain() {
 cmd_support() {
   local sub="${1:-}"; shift || true
   case "${sub,,}" in
-    ""|help|-h|--help) die "support <open|bundle|notify|ui>" ;;
+    ""|help|-h|--help) die "support <open|bundle|notify|ui|trace>" ;;
     open)              cmd_open "$@" ;;
     bundle)            cmd_bundle "$@" ;;
     notify)            cmd_notify "$@" ;;
     ui)                cmd_ui "$@" ;;
     *)
-      die "support <open|bundle|notify|ui>"
+      die "support <open|bundle|notify|ui|trace>"
       ;;
   esac
 }
@@ -3295,6 +3603,7 @@ cmd_help() {
 - `lds stack events [--since <dur>]`  *(alias: `events`)*
 - `lds stack clean --yes [--volumes]`  *(alias: `clean`)*
 - `lds stack verify`  *(alias: `verify`)*
+- `lds stack diff [--config] [--json]`  *(shows desired vs running images)*
 
 
 ## Domain (vhost lifecycle + routing)
@@ -3334,7 +3643,8 @@ Legacy alias: `lds host …` → same subcommands as `domain`.
 - `lds doctor fix`
 
 ## Support
-- `lds support open <mail|db|redis|kibana|domain>`
+- `lds support open <mail|db|redis|kibana|domain>
+  support trace <domain>`
 - `lds support bundle [--redact|--full]`
 - `lds support notify …`
 - `lds support ui`
@@ -3378,7 +3688,7 @@ MD
 ${BOLD}LocalDevStack (lds)${NC}
 
 ${CYAN}Stack (compose + runtime):${NC}
-  stack up|start|down|restart|status|ps|logs|exec|events|clean|verify|config
+  stack up|start|down|restart|status|ps|logs|exec|events|clean|verify|config|diff
   up                               Alias of: stack up
   start                            Alias of: stack start
   down|stop                        Alias of: stack down
@@ -3387,7 +3697,7 @@ ${CYAN}Stack (compose + runtime):${NC}
   clean|verify                     Alias of: stack <...>
 
 ${CYAN}Domain (vhosts + routing):${NC}
-  domain add|rm|ls|check|nginx
+  domain add|rm|ls|export|import|check|nginx
   host add|rm|list|check|nginx     Legacy alias of: domain <...>
 
 ${CYAN}Certificates (TLS):${NC}
@@ -3409,6 +3719,7 @@ ${CYAN}Doctor:${NC}
 
 ${CYAN}Support:${NC}
   support open <mail|db|redis|kibana|domain>
+  support trace <domain>
   support bundle [--redact|--full]
   support notify ...
   support ui
