@@ -2989,6 +2989,7 @@ run_start() {
     printf "%b[run]%b docker run failed.\n" "$RED" "$NC" >&2
     return 1
   fi
+  printf "\n"
 }
 
 run_exec_shell() {
@@ -3153,6 +3154,9 @@ cmd_run() {
     else
       printf "  %bPorts:%b     (none published)\n" "$BOLD" "$NC"
     fi
+    printf "%b\n[run]%b Example Usage (in Composer)\n" "$CYAN" "$NC"
+    printf "  %bimage:%b %s\n" "$BOLD" "$NC" "$img"
+    printf "  %bpull_policy:%b never\n" "$BOLD" "$NC"
     printf "\n"
   }
 
@@ -3230,7 +3234,7 @@ cmd_run() {
     _run_build_summary "$tag" "$dir_posix" "$name"
 
     if docker inspect -f '{{.State.Running}}' "$name" 2>/dev/null | grep -q true; then
-      printf "%b[run]%b Container already running: %s\n" "$GREEN" "$NC" "$name"
+      printf "%b[run]%b Container already running: %s\n\n" "$GREEN" "$NC" "$name"
     else
       if docker inspect "$name" >/dev/null 2>&1; then
         docker rm -f "$name" >/dev/null 2>&1 || true
