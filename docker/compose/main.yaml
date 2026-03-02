@@ -49,12 +49,18 @@ volumes:
       com.infocyph.lds: "1"
       com.infocyph.stack: "LocalDevStack"
       com.infocyph.purpose: "Apache Host Configs"
-  lds_ssl:
+  lds_ssl_keys:
     name: SSLKeys
     labels:
       com.infocyph.lds: "1"
       com.infocyph.stack: "LocalDevStack"
       com.infocyph.purpose: "SSL Keys"
+  lds_ssl_roots:
+    name: SSLRootCA
+    labels:
+      com.infocyph.lds: "1"
+      com.infocyph.stack: "LocalDevStack"
+      com.infocyph.purpose: "SSL Root CA"
 
 include:
   - docker/compose/companion.yaml

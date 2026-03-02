@@ -15,7 +15,7 @@ x-php-service: &php-service
     - ../../configuration/php/php.ini:/usr/local/etc/php/conf.d/99-overrides.ini
     - "../../configuration/ssh:/home/${USER}/.ssh:ro"
     - "${HOME}/.gitconfig:/home/${USER}/.gitconfig:ro"
-    - ../../configuration/rootCA:/etc/share/rootCA:ro
+    - lds_ssl_roots:/etc/share/rootCA:ro
     - lds_fpm_sock:/home/${USERNAME}/.run/php-fpm
     - ../../configuration/php/pools:/usr/local/etc/php-fpm.domains:ro
     - ../../logs/php-fpm:/var/log/php-fpm
