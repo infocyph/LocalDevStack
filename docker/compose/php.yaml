@@ -4,21 +4,6 @@ x-php-service: &php-service
     - TZ=${TZ:-}
   env_file:
     - "../../.env"
-  networks:
-    frontend: {}
-    backend: {}
-    datastore: {}
-  volumes:
-    - "${PROJECT_DIR:-./../../../application}:/app"
-    - ../conf/www-php.conf:/usr/local/etc/php-fpm.d/www.conf
-    - ../conf/openssl.cnf:/etc/ssl/openssl.cnf
-    - ../../configuration/php/php.ini:/usr/local/etc/php/conf.d/99-overrides.ini
-    - "../../configuration/ssh:/home/${USER}/.ssh:ro"
-    - "${HOME}/.gitconfig:/home/${USER}/.gitconfig:ro"
-    - lds_ssl_roots:/etc/share/rootCA:ro
-    - lds_fpm_sock:/home/${USERNAME}/.run/php-fpm
-    - ../../configuration/php/pools:/usr/local/etc/php-fpm.domains:ro
-    - ../../logs/php-fpm:/var/log/php-fpm
   depends_on:
     - server-tools
   healthcheck:
@@ -52,6 +37,18 @@ services:
         PHP_VERSION: 7.3
         PHP_EXT_VERSIONED: ${PHP_EXT_73:-}
         LINUX_PKG_VERSIONED: ${LINUX_PKG_73:-}
+    volumes:
+      - "${PROJECT_DIR:-./../../../application}:/app"
+      - ../conf/www-php.conf:/usr/local/etc/php-fpm.d/www.conf
+      - ../conf/openssl.cnf:/etc/ssl/openssl.cnf
+      - ../../configuration/php/php.ini:/usr/local/etc/php/conf.d/99-overrides.ini
+      - "../../configuration/ssh:/home/${USER}/.ssh:ro"
+      - "${HOME}/.gitconfig:/home/${USER}/.gitconfig:ro"
+      - lds_ssl_roots:/etc/share/rootCA:ro
+      - lds_fpm_sock:/home/${USERNAME}/.run/php-fpm:rw
+      - ../../configuration/php/pools:/usr/local/etc/php-fpm.domains:ro
+      - ../../logs/php-fpm:/var/log/php-fpm
+      - ../../configuration/php/pools/php73:/usr/local/etc/php-fpm.domains:ro
     profiles: [php, php73]
 
   php74:
@@ -78,6 +75,18 @@ services:
         PHP_VERSION: 7.4
         PHP_EXT_VERSIONED: ${PHP_EXT_74:-}
         LINUX_PKG_VERSIONED: ${LINUX_PKG_74:-}
+    volumes:
+      - "${PROJECT_DIR:-./../../../application}:/app"
+      - ../conf/www-php.conf:/usr/local/etc/php-fpm.d/www.conf
+      - ../conf/openssl.cnf:/etc/ssl/openssl.cnf
+      - ../../configuration/php/php.ini:/usr/local/etc/php/conf.d/99-overrides.ini
+      - "../../configuration/ssh:/home/${USER}/.ssh:ro"
+      - "${HOME}/.gitconfig:/home/${USER}/.gitconfig:ro"
+      - lds_ssl_roots:/etc/share/rootCA:ro
+      - lds_fpm_sock:/home/${USERNAME}/.run/php-fpm:rw
+      - ../../configuration/php/pools:/usr/local/etc/php-fpm.domains:ro
+      - ../../logs/php-fpm:/var/log/php-fpm
+      - ../../configuration/php/pools/php74:/usr/local/etc/php-fpm.domains:ro
     profiles: [php, php74]
 
   php80:
@@ -104,6 +113,18 @@ services:
         PHP_VERSION: 8.0
         PHP_EXT_VERSIONED: ${PHP_EXT_80:-}
         LINUX_PKG_VERSIONED: ${LINUX_PKG_80:-}
+    volumes:
+      - "${PROJECT_DIR:-./../../../application}:/app"
+      - ../conf/www-php.conf:/usr/local/etc/php-fpm.d/www.conf
+      - ../conf/openssl.cnf:/etc/ssl/openssl.cnf
+      - ../../configuration/php/php.ini:/usr/local/etc/php/conf.d/99-overrides.ini
+      - "../../configuration/ssh:/home/${USER}/.ssh:ro"
+      - "${HOME}/.gitconfig:/home/${USER}/.gitconfig:ro"
+      - lds_ssl_roots:/etc/share/rootCA:ro
+      - lds_fpm_sock:/home/${USERNAME}/.run/php-fpm:rw
+      - ../../configuration/php/pools:/usr/local/etc/php-fpm.domains:ro
+      - ../../logs/php-fpm:/var/log/php-fpm
+      - ../../configuration/php/pools/php80:/usr/local/etc/php-fpm.domains:ro
     profiles: [php, php80]
 
   php81:
@@ -130,6 +151,18 @@ services:
         PHP_VERSION: 8.1
         PHP_EXT_VERSIONED: ${PHP_EXT_81:-}
         LINUX_PKG_VERSIONED: ${LINUX_PKG_81:-}
+    volumes:
+      - "${PROJECT_DIR:-./../../../application}:/app"
+      - ../conf/www-php.conf:/usr/local/etc/php-fpm.d/www.conf
+      - ../conf/openssl.cnf:/etc/ssl/openssl.cnf
+      - ../../configuration/php/php.ini:/usr/local/etc/php/conf.d/99-overrides.ini
+      - "../../configuration/ssh:/home/${USER}/.ssh:ro"
+      - "${HOME}/.gitconfig:/home/${USER}/.gitconfig:ro"
+      - lds_ssl_roots:/etc/share/rootCA:ro
+      - lds_fpm_sock:/home/${USERNAME}/.run/php-fpm:rw
+      - ../../configuration/php/pools:/usr/local/etc/php-fpm.domains:ro
+      - ../../logs/php-fpm:/var/log/php-fpm
+      - ../../configuration/php/pools/php81:/usr/local/etc/php-fpm.domains:ro
     profiles: [php, php81]
 
   php82:
@@ -156,6 +189,18 @@ services:
         PHP_VERSION: 8.2
         PHP_EXT_VERSIONED: ${PHP_EXT_82:-}
         LINUX_PKG_VERSIONED: ${LINUX_PKG_82:-}
+    volumes:
+      - "${PROJECT_DIR:-./../../../application}:/app"
+      - ../conf/www-php.conf:/usr/local/etc/php-fpm.d/www.conf
+      - ../conf/openssl.cnf:/etc/ssl/openssl.cnf
+      - ../../configuration/php/php.ini:/usr/local/etc/php/conf.d/99-overrides.ini
+      - "../../configuration/ssh:/home/${USER}/.ssh:ro"
+      - "${HOME}/.gitconfig:/home/${USER}/.gitconfig:ro"
+      - lds_ssl_roots:/etc/share/rootCA:ro
+      - lds_fpm_sock:/home/${USERNAME}/.run/php-fpm:rw
+      - ../../configuration/php/pools:/usr/local/etc/php-fpm.domains:ro
+      - ../../logs/php-fpm:/var/log/php-fpm
+      - ../../configuration/php/pools/php82:/usr/local/etc/php-fpm.domains:ro
     profiles: [php, php82]
 
   php83:
@@ -182,6 +227,18 @@ services:
         PHP_VERSION: 8.3
         PHP_EXT_VERSIONED: ${PHP_EXT_83:-}
         LINUX_PKG_VERSIONED: ${LINUX_PKG_83:-}
+    volumes:
+      - "${PROJECT_DIR:-./../../../application}:/app"
+      - ../conf/www-php.conf:/usr/local/etc/php-fpm.d/www.conf
+      - ../conf/openssl.cnf:/etc/ssl/openssl.cnf
+      - ../../configuration/php/php.ini:/usr/local/etc/php/conf.d/99-overrides.ini
+      - "../../configuration/ssh:/home/${USER}/.ssh:ro"
+      - "${HOME}/.gitconfig:/home/${USER}/.gitconfig:ro"
+      - lds_ssl_roots:/etc/share/rootCA:ro
+      - lds_fpm_sock:/home/${USERNAME}/.run/php-fpm:rw
+      - ../../configuration/php/pools:/usr/local/etc/php-fpm.domains:ro
+      - ../../logs/php-fpm:/var/log/php-fpm
+      - ../../configuration/php/pools/php83:/usr/local/etc/php-fpm.domains:ro
     profiles: [php, php83]
 
   php84:
@@ -208,6 +265,18 @@ services:
         PHP_VERSION: 8.4
         PHP_EXT_VERSIONED: ${PHP_EXT_84:-}
         LINUX_PKG_VERSIONED: ${LINUX_PKG_84:-}
+    volumes:
+      - "${PROJECT_DIR:-./../../../application}:/app"
+      - ../conf/www-php.conf:/usr/local/etc/php-fpm.d/www.conf
+      - ../conf/openssl.cnf:/etc/ssl/openssl.cnf
+      - ../../configuration/php/php.ini:/usr/local/etc/php/conf.d/99-overrides.ini
+      - "../../configuration/ssh:/home/${USER}/.ssh:ro"
+      - "${HOME}/.gitconfig:/home/${USER}/.gitconfig:ro"
+      - lds_ssl_roots:/etc/share/rootCA:ro
+      - lds_fpm_sock:/home/${USERNAME}/.run/php-fpm:rw
+      - ../../configuration/php/pools:/usr/local/etc/php-fpm.domains:ro
+      - ../../logs/php-fpm:/var/log/php-fpm
+      - ../../configuration/php/pools/php84:/usr/local/etc/php-fpm.domains:ro
     profiles: [php, php84]
 
   php85:
@@ -234,4 +303,16 @@ services:
         PHP_VERSION: 8.5
         PHP_EXT_VERSIONED: ${PHP_EXT_85:-}
         LINUX_PKG_VERSIONED: ${LINUX_PKG_85:-}
+    volumes:
+      - "${PROJECT_DIR:-./../../../application}:/app"
+      - ../conf/www-php.conf:/usr/local/etc/php-fpm.d/www.conf
+      - ../conf/openssl.cnf:/etc/ssl/openssl.cnf
+      - ../../configuration/php/php.ini:/usr/local/etc/php/conf.d/99-overrides.ini
+      - "../../configuration/ssh:/home/${USER}/.ssh:ro"
+      - "${HOME}/.gitconfig:/home/${USER}/.gitconfig:ro"
+      - lds_ssl_roots:/etc/share/rootCA:ro
+      - lds_fpm_sock:/home/${USERNAME}/.run/php-fpm:rw
+      - ../../configuration/php/pools:/usr/local/etc/php-fpm.domains:ro
+      - ../../logs/php-fpm:/var/log/php-fpm
+      - ../../configuration/php/pools/php85:/usr/local/etc/php-fpm.domains:ro
     profiles: [php, php85]
