@@ -21,7 +21,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - "${SOP_REPO:-./../../../sops-repo}:/etc/share/vhosts/sops"
       - "${HOME}/.gitconfig:/home/root/.gitconfig:ro"
-      - ../../configuration/php/pools:/etc/share/vhosts/fpm
+      - lds_fpm_pools:/etc/share/vhosts/fpm
       - ../../logs:/global/log:ro
       - ../../configuration/ssl:/etc/share/certs
     networks:

@@ -17,7 +17,7 @@ x-php-service: &php-service
     - "${HOME}/.gitconfig:/home/${USER}/.gitconfig:ro"
     - lds_ssl_roots:/etc/share/rootCA:ro
     - lds_fpm_sock:/home/${USERNAME}/.run/php-fpm
-    - ../../configuration/php/pools:/usr/local/etc/php-fpm.domains:ro
+    - lds_fpm_pools:/usr/local/etc/php-fpm.domains:ro
     - ../../logs/php-fpm:/var/log/php-fpm
   depends_on:
     - server-tools
