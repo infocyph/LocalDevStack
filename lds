@@ -16,7 +16,24 @@ RED="${RED:-}"; GREEN="${GREEN:-}"; CYAN="${CYAN:-}"; YELLOW="${YELLOW:-}"
 BLUE="${BLUE:-}"; MAGENTA="${MAGENTA:-}"; NC="${NC:-}"
 
 die() {
-  printf "%bError:%b %s\n" "${RED:-}" "${NC:-}" "$*" >&2
+  printf "%bError:%b %s
+" "${RED:-}" "${NC:-}" "$*" >&2
+
+    printf "
+%bDisk:%b
+" "${CYAN:-}" "${NC:-}" >&2
+    _status_show_disk 2>/dev/null || true
+
+    printf "
+%bVolumes:%b
+" "${CYAN:-}" "${NC:-}" >&2
+    _status_show_volumes 2>/dev/null || true
+
+    printf "
+%bChecks:%b
+" "${CYAN:-}" "${NC:-}" >&2
+    _status_checks 2>/dev/null || true
+
   exit 1
 }
 
@@ -1589,8 +1606,143 @@ _status_checks() {
 }
 _status_show_disk() {
   docker system df
-  printf "\n%bProject data:%b\n" "$CYAN" "$NC"
+  printf "
+%bProject data:%b
+" "$CYAN" "$NC"
   du -sh "$DIR/data" 2>/dev/null || true
+}
+
+# Internal: human readable bytes (B/K/M/G/T). Accepts integer bytes.
+_human_bytes() {
+  local b="${1:-0}"
+  awk -v b="$b" 'BEGIN{
+    split("B KB MB GB TB PB EB",u," ");
+    i=1;
+    while (b>=1024 && i<length(u)) { b/=1024; i++; }
+    if (i==1) { printf "%.0f %s", b, u[i]; }
+    else { printf "%.1f %s", b, u[i]; }
+  }'
+}
+
+# Internal: directory size in bytes (portable-ish across GNU/BSD du)
+_dir_size_bytes() {
+  local p="${1:-}"
+  [[ -n "$p" && -d "$p" ]] || { printf '0'; return 0; }
+
+  # GNU du supports -b; BSD does not.
+  local out
+  if out="$(du -sb "$p" 2>/dev/null | awk '{print $1}' 2>/dev/null)"; then
+    [[ -n "$out" ]] && { printf '%s' "$out"; return 0; }
+  fi
+
+  # Fallback: du -sk * 1024
+  out="$(du -sk "$p" 2>/dev/null | awk '{print $1}' 2>/dev/null || true)"
+  [[ -n "$out" ]] || out="0"
+  awk -v k="$out" 'BEGIN{ printf "%.0f", k*1024 }'
+}
+
+# Internal: volumes list + sizes for this compose project
+_status_show_volumes() {
+  local project; project="$(lds_project)"
+
+  # 1) volumes by compose label (if any)
+  local -a vols=()
+  mapfile -t vols < <(
+    docker volume ls -q --filter "label=com.docker.compose.project=$project" 2>/dev/null | sed '/^[[:space:]]*$/d'
+  )
+
+  # 2) volumes mounted by this project's containers (covers external/unlabeled)
+  local -a cids=()
+  mapfile -t cids < <(docker_compose ps -q 2>/dev/null | sed '/^[[:space:]]*$/d')
+
+  if (( ${#cids[@]} > 0 )); then
+    local v
+    while IFS= read -r v; do
+      [[ -n "$v" ]] && vols+=("$v")
+    done < <(
+      docker inspect -f '{{range .Mounts}}{{if eq .Type "volume"}}{{.Name}}{{"\n"}}{{end}}{{end}}' "${cids[@]}" 2>/dev/null \
+        | sed '/^[[:space:]]*$/d'
+    )
+  fi
+
+  # uniq
+  if (( ${#vols[@]} > 0 )); then
+    mapfile -t vols < <(printf "%s\n" "${vols[@]}" | awk '!seen[$0]++')
+  fi
+
+  if (( ${#vols[@]} == 0 )); then
+    printf "(none)\n"
+    return 0
+  fi
+
+  # size map from `docker system df -v`
+  declare -A __VOL_SZ=()
+  local df
+  df="$(docker system df -v 2>/dev/null || true)"
+  if [[ -n "$df" ]]; then
+    # Extract the "Local Volumes space usage:" table: VOLUME NAME | LINKS | SIZE
+    while read -r name links size rest; do
+      [[ -n "$name" && "$name" != "VOLUME" ]] || continue
+      [[ -n "$size" ]] || continue
+      __VOL_SZ["$name"]="$size"
+    done < <(
+      printf "%s\n" "$df" |
+        awk '
+    /^Local Volumes space usage:/ {inside=1; next}
+    inside && /^Build cache usage:/ {exit}
+    inside && /^[[:space:]]*$/ {next}
+    inside {print}
+  ' | awk 'NR==1{next} {print $1, $2, $3}'
+    )
+  fi
+
+  # inspect metadata
+  local -a rows=()
+  mapfile -t rows < <(
+    docker volume inspect -f '{{.Name}}	{{.Driver}}' "${vols[@]}" 2>/dev/null | sed '/^[[:space:]]*$/d'
+  )
+
+  if (( ${#rows[@]} == 0 )); then
+    printf "(none)\n"
+    return 0
+  fi
+
+  local w_name=6 w_drv=6
+  local line name drv
+  for line in "${rows[@]}"; do
+    IFS=$'\t' read -r name drv <<<"$line"
+    ((${#name} > w_name)) && w_name=${#name}
+    ((${#drv}  > w_drv))  && w_drv=${#drv}
+  done
+  (( w_name > 40 )) && w_name=40
+  (( w_drv  > 12 )) && w_drv=12
+
+  printf "  %b%-*s%b  %b%-*s%b  %b%s%b\n" \
+    "$BOLD" "$w_name" "NAME" "$NC" \
+    "$BOLD" "$w_drv"  "DRIVER" "$NC" \
+    "$BOLD" "SIZE" "$NC"
+
+  local total_note=0
+  for line in "${rows[@]}"; do
+    IFS=$'\t' read -r name drv <<<"$line"
+
+    local n_disp="$name" d_disp="$drv"
+    if ((${#n_disp} > w_name)); then n_disp="${n_disp:0:w_name-1}…"; fi
+    if ((${#d_disp} > w_drv));  then d_disp="${d_disp:0:w_drv-1}…"; fi
+
+    local sz="${__VOL_SZ[$name]:--}"
+    [[ "$sz" != "-" ]] && total_note=1
+
+    printf "  %-*s  %-*s  %s\n" \
+      "$w_name" "$n_disp" \
+      "$w_drv"  "${d_disp:-'-'}" \
+      "$sz"
+  done
+
+  if (( total_note == 0 )); then
+    printf "\n  %bNote:%b volume sizes unavailable (docker system df -v did not provide volume table)\n" \
+      "$YELLOW" "$NC"
+  fi
 }
 
 _status_urls() {
@@ -1857,6 +2009,9 @@ cmd_status() {
 
   printf "\n%bDisk:%b\n" "$CYAN" "$NC"
   _status_show_disk || true
+
+  printf "\n%bVolumes:%b\n" "$CYAN" "$NC"
+  _status_show_volumes || true
 
   printf "\n%bChecks:%b\n" "$CYAN" "$NC"
   _status_checks || true
