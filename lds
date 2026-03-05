@@ -1577,15 +1577,8 @@ _status_checks() {
   [[ -d "$DIR/configuration" ]] && proj_ok+=(config_dir) || proj_bad+=(config_dir)
   [[ -d "$DIR/data" ]] && proj_ok+=(data_dir) || proj_bad+=(data_dir)
   [[ -d "$DIR/logs" ]] && proj_ok+=(logs_dir) || proj_bad+=(logs_dir)
-  [[ -f "$DIR/configuration/rootCA/rootCA.pem" ]] && proj_ok+=(rootCA) || proj_bad+=(rootCA)
-
-  if [[ -f "$DIR/lds" ]]; then
-    if grep -U $"\r" "$DIR/lds" >/dev/null 2>&1; then
-      proj_bad+=(crlf)
-    else
-      proj_ok+=(lf)
-    fi
-  fi
+  [[ -f "$DIR/configuration/ssl/rootCA.pem" ]] && proj_ok+=(rootCA) || proj_bad+=(rootCA)
+  [[ -f "$DIR/configuration/ssl/mTLS-user.p12" ]] && proj_ok+=(mTLS) || proj_bad+=(mTLS)
 
   # Print exactly two lines (tab separated)
   printf "%bSystem%b\t" "$CYAN" "$NC"
