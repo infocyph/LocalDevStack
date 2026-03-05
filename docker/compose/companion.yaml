@@ -8,8 +8,8 @@ services:
       - TZ=${TZ:-}
       - USERNAME=${USER}
     volumes:
-      - ../../configuration/apache:/etc/share/vhosts/apache
-      - ../../configuration/nginx:/etc/share/vhosts/nginx
+      - lds_apache_host:/etc/share/vhosts/apache
+      - lds_nginx_host:/etc/share/vhosts/nginx
       - ../../configuration/node:/etc/share/vhosts/node
       - ../../configuration/sops/config:/etc/share/sops/config
       - ../../configuration/sops/global:/etc/share/sops/global

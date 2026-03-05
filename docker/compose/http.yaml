@@ -11,7 +11,7 @@ services:
       - "${HTTPS_PORT:-443}:443"
     volumes:
       - ../../logs/nginx:/var/log/nginx
-      - ../../configuration/nginx:/etc/nginx/conf.d:ro
+      - lds_nginx_host:/etc/nginx/conf.d:ro
       - lds_ssl_keys:/etc/mkcert:ro
       - lds_ssl_roots:/etc/share/rootCA:ro
       - "${PROJECT_DIR:-./../../../application}:/app"
@@ -35,7 +35,7 @@ services:
       - TZ=${TZ:-}
     volumes:
       - lds_ssl_keys:/etc/mkcert:ro
-      - ../../configuration/apache:/usr/local/apache2/conf/extra:ro
+      - lds_apache_host:/usr/local/apache2/conf/extra:ro
       - ../../logs/apache:/var/log/apache2
       - lds_ssl_roots:/etc/share/rootCA:ro
       - "${PROJECT_DIR:-./../../../application}:/app"
