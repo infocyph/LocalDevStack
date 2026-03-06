@@ -573,13 +573,6 @@ fix_perms() {
   chmod 755 "$DIR/docker"
   find "$DIR/docker" -type f ! -perm 644 -exec chmod 644 {} +
 
-  chmod 2777 "$DIR/data"
-  mkdir -p "$DIR/data/cloudbeaver" "$DIR/data/mysql" "$DIR/data/postgresql" "$DIR/data/mongo" \
-    "$DIR/data/mariadb" "$DIR/data/elasticsearch" "$DIR/data/redis" "$DIR/data/mailpit" \
-    "$DIR/data/redis-insight" "$DIR/data/kibana" "$DIR/data/filebeat"
-  find "$DIR/data" -mindepth 1 -maxdepth 1 -type d -exec chmod 2777 {} +
-  find "$DIR/data" -type f -exec chmod 666 {} +
-
   chmod -R 777 "$DIR/logs"
   chown -R "$USER:docker" "$DIR/logs"
 
@@ -612,7 +605,8 @@ setup_domain() {
   http_reload
 }
 
-cmd_delhost() {
+delete_domain() {
+
   local domain="${1:-}"
   [[ -n "$domain" ]] || die "Usage: lds delhost <domain>"
 
@@ -1542,62 +1536,47 @@ _status_project_names() {
 # 1) Problems: unhealthy/restarting/exited + restart count + last exit
 _status_show_problems() {
   local -a cids=()
-  mapfile -t cids < <(_status_project_cids)
-  if (( ${#cids[@]} == 0 )); then
+  mapfile -t cids < <(docker_compose ps -q 2>/dev/null | sed '/^[[:space:]]*$/d')
+  (( ${#cids[@]} == 0 )) && { printf "(none)\n"; return 0; }
+
+  # Collect rows as TAB-separated fields
+  # name | state | health | restart | exit | finishedAt
+  local raw
+  raw="$(
+    docker inspect -f '{{.Name}}	{{.State.Status}}	{{if .State.Health}}{{.State.Health.Status}}{{end}}	{{.RestartCount}}	{{.State.ExitCode}}	{{.State.FinishedAt}}' \
+      "${cids[@]}" 2>/dev/null | sed 's|^/||'
+  )"
+
+  local -a rows=()
+  local line name state health restart exitcode finishedAt
+
+  # Only include actual problems:
+  # - not running
+  # - OR health == unhealthy
+  # Note: containers with no healthcheck (health="") are NOT problems.
+  while IFS=$'\t' read -r name state health restart exitcode finishedAt; do
+    [[ -n "$name" ]] || continue
+    if [[ "$state" != "running" || "$health" == "unhealthy" ]]; then
+      rows+=("$name"$'\t'"$state"$'\t'"${health:-'-'}"$'\t'"${restart:-0}"$'\t'"${exitcode:-0}"$'\t'"${finishedAt:-'-'}")
+    fi
+  done <<< "$raw"
+
+  if (( ${#rows[@]} == 0 )); then
     printf "(none)\n"
     return 0
   fi
 
-  local -a rows=()
-  mapfile -t rows < <(
-    docker inspect -f '{{.Name}}\t{{.State.Status}}\t{{if .State.Health}}{{.State.Health.Status}}{{end}}\t{{.RestartCount}}\t{{.State.ExitCode}}\t{{.State.FinishedAt}}' \
-      "${cids[@]}" 2>/dev/null | sed 's#^/##'
-  )
-
-  local printed=0
-  local w=4
-  local line name st health rest exitc fin
-  for line in "${rows[@]}"; do
-    IFS=$'\t' read -r name st health rest exitc fin <<<"$line"
-    ((${#name} > w)) && w=${#name}
-  done
-  (( w > 34 )) && w=34
-
-  printf "  %b%-*s%b  %b%-10s%b  %b%-10s%b  %b%-7s%b  %b%s%b\n" \
-    "$BOLD" "$w" "NAME" "$NC" \
-    "$BOLD" "STATE" "$NC" \
-    "$BOLD" "HEALTH" "$NC" \
-    "$BOLD" "RESTART" "$NC" \
-    "$BOLD" "LAST_EXIT" "$NC"
+  # Pretty table
+  printf "  %-18s  %-10s  %-10s  %-7s  %-18s\n" "NAME" "STATE" "HEALTH" "RESTART" "LAST_EXIT"
 
   for line in "${rows[@]}"; do
-    IFS=$'\t' read -r name st health rest exitc fin <<<"$line"
-    local bad=0
-    [[ "$st" != "running" ]] && bad=1
-    [[ "$health" == "unhealthy" ]] && bad=1
-    [[ "$st" == "restarting" ]] && bad=1
-
-    (( bad )) || continue
-
-    local n="$name"; ((${#n} > w)) && n="${n:0:w-1}…"
-    local stc="$(_state_color "$st")"
-    local hc="$(_health_color "$health")"
-    local he="${health:-"-"}"; [[ -z "$he" ]] && he="-"
-    local last="-"
-    if [[ "$st" != "running" || "$exitc" != "0" ]]; then
-      last="code=$exitc"
-    fi
-
-    printf "  %-*s  %b%-10s%b  %b%-10s%b  %-7s  %s\n" \
-      "$w" "$n" \
-      "$stc" "${st:-'-'}" "$NC" \
-      "$hc" "$he" "$NC" \
-      "${rest:-0}" \
-      "$last"
-    printed=1
+    IFS=$'\t' read -r name state health restart exitcode finishedAt <<< "$line"
+    # LAST_EXIT: show exit code; add finishedAt for non-running states (helps debugging)
+    local last="code=${exitcode}"
+    [[ "$state" != "running" && "$finishedAt" != "-" ]] && last+=" @${finishedAt}"
+    printf "  %-18s  %-10s  %-10s  %-7s  %-18s\n" \
+      "$name" "$state" "${health:-'-'}" "${restart:-0}" "$last"
   done
-
-  (( printed )) || printf "  (none)\n"
 }
 
 # 2) Top consumers: top-5 by MEM and CPU (from docker stats)
@@ -1750,23 +1729,62 @@ _status_show_volumes() {
 _status_show_networks() {
   local project; project="$(lds_project)"
 
-  printf "  %bNetworks:%b\n" "$BOLD" "$NC"
-  docker network ls --filter "label=com.docker.compose.project=$project" --format '    {{.Name}}' 2>/dev/null || printf "    (none)\n"
-
+  # Project containers (fast, single compose call)
   local -a cids=()
   mapfile -t cids < <(_status_project_cids)
-  if (( ${#cids[@]} == 0 )); then
-    return 0
+  (( ${#cids[@]} )) || { printf "    (none)\n"; return 0; }
+
+  printf "  %bNetworks:%b\n" "$BOLD" "$NC"
+
+  # 1) Prefer label-based listing (now that you add labels in compose)
+  # 2) Fallback: derive from containers (works for external/unlabeled networks)
+  local nets=""
+  nets="$(docker network ls --filter "label=com.docker.compose.project=$project" --format '{{.Name}}' 2>/dev/null | sed '/^[[:space:]]*$/d' || true)"
+  if [[ -z "$nets" ]]; then
+    nets="$(
+      docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{"\n"}}{{end}}' \
+        "${cids[@]}" 2>/dev/null \
+        | sed '/^[[:space:]]*$/d' \
+        | sort -u
+    )"
+  fi
+
+  if [[ -z "$nets" ]]; then
+    printf "    (none)\n"
+  else
+    printf "    %-22s %-8s %-18s %-18s %-6s\n" "NAME" "DRIVER" "SUBNET" "GATEWAY" "CNTS"
+
+    # Count attached containers per network via inspect (cheap for a few nets)
+    while IFS= read -r n; do
+      [[ -n "$n" ]] || continue
+
+      local driver subnet gateway cnt
+      driver="$(docker network inspect -f '{{.Driver}}' "$n" 2>/dev/null || true)"
+      subnet="$(docker network inspect -f '{{with index .IPAM.Config 0}}{{.Subnet}}{{end}}' "$n" 2>/dev/null || true)"
+      gateway="$(docker network inspect -f '{{with index .IPAM.Config 0}}{{.Gateway}}{{end}}' "$n" 2>/dev/null || true)"
+      cnt="$(docker network inspect -f '{{len .Containers}}' "$n" 2>/dev/null || true)"
+
+      printf "    %-22s %-8s %-18s %-18s %-6s\n" \
+        "$n" "${driver:-'-'}" "${subnet:-'-'}" "${gateway:-'-'}" "${cnt:-0}"
+    done <<< "$nets"
   fi
 
   printf "  %bContainer IPs:%b\n" "$BOLD" "$NC"
+
+  # Format: NAME<TAB>NETWORK<TAB>IP
   local out
-  out="$(docker inspect -f '{{.Name}}\t{{range $k,$v := .NetworkSettings.Networks}}{{$k}}\t{{$v.IPAddress}}{{"\\n"}}{{end}}' "${cids[@]}" 2>/dev/null | sed 's#^/##' || true)"
-  if [[ -z "$out" ]]; then
+  out="$(
+    docker inspect -f '{{.Name}}{{"\t"}}{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{"\t"}}{{$v.IPAddress}}{{"\n"}}{{end}}' \
+      "${cids[@]}" 2>/dev/null | sed 's#^/##' || true
+  )"
+
+  if [[ -z "${out//$'\n'/}" ]]; then
     printf "    (none)\n"
     return 0
   fi
-  printf "%s\n" "$out" | awk -F'\t' 'NF>=3{printf "    %-18s  %-22s  %s\n",$1,$2,$3}'
+
+  printf "    %-18s  %-22s  %s\n" "NAME" "NETWORK" "IP"
+  printf "%s\n" "$out" | awk -F'\t' 'NF>=3 && $2!="" {printf "    %-18s  %-22s  %s\n",$1,$2,$3}'
 }
 
 # 5) Optional endpoint probes (gated)
@@ -1913,7 +1931,6 @@ _status_checks() {
   [[ -f "$ENV_DOCKER" ]] && proj_ok+=(env) || proj_bad+=(env)
   [[ -d "$DIR/docker" ]] && proj_ok+=(docker_dir) || proj_bad+=(docker_dir)
   [[ -d "$DIR/configuration" ]] && proj_ok+=(config_dir) || proj_bad+=(config_dir)
-  [[ -d "$DIR/data" ]] && proj_ok+=(data_dir) || proj_bad+=(data_dir)
   [[ -d "$DIR/logs" ]] && proj_ok+=(logs_dir) || proj_bad+=(logs_dir)
   [[ -f "$DIR/configuration/ssl/rootCA.pem" ]] && proj_ok+=(rootCA) || proj_bad+=(rootCA)
   [[ -f "$DIR/configuration/ssl/mTLS-user.p12" ]] && proj_ok+=(mTLS) || proj_bad+=(mTLS)
@@ -1937,10 +1954,6 @@ _status_checks() {
 }
 _status_show_disk() {
   docker system df
-  printf "
-%bProject data:%b
-" "$CYAN" "$NC"
-  du -sh "$DIR/data" 2>/dev/null || true
 }
 
 # Internal: human readable bytes (B/K/M/G/T). Accepts integer bytes.
@@ -2573,7 +2586,7 @@ cmd_host() {
       ;;
     rm|remove|del|delete)
       local dom="${1:-}"; [[ -n "$dom" ]] || die "host rm <domain>"
-      cmd_delhost "$dom"
+      delete_domain "$dom"
       ;;
     list)
       shopt -s nullglob

@@ -4,6 +4,10 @@ networks:
   frontend:
     name: Frontend
     driver: bridge
+    labels:
+      com.docker.compose.project: "LocalDevStack"
+      com.docker.compose.network: "frontend"
+      com.infocyph.stack: "LocalDevStack"
     ipam:
       config:
         - subnet: 172.28.0.0/24
@@ -12,6 +16,10 @@ networks:
   backend:
     name: Backend
     driver: bridge
+    labels:
+      com.docker.compose.project: "LocalDevStack"
+      com.docker.compose.network: "backend"
+      com.infocyph.stack: "LocalDevStack"
     ipam:
       config:
         - subnet: 172.29.0.0/24
@@ -20,6 +28,10 @@ networks:
   datastore:
     name: DataStore
     driver: bridge
+    labels:
+      com.docker.compose.project: "LocalDevStack"
+      com.docker.compose.network: "datastore"
+      com.infocyph.stack: "LocalDevStack"
     ipam:
       config:
         - subnet: 172.30.0.0/24
