@@ -10,14 +10,14 @@ x-php-service: &php-service
     datastore: {}
   volumes:
     - "${PROJECT_DIR:-./../../../application}:/app"
+    - lds_ssl_roots:/etc/share/rootCA:ro
+    - lds_fpm_sock:/home/${USERNAME}/.run/php-fpm
+    - lds_fpm_pools:/usr/local/etc/php-fpm.domains:ro
     - ../conf/www-php.conf:/usr/local/etc/php-fpm.d/www.conf
     - ../conf/openssl.cnf:/etc/ssl/openssl.cnf
     - ../../configuration/php/php.ini:/usr/local/etc/php/conf.d/99-overrides.ini
     - "../../configuration/ssh:/home/${USER}/.ssh:ro"
     - "${HOME}/.gitconfig:/home/${USER}/.gitconfig:ro"
-    - lds_ssl_roots:/etc/share/rootCA:ro
-    - lds_fpm_sock:/home/${USERNAME}/.run/php-fpm
-    - lds_fpm_pools:/usr/local/etc/php-fpm.domains:ro
     - ../../logs/php-fpm:/var/log/php-fpm
   depends_on:
     - server-tools

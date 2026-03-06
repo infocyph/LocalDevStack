@@ -11,7 +11,7 @@ services:
     image: redis/redis-stack-server:${REDIS_VERSION:-latest}
     profiles: [redis]
     volumes:
-      - ../../data/redis:/data
+      - lds_redis:/data
       - ../../logs/redis:/var/log/redis
     environment:
       - TZ=${TZ:-}
@@ -37,7 +37,7 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
       - POSTGRES_DB=${POSTGRES_DATABASE:-postgres}
     volumes:
-      - ../../data/postgresql:/var/lib/postgresql
+      - lds_pg:/var/lib/postgresql
       - ../../logs/postgresql:/var/log/postgresql
       - ../conf/pg_hba.conf:/etc/postgresql/pg_hba.conf
 #      - ../conf/postgresql.conf:/etc/postgresql/postgresql.conf
@@ -73,7 +73,7 @@ services:
       - MYSQL_PASSWORD=${MYSQL_PASSWORD:-12345}
       - MYSQL_DATABASE=${MYSQL_DATABASE:-localdb}
     volumes:
-      - ../../data/mysql:/var/lib/mysql
+      - lds_my:/var/lib/mysql
       - ../../logs/mysql:/var/log/mysql
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h127.0.0.1 -u root -p${MYSQL_ROOT_PASSWORD:-12345}"]
@@ -95,7 +95,7 @@ services:
       - MONGO_INITDB_ROOT_USERNAME=${MONGODB_ROOT_USERNAME:-root}
       - MONGO_INITDB_ROOT_PASSWORD=${MONGODB_ROOT_PASSWORD:-12345}
     volumes:
-      - ../../data/mongo:/data/db
+      - lds_mongo:/data/db
       - ../../logs/mongodb:/var/log/mongodb
     healthcheck:
       test:
@@ -123,7 +123,7 @@ services:
       - MARIADB_PASSWORD=${MARIADB_PASSWORD:-12345}
       - MARIADB_DATABASE=${MARIADB_DATABASE:-localdb}
     volumes:
-      - ../../data/mariadb:/var/lib/mysql
+      - lds_maria:/var/lib/mysql
       - ../../logs/mariadb:/var/log/mysql
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p${MARIADB_ROOT_PASSWORD:-12345}"]
@@ -147,7 +147,7 @@ services:
       - "cluster.name=single_node_cluster"
       - "node.name=elasticsearch-node-single"
     volumes:
-      - ../../data/elasticsearch:/usr/share/elasticsearch/data
+      - lds_es:/usr/share/elasticsearch/data
       - ../../logs/elasticsearch:/usr/share/elasticsearch/logs
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]

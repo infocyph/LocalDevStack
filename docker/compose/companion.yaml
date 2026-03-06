@@ -8,22 +8,22 @@ services:
       - TZ=${TZ:-}
       - USERNAME=${USER}
     volumes:
+      - "${PROJECT_DIR:-./../../../application}:/app"
+      - lds_ssl_roots:/etc/share/rootCA
       - lds_apache_host:/etc/share/vhosts/apache
       - lds_nginx_host:/etc/share/vhosts/nginx
+      - lds_ssl_keys:/etc/mkcert
+      - lds_fpm_pools:/etc/share/vhosts/fpm
       - ../../configuration/node:/etc/share/vhosts/node
       - ../../configuration/sops/config:/etc/share/sops/config
       - ../../configuration/sops/global:/etc/share/sops/global
       - ../../configuration/sops/keys:/etc/share/sops/keys
-      - lds_ssl_keys:/etc/mkcert
       - "../../configuration/ssh:/home/root/.ssh:ro"
-      - "${PROJECT_DIR:-./../../../application}:/app"
-      - lds_ssl_roots:/etc/share/rootCA
-      - /var/run/docker.sock:/var/run/docker.sock
       - "${SOP_REPO:-./../../../sops-repo}:/etc/share/vhosts/sops"
       - "${HOME}/.gitconfig:/home/root/.gitconfig:ro"
-      - lds_fpm_pools:/etc/share/vhosts/fpm
-      - ../../logs:/global/log:ro
       - ../../configuration/ssl:/etc/share/certs
+      - ../../logs:/global/log:ro
+      - /var/run/docker.sock:/var/run/docker.sock
     networks:
       frontend:
         ipv4_address: 172.28.0.13
@@ -76,8 +76,8 @@ services:
       - MP_SMTP_REQUIRE_STARTTLS=true
       - MP_SMTP_AUTH_ACCEPT_ANY=1
     volumes:
-      - ../../data/mailpit:/data
       - lds_ssl_keys:/certs:ro
+      - lds_mail:/data
     depends_on:
       - server-tools
     networks:

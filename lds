@@ -18,25 +18,9 @@ BLUE="${BLUE:-}"; MAGENTA="${MAGENTA:-}"; NC="${NC:-}"
 die() {
   printf "%bError:%b %s
 " "${RED:-}" "${NC:-}" "$*" >&2
-
-    printf "
-%bDisk:%b
-" "${CYAN:-}" "${NC:-}" >&2
-    _status_show_disk 2>/dev/null || true
-
-    printf "
-%bVolumes:%b
-" "${CYAN:-}" "${NC:-}" >&2
-    _status_show_volumes 2>/dev/null || true
-
-    printf "
-%bChecks:%b
-" "${CYAN:-}" "${NC:-}" >&2
-    _status_checks 2>/dev/null || true
-
   exit 1
 }
-
+LDS_STATUS_PROBE=1
 ###############################################################################
 # Command presence + tool proxy rules
 # - Host-only commands MUST exist on host (e.g. docker)
@@ -1544,6 +1528,360 @@ _status_show_stats() {
   fi
 }
 
+
+# Internal: list container IDs for current compose project
+_status_project_cids() {
+  docker_compose ps -q 2>/dev/null | sed '/^[[:space:]]*$/d' || true
+}
+
+# Internal: list container names (compose ps) optionally including stopped
+_status_project_names() {
+  docker_compose ps -a --format '{{.Name}}' 2>/dev/null | sed '/^[[:space:]]*$/d' || true
+}
+
+# 1) Problems: unhealthy/restarting/exited + restart count + last exit
+_status_show_problems() {
+  local -a cids=()
+  mapfile -t cids < <(_status_project_cids)
+  if (( ${#cids[@]} == 0 )); then
+    printf "(none)\n"
+    return 0
+  fi
+
+  local -a rows=()
+  mapfile -t rows < <(
+    docker inspect -f '{{.Name}}\t{{.State.Status}}\t{{if .State.Health}}{{.State.Health.Status}}{{end}}\t{{.RestartCount}}\t{{.State.ExitCode}}\t{{.State.FinishedAt}}' \
+      "${cids[@]}" 2>/dev/null | sed 's#^/##'
+  )
+
+  local printed=0
+  local w=4
+  local line name st health rest exitc fin
+  for line in "${rows[@]}"; do
+    IFS=$'\t' read -r name st health rest exitc fin <<<"$line"
+    ((${#name} > w)) && w=${#name}
+  done
+  (( w > 34 )) && w=34
+
+  printf "  %b%-*s%b  %b%-10s%b  %b%-10s%b  %b%-7s%b  %b%s%b\n" \
+    "$BOLD" "$w" "NAME" "$NC" \
+    "$BOLD" "STATE" "$NC" \
+    "$BOLD" "HEALTH" "$NC" \
+    "$BOLD" "RESTART" "$NC" \
+    "$BOLD" "LAST_EXIT" "$NC"
+
+  for line in "${rows[@]}"; do
+    IFS=$'\t' read -r name st health rest exitc fin <<<"$line"
+    local bad=0
+    [[ "$st" != "running" ]] && bad=1
+    [[ "$health" == "unhealthy" ]] && bad=1
+    [[ "$st" == "restarting" ]] && bad=1
+
+    (( bad )) || continue
+
+    local n="$name"; ((${#n} > w)) && n="${n:0:w-1}…"
+    local stc="$(_state_color "$st")"
+    local hc="$(_health_color "$health")"
+    local he="${health:-"-"}"; [[ -z "$he" ]] && he="-"
+    local last="-"
+    if [[ "$st" != "running" || "$exitc" != "0" ]]; then
+      last="code=$exitc"
+    fi
+
+    printf "  %-*s  %b%-10s%b  %b%-10s%b  %-7s  %s\n" \
+      "$w" "$n" \
+      "$stc" "${st:-'-'}" "$NC" \
+      "$hc" "$he" "$NC" \
+      "${rest:-0}" \
+      "$last"
+    printed=1
+  done
+
+  (( printed )) || printf "  (none)\n"
+}
+
+# 2) Top consumers: top-5 by MEM and CPU (from docker stats)
+_status_show_top_consumers() {
+  local -a names=()
+  mapfile -t names < <(_status_project_names)
+  if (( ${#names[@]} == 0 )); then
+    printf "(none)\n"
+    return 0
+  fi
+
+  local stats
+  stats="$(docker stats --no-stream --format '{{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}' "${names[@]}" 2>/dev/null || true)"
+  [[ -n "$stats" ]] || { printf "(no stats)\n"; return 0; }
+
+  _to_bytes() {
+    local v="$1"
+    v="${v//,/}"
+    local num unit
+    num="$(printf '%s' "$v" | awk '{gsub(/[^0-9.]/,""); print}')"
+    unit="$(printf '%s' "$v" | awk '{gsub(/[0-9.]/,""); print}')"
+    awk -v n="$num" -v u="$unit" 'BEGIN{
+      mul=1;
+      if(u=="B"||u=="") mul=1;
+      else if(u=="kB"||u=="KB") mul=1000;
+      else if(u=="MB") mul=1000^2;
+      else if(u=="GB") mul=1000^3;
+      else if(u=="TB") mul=1000^4;
+      else if(u=="KiB") mul=1024;
+      else if(u=="MiB") mul=1024^2;
+      else if(u=="GiB") mul=1024^3;
+      else if(u=="TiB") mul=1024^4;
+      printf "%.0f", (n+0)*mul;
+    }'
+  }
+
+  printf "  %bTop by MEM:%b\n" "$BOLD" "$NC"
+  printf "%s\n" "$stats" | awk -F'\t' '
+    {name=$1; cpu=$2; mem=$3; split(mem,a,"/"); gsub(/^[[:space:]]+|[[:space:]]+$/,"",a[1]); print name "\t" cpu "\t" a[1]}
+  ' | while IFS=$'\t' read -r n cpu mem; do
+      printf "%s\t%s\t%s\t%s\n" "$n" "$cpu" "$mem" "$(_to_bytes "$mem")"
+    done | sort -t$'\t' -k4,4nr | head -n 5 | awk -F'\t' '{printf "    %-16s  CPU=%-7s  MEM=%s\n",$1,$2,$3}'
+
+  printf "  %bTop by CPU:%b\n" "$BOLD" "$NC"
+  printf "%s\n" "$stats" | awk -F'\t' '
+    {name=$1; cpu=$2; gsub(/%/,"",cpu); print name "\t" cpu}
+  ' | sort -t$'\t' -k2,2nr | head -n 5 | awk -F'\t' '{printf "    %-16s  CPU=%s%%\n",$1,$2}'
+}
+
+# 3) Volumes: mounted volumes + size + links + mounted-by
+_status_show_volumes() {
+  local -a cids=()
+  mapfile -t cids < <(_status_project_cids)
+  if (( ${#cids[@]} == 0 )); then
+    printf "(none)\n"
+    return 0
+  fi
+
+  declare -A v2c=()
+  local cid cname v
+  for cid in "${cids[@]}"; do
+    cname="$(docker inspect -f '{{.Name}}' "$cid" 2>/dev/null | sed 's#^/##')"
+    while IFS= read -r v; do
+      [[ -n "$v" ]] || continue
+      if [[ -n "${v2c[$v]+x}" ]]; then
+        v2c["$v"]+=",${cname}"
+      else
+        v2c["$v"]="${cname}"
+      fi
+    done < <(docker inspect -f '{{range .Mounts}}{{if eq .Type "volume"}}{{.Name}}{{"\\n"}}{{end}}{{end}}' "$cid" 2>/dev/null)
+  done
+
+  local -a vols=()
+  mapfile -t vols < <(printf "%s\n" "${!v2c[@]}" | sort)
+
+  if (( ${#vols[@]} == 0 )); then
+    printf "(none)\n"
+    return 0
+  fi
+
+  declare -A vsize=() vlinks=()
+  local df
+  df="$(docker system df -v 2>/dev/null || true)"
+  if [[ -n "$df" ]]; then
+    while read -r name links size _; do
+      [[ -n "$name" && "$name" != "VOLUME" && "$name" != "VOLUME_NAME" ]] || continue
+      [[ -n "$size" && "$size" != "SIZE" ]] || continue
+      vlinks["$name"]="$links"
+      vsize["$name"]="$size"
+    done < <(
+      printf "%s\n" "$df" |
+        awk '
+          /^Local Volumes space usage:/ {inside=1; next}
+          inside && /^[A-Za-z].*usage:$/ {exit}
+          inside && /^[[:space:]]*$/ {next}
+          inside {print}
+        ' | awk 'NR==1{next} {print $1, $2, $3, $4}'
+    )
+  fi
+
+  local -a rows=()
+  mapfile -t rows < <(docker volume inspect -f '{{.Name}}\t{{.Driver}}' "${vols[@]}" 2>/dev/null)
+
+  local w_name=6 w_drv=6
+  local line name drv
+  for line in "${rows[@]}"; do
+    IFS=$'\t' read -r name drv <<<"$line"
+    ((${#name} > w_name)) && w_name=${#name}
+    ((${#drv}  > w_drv))  && w_drv=${#drv}
+  done
+  (( w_name > 36 )) && w_name=36
+  (( w_drv  > 12 )) && w_drv=12
+
+  printf "  %b%-*s%b  %b%-*s%b  %b%-8s%b  %b%-6s%b  %b%s%b\n" \
+    "$BOLD" "$w_name" "VOLUME" "$NC" \
+    "$BOLD" "$w_drv"  "DRIVER" "$NC" \
+    "$BOLD" "SIZE" "$NC" \
+    "$BOLD" "LINKS" "$NC" \
+    "$BOLD" "MOUNTED_BY" "$NC"
+
+  local any_size=0
+  for line in "${rows[@]}"; do
+    IFS=$'\t' read -r name drv <<<"$line"
+
+    local sz="${vsize[$name]:--}"
+    local lk="${vlinks[$name]:--}"
+    [[ "$sz" != "-" ]] && any_size=1
+
+    local mb="${v2c[$name]:-}"
+    local shown="$mb" extra=""
+    local cnt
+    cnt="$(printf '%s' "$mb" | awk -F',' '{print NF}')"
+    if (( cnt > 3 )); then
+      shown="$(printf '%s' "$mb" | awk -F',' '{print $1","$2","$3}')"
+      extra=",…(+${cnt}-3)"
+      extra=",…(+$(($cnt-3)))"
+    fi
+
+    local n="$name"; ((${#n} > w_name)) && n="${n:0:w_name-1}…"
+    local d="$drv";  ((${#d} > w_drv))  && d="${d:0:w_drv-1}…"
+
+    printf "  %-*s  %-*s  %-8s  %-6s  %s%s\n" \
+      "$w_name" "$n" "$w_drv" "${d:-'-'}" "$sz" "$lk" "$shown" "$extra"
+  done
+
+  (( any_size )) || printf "\n  %bNote:%b volume sizes unavailable (docker system df -v did not provide volume table)\n" "$YELLOW" "$NC"
+}
+
+# 4) Networks + IPs
+_status_show_networks() {
+  local project; project="$(lds_project)"
+
+  printf "  %bNetworks:%b\n" "$BOLD" "$NC"
+  docker network ls --filter "label=com.docker.compose.project=$project" --format '    {{.Name}}' 2>/dev/null || printf "    (none)\n"
+
+  local -a cids=()
+  mapfile -t cids < <(_status_project_cids)
+  if (( ${#cids[@]} == 0 )); then
+    return 0
+  fi
+
+  printf "  %bContainer IPs:%b\n" "$BOLD" "$NC"
+  local out
+  out="$(docker inspect -f '{{.Name}}\t{{range $k,$v := .NetworkSettings.Networks}}{{$k}}\t{{$v.IPAddress}}{{"\\n"}}{{end}}' "${cids[@]}" 2>/dev/null | sed 's#^/##' || true)"
+  if [[ -z "$out" ]]; then
+    printf "    (none)\n"
+    return 0
+  fi
+  printf "%s\n" "$out" | awk -F'\t' 'NF>=3{printf "    %-18s  %-22s  %s\n",$1,$2,$3}'
+}
+
+# 5) Optional endpoint probes (gated)
+_status_show_probes() {
+  ((${LDS_STATUS_PROBE:-0})) || { printf "(disabled; set LDS_STATUS_PROBE=1)\n"; return 0; }
+  if ! has_tool curl; then
+    printf "(curl missing)\n"
+    return 0
+  fi
+
+  local -a urls=()
+  mapfile -t urls < <(_status_urls 2>/dev/null || true)
+
+  if (( ${#urls[@]} == 0 )); then
+    printf "(no urls)\n"
+    return 0
+  fi
+
+  local u host code t
+  for u in "${urls[@]}"; do
+    host="${u#https://}"
+    code="$(curl -ksS --max-time 2 --resolve "${host}:443:127.0.0.1" -o /dev/null -w '%{http_code}' "$u" 2>/dev/null || echo 000)"
+    t="$(curl -ksS --max-time 2 --resolve "${host}:443:127.0.0.1" -o /dev/null -w '%{time_total}' "$u" 2>/dev/null || echo 0)"
+    printf "  %-32s  %s  %ss\n" "$host" "$code" "$t"
+  done
+}
+
+# 6) Recent errors for problematic containers (tail logs)
+_status_show_recent_errors() {
+  local -a cids=()
+  mapfile -t cids < <(_status_project_cids)
+  (( ${#cids[@]} )) || { printf "(none)\n"; return 0; }
+
+  local -a bad=()
+  local cid st health
+  for cid in "${cids[@]}"; do
+    st="$(docker inspect -f '{{.State.Status}}' "$cid" 2>/dev/null || true)"
+    health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$cid" 2>/dev/null || true)"
+    if [[ "$st" != "running" || "$health" == "unhealthy" || "$st" == "restarting" ]]; then
+      bad+=("$cid")
+    fi
+  done
+
+  if (( ${#bad[@]} == 0 )); then
+    printf "(none)\n"
+    return 0
+  fi
+
+  local cid name
+  for cid in "${bad[@]}"; do
+    name="$(docker inspect -f '{{.Name}}' "$cid" 2>/dev/null | sed 's#^/##')"
+    printf "  %b%s%b\n" "$BOLD" "$name" "$NC"
+    docker logs --tail 6 "$cid" 2>&1 | sed 's/^/    /' || true
+  done
+}
+
+# 7) Drift / hygiene checks
+_status_show_drift() {
+  local project; project="$(lds_project)"
+
+  local -a compose_names=()
+  mapfile -t compose_names < <(docker_compose ps -a --format '{{.Name}}' 2>/dev/null | sed '/^[[:space:]]*$/d' || true)
+
+  declare -A have=()
+  local n
+  for n in "${compose_names[@]}"; do have["$n"]=1; done
+
+  local -a labeled=()
+  mapfile -t labeled < <(docker ps -a --filter "label=com.docker.compose.project=$project" --format '{{.Names}}' 2>/dev/null | sed '/^[[:space:]]*$/d' || true)
+
+  local -a orphans=()
+  for n in "${labeled[@]}"; do
+    [[ -n "${have[$n]+x}" ]] || orphans+=("$n")
+  done
+
+  if (( ${#orphans[@]} )); then
+    printf "  %bOrphan containers:%b %s\n" "$YELLOW" "$NC" "${orphans[*]}"
+  else
+    printf "  %bOrphan containers:%b (none)\n" "$GREEN" "$NC"
+  fi
+
+  local -a v_lab=() v_mnt=()
+  mapfile -t v_lab < <(docker volume ls -q --filter "label=com.docker.compose.project=$project" 2>/dev/null | sed '/^[[:space:]]*$/d' || true)
+
+  local -a cids=()
+  mapfile -t cids < <(_status_project_cids)
+  if (( ${#cids[@]} )); then
+    mapfile -t v_mnt < <(
+      docker inspect -f '{{range .Mounts}}{{if eq .Type "volume"}}{{.Name}}{{"\\n"}}{{end}}{{end}}' "${cids[@]}" 2>/dev/null \
+        | sed '/^[[:space:]]*$/d' | awk '!seen[$0]++'
+    )
+  fi
+  declare -A m=()
+  for n in "${v_mnt[@]}"; do m["$n"]=1; done
+
+  local -a unused=()
+  for n in "${v_lab[@]}"; do
+    [[ -n "${m[$n]+x}" ]] || unused+=("$n")
+  done
+
+  if (( ${#v_lab[@]} == 0 )); then
+    printf "  %bLabeled volumes:%b (none)\n" "$DIM" "$NC"
+  elif (( ${#unused[@]} )); then
+    printf "  %bUnused labeled volumes:%b %s\n" "$YELLOW" "$NC" "${unused[*]}"
+  else
+    printf "  %bUnused labeled volumes:%b (none)\n" "$GREEN" "$NC"
+  fi
+
+  local reclaim
+  reclaim="$(docker system df 2>/dev/null | awk '/Build Cache/ {print $NF}' || true)"
+  if [[ -n "$reclaim" && "$reclaim" != "0B" ]]; then
+    printf "  %bHint:%b docker builder prune can reclaim build cache\n" "$DIM" "$NC"
+  fi
+}
+
 # Internal: compact checks for `status` (2 groups: System + Project)
 _status_checks() {
   _has() { has_cmd "$1"; }
@@ -1997,16 +2335,54 @@ cmd_status() {
     return 0
   fi
 
-  printf "\n%bStats:%b\n" "$CYAN" "$NC"
+  printf "
+%bProblems:%b
+" "$CYAN" "$NC"
+  _status_show_problems || true
+
+  printf "
+%bTop consumers:%b
+" "$CYAN" "$NC"
+  _status_show_top_consumers || true
+
+  printf "
+%bStats:%b
+" "$CYAN" "$NC"
   _status_show_stats "${1:-}" || true
 
-  printf "\n%bDisk:%b\n" "$CYAN" "$NC"
+  printf "
+%bDisk:%b
+" "$CYAN" "$NC"
   _status_show_disk || true
 
-  printf "\n%bVolumes:%b\n" "$CYAN" "$NC"
+  printf "
+%bVolumes:%b
+" "$CYAN" "$NC"
   _status_show_volumes || true
 
-  printf "\n%bChecks:%b\n" "$CYAN" "$NC"
+  printf "
+%bNetworks:%b
+" "$CYAN" "$NC"
+  _status_show_networks || true
+
+  printf "
+%bProbes:%b
+" "$CYAN" "$NC"
+  _status_show_probes || true
+
+  printf "
+%bRecent errors:%b
+" "$CYAN" "$NC"
+  _status_show_recent_errors || true
+
+  printf "
+%bDrift:%b
+" "$CYAN" "$NC"
+  _status_show_drift || true
+
+  printf "
+%bChecks:%b
+" "$CYAN" "$NC"
   _status_checks || true
 }
 # ─────────────────────────────────────────────────────────────────────────────

@@ -10,12 +10,12 @@ services:
       - "${HTTP_PORT:-80}:80"
       - "${HTTPS_PORT:-443}:443"
     volumes:
-      - ../../logs/nginx:/var/log/nginx
+      - "${PROJECT_DIR:-./../../../application}:/app"
       - lds_nginx_host:/etc/nginx/conf.d:ro
       - lds_ssl_keys:/etc/mkcert:ro
       - lds_ssl_roots:/etc/share/rootCA:ro
-      - "${PROJECT_DIR:-./../../../application}:/app"
       - lds_fpm_sock:/run/php-fpm:ro
+      - ../../logs/nginx:/var/log/nginx
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
@@ -34,12 +34,12 @@ services:
     environment:
       - TZ=${TZ:-}
     volumes:
-      - lds_ssl_keys:/etc/mkcert:ro
-      - lds_apache_host:/usr/local/apache2/conf/extra:ro
-      - ../../logs/apache:/var/log/apache2
-      - lds_ssl_roots:/etc/share/rootCA:ro
       - "${PROJECT_DIR:-./../../../application}:/app"
+      - lds_ssl_keys:/etc/mkcert:ro
+      - lds_apache_host:/usr/local/apache2/conf/vhosts:ro
+      - lds_ssl_roots:/etc/share/rootCA:ro
       - lds_fpm_sock:/run/php-fpm:ro
+      - ../../logs/apache:/var/log/apache2
     depends_on:
       - nginx
     networks:
