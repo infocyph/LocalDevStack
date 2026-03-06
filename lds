@@ -588,7 +588,7 @@ fix_perms() {
 # 3. DOMAIN / PROFILE INTEGRATION
 ###############################################################################
 mkhost() { docker exec SERVER_TOOLS mkhost "$@"; }
-delhost() { docker exec SERVER_TOOLS delhost "$@"; }
+rmhost() { docker exec SERVER_TOOLS rmhost "$@"; }
 
 setup_domain() {
   mkhost --RESET
@@ -606,13 +606,50 @@ setup_domain() {
 }
 
 delete_domain() {
+  rmhost --RESET
 
-  local domain="${1:-}"
-  [[ -n "$domain" ]] || die "Usage: lds delhost <domain>"
+  # interactive delete
+  docker exec -it SERVER_TOOLS rmhost "$@"
 
-  delhost "$domain"
-  delhost --RESET >/dev/null 2>&1 || true
+  local php_cont apache_cont node_cont
+  php_cont=$(rmhost --DELETE_PHP_PROFILE || true)
+  apache_cont=$(rmhost --APACHE_DELETE || true)
+  node_cont=$(rmhost --DELETE_NODE_PROFILE || true)
 
+  # helper: stop+remove containers by a comma-separated list of exact names
+  _rm_containers_csv() {
+    local csv="$1"
+    [[ -n "$csv" ]] || return 0
+    local IFS=',' name
+    for name in $csv; do
+      name="$(echo "$name" | xargs)"
+      [[ -n "$name" ]] || continue
+      docker rm -f "$name" >/dev/null 2>&1 || true
+    done
+  }
+
+  # Stop/remove containers immediately (exact names from rmhost)
+  _rm_containers_csv "$php_cont"
+  _rm_containers_csv "$apache_cont"
+  _rm_containers_csv "$node_cont"
+
+  # Remove profiles (if your modify_profiles expects profile keys, keep using what rmhost returns for profiles;
+  # if rmhost also returns exact profile names here, this is fine too.)
+  if [[ -n "$php_cont" ]]; then
+    local IFS=',' p
+    for p in $php_cont; do p="$(echo "$p" | xargs)"; [[ -n "$p" ]] && modify_profiles remove "$p"; done
+  fi
+  if [[ -n "$apache_cont" ]]; then
+    local IFS=',' p
+    for p in $apache_cont; do p="$(echo "$p" | xargs)"; [[ -n "$p" ]] && modify_profiles remove "$p"; done
+  fi
+  if [[ -n "$node_cont" ]]; then
+    local IFS=',' p
+    for p in $node_cont; do p="$(echo "$p" | xargs)"; [[ -n "$p" ]] && modify_profiles remove "$p"; done
+  fi
+
+  rmhost --RESET
+  dc_up -d
   http_reload
 }
 
@@ -2585,8 +2622,7 @@ cmd_host() {
       setup_domain
       ;;
     rm|remove|del|delete)
-      local dom="${1:-}"; [[ -n "$dom" ]] || die "host rm <domain>"
-      delete_domain "$dom"
+      delete_domain "$@"
       ;;
     list)
       shopt -s nullglob
