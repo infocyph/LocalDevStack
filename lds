@@ -589,6 +589,49 @@ fix_perms() {
 ###############################################################################
 mkhost() { docker exec SERVER_TOOLS mkhost "$@"; }
 rmhost() { docker exec SERVER_TOOLS rmhost "$@"; }
+php_reload_or_restart_project() {
+  local project; project="$(lds_project)"
+  [[ -n "$project" ]] || return 0
+
+  local -a php_names=()
+  mapfile -t php_names < <(
+    docker ps --format '{{.Names}}\t{{.Label "com.docker.compose.project"}}' 2>/dev/null \
+      | awk -F'\t' -v pr="$project" '$2==pr && $1 ~ /^PHP_/ {print $1}'
+  )
+  ((${#php_names[@]})) || return 0
+
+  local name
+  for name in "${php_names[@]}"; do
+    if docker exec "$name" sh -lc '
+      set -e
+
+      # 1) config test (safe to skip if not supported)
+      if command -v php-fpm >/dev/null 2>&1; then
+        php-fpm -tt >/dev/null 2>&1 || exit 2
+      fi
+
+      # 2) find master pid
+      pid=""
+      for f in /var/run/php-fpm.pid /run/php-fpm/php-fpm.pid /run/php-fpm.pid; do
+        if [ -s "$f" ]; then pid="$(cat "$f" 2>/dev/null || true)"; break; fi
+      done
+
+      if [ -z "$pid" ] && command -v ps >/dev/null 2>&1; then
+        # busybox ps output; pick "php-fpm: master" line if present
+        pid="$(ps 2>/dev/null | awk "/php-fpm: master/ {print \$1; exit}")"
+      fi
+
+      # common case: php-fpm is PID 1 in the container
+      [ -n "$pid" ] || pid="1"
+
+      kill -USR2 "$pid" >/dev/null 2>&1
+    ' >/dev/null 2>&1; then
+      : # reloaded OK
+    else
+      docker restart "$name" >/dev/null 2>&1 || true
+    fi
+  done
+}
 
 setup_domain() {
   mkhost --RESET
@@ -601,6 +644,7 @@ setup_domain() {
   [[ -n $svr_prof ]] && modify_profiles add "$svr_prof"
   [[ -n $node_prof ]] && modify_profiles add "$node_prof"
   mkhost --RESET
+  php_reload_or_restart_project
   dc_up -d
   http_reload
 }
@@ -649,6 +693,7 @@ delete_domain() {
   fi
 
   rmhost --RESET
+  php_reload_or_restart_project
   dc_up -d
   http_reload
 }
