@@ -1,0 +1,434 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." 2>/dev/null && pwd || pwd)"
+ENV_FILE="$REPO_ROOT/.env"
+
+SERVICE="${ELASTICSEARCH_SERVICE:-ELASTICSEARCH}"
+ES_SCHEME="${ELASTICSEARCH_SCHEME:-http}"
+ES_HOST="${ELASTICSEARCH_HOST:-127.0.0.1}"
+ES_PORT="${ELASTICSEARCH_PORT:-9200}"
+ES_USER="${ELASTICSEARCH_USERNAME:-${ES_USERNAME:-}}"
+ES_PASS="${ELASTICSEARCH_PASSWORD:-${ES_PASSWORD:-}}"
+ES_API_KEY="${ELASTICSEARCH_API_KEY:-${ES_API_KEY:-}}"
+ES_INSECURE="${ELASTICSEARCH_INSECURE:-0}"
+
+is_msys() {
+  case "${OSTYPE:-}" in
+    msys*|cygwin*|win32*) return 0 ;;
+  esac
+  return 1
+}
+
+load_env_file() {
+  [[ -f "$ENV_FILE" ]] || return 0
+
+  local key raw value
+  while IFS= read -r raw || [[ -n "$raw" ]]; do
+    raw="${raw%$'\r'}"
+    [[ -z "$raw" || "$raw" =~ ^[[:space:]]*# ]] && continue
+    raw="${raw#export }"
+    [[ "$raw" == *=* ]] || continue
+
+    key="${raw%%=*}"
+    value="${raw#*=}"
+
+    key="${key##[[:space:]]}"
+    key="${key%%[[:space:]]}"
+    [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+
+    if [[ "$value" =~ ^\".*\"$ || "$value" =~ ^\'.*\'$ ]]; then
+      value="${value:1:${#value}-2}"
+    fi
+
+    case "$key" in
+      ELASTICSEARCH_SERVICE) [[ -z "${ELASTICSEARCH_SERVICE:-}" ]] && SERVICE="$value" ;;
+      ELASTICSEARCH_SCHEME)  [[ -z "${ELASTICSEARCH_SCHEME:-}"  ]] && ES_SCHEME="$value" ;;
+      ELASTICSEARCH_HOST)    [[ -z "${ELASTICSEARCH_HOST:-}"    ]] && ES_HOST="$value" ;;
+      ELASTICSEARCH_PORT)    [[ -z "${ELASTICSEARCH_PORT:-}"    ]] && ES_PORT="$value" ;;
+      ELASTICSEARCH_USERNAME|ES_USERNAME) [[ -z "$ES_USER" ]] && ES_USER="$value" ;;
+      ELASTICSEARCH_PASSWORD|ES_PASSWORD) [[ -z "$ES_PASS" ]] && ES_PASS="$value" ;;
+      ELASTICSEARCH_API_KEY|ES_API_KEY)   [[ -z "$ES_API_KEY" ]] && ES_API_KEY="$value" ;;
+      ELASTICSEARCH_INSECURE) [[ -z "${ELASTICSEARCH_INSECURE:-}" ]] && ES_INSECURE="$value" ;;
+    esac
+  done < "$ENV_FILE"
+}
+
+container_env() {
+  local name="$1"
+  docker inspect -f "{{range .Config.Env}}{{println .}}{{end}}" "$SERVICE" 2>/dev/null \
+    | awk -F= -v key="$name" '$1==key { sub(/^[^=]*=/, ""); print; exit }'
+}
+
+container_running() {
+  docker inspect -f '{{.State.Running}}' "$SERVICE" 2>/dev/null | grep -qi '^true$'
+}
+
+require_service() {
+  if ! container_running; then
+    echo "Error: $SERVICE is not running." >&2
+    exit 1
+  fi
+}
+
+resolve_container_defaults() {
+  local v
+
+  v="$(container_env ELASTICSEARCH_USERNAME || true)"
+  [[ -n "$v" && -z "$ES_USER" ]] && ES_USER="$v"
+
+  v="$(container_env ELASTICSEARCH_PASSWORD || true)"
+  [[ -n "$v" && -z "$ES_PASS" ]] && ES_PASS="$v"
+
+  v="$(container_env ES_USERNAME || true)"
+  [[ -n "$v" && -z "$ES_USER" ]] && ES_USER="$v"
+
+  v="$(container_env ES_PASSWORD || true)"
+  [[ -n "$v" && -z "$ES_PASS" ]] && ES_PASS="$v"
+
+  v="$(container_env ELASTICSEARCH_API_KEY || true)"
+  [[ -n "$v" && -z "$ES_API_KEY" ]] && ES_API_KEY="$v"
+
+  v="$(container_env ES_API_KEY || true)"
+  [[ -n "$v" && -z "$ES_API_KEY" ]] && ES_API_KEY="$v"
+
+  v="$(container_env ELASTICSEARCH_HOST || true)"
+  [[ -n "$v" && -z "${ELASTICSEARCH_HOST:-}" ]] && ES_HOST="$v"
+
+  v="$(container_env ELASTICSEARCH_PORT || true)"
+  [[ -n "$v" && -z "${ELASTICSEARCH_PORT:-}" ]] && ES_PORT="$v"
+}
+
+base_url() {
+  printf '%s://%s:%s' "$ES_SCHEME" "$ES_HOST" "$ES_PORT"
+}
+
+have_stdin() {
+  [[ ! -t 0 ]]
+}
+
+join_by() {
+  local sep="$1"; shift || true
+  local first=1 out=""
+  local s
+  for s in "$@"; do
+    if (( first )); then
+      out="$s"
+      first=0
+    else
+      out+="$sep$s"
+    fi
+  done
+  printf '%s' "$out"
+}
+
+curl_exec() {
+  local method="$1"
+  local path="$2"
+  local data_file="${3:-}"
+  local content_type="${4:-application/json}"
+  shift $(( $# >= 4 ? 4 : $# )) || true
+  local extra=("$@")
+
+  local url
+  if [[ "$path" =~ ^https?:// ]]; then
+    url="$path"
+  else
+    [[ "$path" == /* ]] || path="/$path"
+    url="$(base_url)$path"
+  fi
+
+  local cmd=(docker exec -i "$SERVICE" curl -sS -X "$method" "$url")
+  (( ES_INSECURE )) && cmd+=(--insecure)
+  cmd+=(-H 'Accept: application/json')
+
+  if [[ -n "$ES_API_KEY" ]]; then
+    cmd+=(-H "Authorization: ApiKey $ES_API_KEY")
+  elif [[ -n "$ES_USER" || -n "$ES_PASS" ]]; then
+    cmd+=(-u "${ES_USER}:${ES_PASS}")
+  fi
+
+  if [[ -n "$data_file" ]]; then
+    cmd+=(-H "Content-Type: $content_type" --data-binary "@$data_file")
+  fi
+
+  if ((${#extra[@]})); then
+    cmd+=("${extra[@]}")
+  fi
+
+  "${cmd[@]}"
+}
+
+mktemp_host() {
+  mktemp 2>/dev/null || mktemp -t es
+}
+
+cleanup_files=()
+cleanup() {
+  local f
+  for f in "${cleanup_files[@]:-}"; do
+    [[ -n "$f" && -f "$f" ]] && rm -f -- "$f"
+  done
+}
+trap cleanup EXIT
+
+prepare_body_file() {
+  local src="${1:-}"
+  local tmp
+  tmp="$(mktemp_host)"
+  cleanup_files+=("$tmp")
+
+  if [[ -n "$src" ]]; then
+    if [[ "$src" == @* ]]; then
+      src="${src#@}"
+    fi
+    [[ -f "$src" ]] || { echo "Error: body file not found: $src" >&2; exit 1; }
+    cat -- "$src" > "$tmp"
+  else
+    cat > "$tmp"
+  fi
+
+  printf '%s' "$tmp"
+}
+
+print_usage() {
+  cat <<USAGE
+Usage:
+  es                               # GET /
+  es status                        # GET /
+  es health                        # GET /_cluster/health?pretty
+  es indices                       # GET /_cat/indices?v
+  es aliases                       # GET /_cat/aliases?v
+  es nodes                         # GET /_cat/nodes?v
+  es shards                        # GET /_cat/shards?v
+  es cat <path>                    # GET /_cat/<path>?v
+  es get <path>                    # GET <path>
+  es delete <path>                 # DELETE <path>
+  es head <path>                   # HEAD <path>
+  es post <path> [@file|-]         # POST JSON body
+  es put <path> [@file|-]          # PUT JSON body
+  es bulk [@file|-]                # POST /_bulk (ndjson)
+  es search <index> [@file|-]      # POST /<index>/_search
+  es index <index> [id] [@file|-]  # POST/PUT document
+  es raw <METHOD> <path> [body]    # Generic passthrough
+
+Examples:
+  es health
+  es get /_cluster/settings?pretty
+  es post /my-index/_search @query.json
+  cat bulk.ndjson | es bulk -
+  es index my-index @doc.json
+  es index my-index 42 @doc.json
+USAGE
+}
+
+main() {
+  load_env_file
+  require_service
+  resolve_container_defaults
+
+  local cmd="${1:-status}"
+  [[ $# -gt 0 ]] && shift || true
+
+  case "$cmd" in
+    -h|--help|help)
+      print_usage
+      ;;
+
+    status)
+      curl_exec GET '/?pretty'
+      ;;
+
+    health)
+      curl_exec GET '/_cluster/health?pretty'
+      ;;
+
+    indices)
+      curl_exec GET '/_cat/indices?v'
+      ;;
+
+    aliases)
+      curl_exec GET '/_cat/aliases?v'
+      ;;
+
+    nodes)
+      curl_exec GET '/_cat/nodes?v'
+      ;;
+
+    shards)
+      curl_exec GET '/_cat/shards?v'
+      ;;
+
+    cat)
+      local path="${1:-}"
+      [[ -n "$path" ]] || { echo 'Error: cat requires a path.' >&2; exit 1; }
+      shift || true
+      path="${path#/}"
+      if [[ "$path" == _cat/* ]]; then
+        curl_exec GET "/${path}?v" '' '' "$@"
+      else
+        curl_exec GET "/_cat/${path}?v" '' '' "$@"
+      fi
+      ;;
+
+    get)
+      local path="${1:-/}"
+      shift || true
+      curl_exec GET "$path" '' '' "$@"
+      ;;
+
+    delete)
+      local path="${1:-}"
+      [[ -n "$path" ]] || { echo 'Error: delete requires a path.' >&2; exit 1; }
+      shift || true
+      curl_exec DELETE "$path" '' '' "$@"
+      ;;
+
+    head)
+      local path="${1:-}"
+      [[ -n "$path" ]] || { echo 'Error: head requires a path.' >&2; exit 1; }
+      shift || true
+      curl_exec HEAD "$path" '' '' -I "$@"
+      ;;
+
+    post|put)
+      local method="${cmd^^}"
+      local path="${1:-}"
+      [[ -n "$path" ]] || { echo "Error: $cmd requires a path." >&2; exit 1; }
+      shift || true
+      local body_arg="${1:-}"
+      [[ $# -gt 0 ]] && shift || true
+      local body_file=''
+      if [[ -n "$body_arg" ]]; then
+        if [[ "$body_arg" == '-' ]]; then
+          body_file="$(prepare_body_file)"
+        else
+          body_file="$(prepare_body_file "$body_arg")"
+        fi
+      elif have_stdin; then
+        body_file="$(prepare_body_file)"
+      fi
+      curl_exec "$method" "$path" "$body_file" 'application/json' "$@"
+      ;;
+
+    bulk)
+      local body_arg="${1:-}"
+      [[ $# -gt 0 ]] && shift || true
+      local body_file=''
+      if [[ -n "$body_arg" ]]; then
+        if [[ "$body_arg" == '-' ]]; then
+          body_file="$(prepare_body_file)"
+        else
+          body_file="$(prepare_body_file "$body_arg")"
+        fi
+      elif have_stdin; then
+        body_file="$(prepare_body_file)"
+      else
+        echo 'Error: bulk requires @file or stdin.' >&2
+        exit 1
+      fi
+      curl_exec POST '/_bulk' "$body_file" 'application/x-ndjson' "$@"
+      ;;
+
+    search)
+      local index="${1:-}"
+      [[ -n "$index" ]] || { echo 'Error: search requires an index or path.' >&2; exit 1; }
+      shift || true
+      local body_arg="${1:-}"
+      [[ $# -gt 0 ]] && shift || true
+      local body_file=''
+      if [[ -n "$body_arg" ]]; then
+        if [[ "$body_arg" == '-' ]]; then
+          body_file="$(prepare_body_file)"
+        else
+          body_file="$(prepare_body_file "$body_arg")"
+        fi
+      elif have_stdin; then
+        body_file="$(prepare_body_file)"
+      fi
+      if [[ "$index" == /* ]]; then
+        curl_exec POST "$index" "$body_file" 'application/json' "$@"
+      else
+        curl_exec POST "/${index}/_search" "$body_file" 'application/json' "$@"
+      fi
+      ;;
+
+    index)
+      local index_name="${1:-}"
+      [[ -n "$index_name" ]] || { echo 'Error: index requires an index name.' >&2; exit 1; }
+      shift || true
+      local maybe_id="${1:-}"
+      local id=''
+      local body_arg=''
+
+      if [[ -n "$maybe_id" ]]; then
+        case "$maybe_id" in
+          @*|-)
+            body_arg="$maybe_id"
+            shift || true
+            ;;
+          *)
+            id="$maybe_id"
+            shift || true
+            body_arg="${1:-}"
+            [[ $# -gt 0 ]] && shift || true
+            ;;
+        esac
+      fi
+
+      local body_file=''
+      if [[ -n "$body_arg" ]]; then
+        if [[ "$body_arg" == '-' ]]; then
+          body_file="$(prepare_body_file)"
+        else
+          body_file="$(prepare_body_file "$body_arg")"
+        fi
+      elif have_stdin; then
+        body_file="$(prepare_body_file)"
+      else
+        echo 'Error: index requires a document body via @file or stdin.' >&2
+        exit 1
+      fi
+
+      if [[ -n "$id" ]]; then
+        curl_exec PUT "/${index_name}/_doc/${id}" "$body_file" 'application/json' "$@"
+      else
+        curl_exec POST "/${index_name}/_doc" "$body_file" 'application/json' "$@"
+      fi
+      ;;
+
+    raw)
+      local method="${1:-}"
+      local path="${2:-}"
+      [[ -n "$method" && -n "$path" ]] || { echo 'Error: raw requires METHOD and path.' >&2; exit 1; }
+      shift 2 || true
+      local body_arg="${1:-}"
+      [[ $# -gt 0 ]] && shift || true
+      local body_file=''
+      if [[ -n "$body_arg" ]]; then
+        if [[ "$body_arg" == '-' ]]; then
+          body_file="$(prepare_body_file)"
+        else
+          body_file="$(prepare_body_file "$body_arg")"
+        fi
+      elif have_stdin && [[ ! "$method" =~ ^(GET|HEAD|DELETE|get|head|delete)$ ]]; then
+        body_file="$(prepare_body_file)"
+      fi
+      curl_exec "${method^^}" "$path" "$body_file" 'application/json' "$@"
+      ;;
+
+    *)
+      if [[ "$cmd" == /* || "$cmd" =~ ^_ ]]; then
+        curl_exec GET "$cmd" '' '' "$@"
+      else
+        echo "Error: unknown command: $cmd" >&2
+        echo >&2
+        print_usage >&2
+        exit 1
+      fi
+      ;;
+  esac
+}
+
+main "$@"

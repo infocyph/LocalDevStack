@@ -19,8 +19,8 @@ ENV_FILE="$ROOT_DIR/docker/.env"
 # ─────────────────────────────────────────────────────────────────────────────
 is_msys() {
   case "${OSTYPE:-}" in
-  msys* | cygwin*) return 0 ;;
-  *) return 1 ;;
+    msys*|cygwin*) return 0 ;;
+    *) return 1 ;;
   esac
 }
 
@@ -47,24 +47,26 @@ resolve_mount_root() {
     posix_root="$WORKDIR"
   fi
 
-  if [[ -z "$posix_root" && -n "${WORKDIR_WIN:-}" ]]; then
-    if command -v cygpath >/dev/null 2>&1; then
-      posix_root="$(cygpath -u "$WORKDIR_WIN" 2>/dev/null || true)"
-    fi
+  if [[ -z "$posix_root" && -n "${WORKDIR_WIN:-}" ]] && command -v cygpath >/dev/null 2>&1; then
+    posix_root="$(cygpath -u "$WORKDIR_WIN" 2>/dev/null || true)"
   fi
 
   if [[ -z "$posix_root" && -n "${WORKING_DIR:-}" ]]; then
     if [[ -d "$WORKING_DIR" ]]; then
       posix_root="$WORKING_DIR"
-    else
-      if command -v cygpath >/dev/null 2>&1; then
-        posix_root="$(cygpath -u "$WORKING_DIR" 2>/dev/null || true)"
-      fi
+    elif command -v cygpath >/dev/null 2>&1; then
+      posix_root="$(cygpath -u "$WORKING_DIR" 2>/dev/null || true)"
     fi
   fi
 
   [[ -n "$posix_root" && -d "$posix_root" ]] || posix_root="$PWD"
   posix_root="$(cd "$posix_root" && pwd)"
+
+  # Git Bash can sometimes resolve to a synthetic workspace under Program Files/Git.
+  # Prefer the repository root in that case to avoid invalid Docker Desktop mounts.
+  if is_msys && [[ "$posix_root" == *"/Program Files/Git/workspace"* || "$posix_root" == *"/Program Files/Git/workspace/"* ]]; then
+    posix_root="$ROOT_DIR"
+  fi
 
   if is_msys && command -v cygpath >/dev/null 2>&1; then
     host_path="$(cygpath -w "$posix_root")"
@@ -79,21 +81,27 @@ resolve_mount_root() {
 # ─────────────────────────────────────────────────────────────────────────────
 # Optional host .env load (whitelist only; optional fallback)
 # ─────────────────────────────────────────────────────────────────────────────
+load_env_value() {
+  local raw="${1:-}"
+  raw="${raw%$'\r'}"
+  raw="${raw#\"}"
+  raw="${raw%\"}"
+  raw="${raw#\'}"
+  raw="${raw%\'}"
+  printf '%s' "$raw"
+}
+
 if [[ -r "$ENV_FILE" ]]; then
   while IFS='=' read -r k v; do
     [[ -z "${k:-}" || "$k" =~ ^[[:space:]]*# ]] && continue
     k="${k//[[:space:]]/}"
     case "$k" in
-    POSTGRESQL_CONTAINER | POSTGRES_CONTAINER | POSTGRES_PORT_IN | WORKING_DIR) ;;
-    *) continue ;;
+      POSTGRESQL_CONTAINER|POSTGRES_CONTAINER|POSTGRES_PORT_IN|WORKING_DIR|WORKDIR|WORKDIR_WIN) ;;
+      *) continue ;;
     esac
-    v="${v%$'\r'}"
-    v="${v#\"}"
-    v="${v%\"}"
-    v="${v#\'}"
-    v="${v%\'}"
+    v="$(load_env_value "${v:-}")"
     export "$k=$v"
-  done <"$ENV_FILE"
+  done < "$ENV_FILE"
 fi
 
 SERVICE="${POSTGRESQL_CONTAINER:-${POSTGRES_CONTAINER:-POSTGRESQL}}"
@@ -223,14 +231,29 @@ NOTES:
 TXT
 }
 
-case "${1:-}" in help | -h | --help)
-  usage
-  exit 0
-  ;;
+case "${1:-}" in
+  help|-h|--help)
+    usage
+    exit 0
+    ;;
 esac
 
-require_container() { docker inspect "$SERVICE" >/dev/null 2>&1 || die "container '$SERVICE' is not running."; }
-is_tty() { [[ -t 0 ]] && echo "-it" || echo "-i"; }
+require_container() {
+  docker inspect "$SERVICE" >/dev/null 2>&1 || die "container '$SERVICE' does not exist."
+  local running
+  running="$(docker inspect -f '{{.State.Running}}' "$SERVICE" 2>/dev/null || true)"
+  [[ "$running" == "true" ]] || die "container '$SERVICE' is not running."
+}
+
+is_tty() { [[ -t 0 && -t 1 ]]; }
+
+docker_tty_flags() {
+  if is_tty; then
+    printf '%s\n' '-it'
+  else
+    printf '%s\n' '-i'
+  fi
+}
 
 # POSIX-safe env read from container
 cenv() {
@@ -242,10 +265,10 @@ cenv_any() {
   local v key
   for key in "$@"; do
     v="$(cenv "$key")"
-    [[ -n "${v:-}" ]] && {
-      printf "%s" "$v"
+    if [[ -n "${v:-}" ]]; then
+      printf '%s' "$v"
       return 0
-    }
+    fi
   done
   return 1
 }
@@ -256,13 +279,19 @@ infer_port() {
   POSTGRES_PORT_IN="${POSTGRES_PORT_IN:-5432}"
 }
 
-pg_image() { docker inspect -f '{{.Config.Image}}' "$SERVICE" 2>/dev/null || die "failed to inspect image for '$SERVICE'."; }
+pg_image() {
+  docker inspect -f '{{.Config.Image}}' "$SERVICE" 2>/dev/null || die "failed to inspect image for '$SERVICE'."
+}
 
 run_pg_mount() {
   local image="$1"
   shift
   local flags=()
-  [[ -t 0 ]] && flags+=(-it) || flags+=(-i)
+  if is_tty; then
+    flags=(-it)
+  else
+    flags=(-i)
+  fi
   msys_no_pathconv
   docker run --rm "${flags[@]}" \
     -v "$MOUNT_HOST_PATH":/workspace -w /workspace \
@@ -271,43 +300,58 @@ run_pg_mount() {
 }
 
 # file -> /workspace/<rel> if under mount root; else empty
+file_abs_path() {
+  local file="$1"
+  cd "$(dirname "$file")" && printf '%s/%s' "$PWD" "$(basename "$file")"
+}
+
 to_workspace_path_under_mount() {
   local file="$1"
   [[ -f "$file" ]] || return 1
   local abs rel=""
-  abs="$(cd "$(dirname "$file")" && pwd)/$(basename "$file")"
+  abs="$(file_abs_path "$file")"
 
   if command -v python3 >/dev/null 2>&1; then
-    rel="$(
-      python3 - "$MOUNT_POSIX_ROOT" "$abs" <<'PY' 2>/dev/null || true
+    rel="$(python3 - "$MOUNT_POSIX_ROOT" "$abs" <<'PY' 2>/dev/null || true
 import os,sys
-root=sys.argv[1]; p=sys.argv[2]
+root=sys.argv[1]
+p=sys.argv[2]
 try:
-  r=os.path.relpath(p,root)
-  if r and not r.startswith("..") and not os.path.isabs(r):
-    print(r)
+    r=os.path.relpath(p, root)
+    if r and not r.startswith('..') and not os.path.isabs(r):
+        print(r)
 except Exception:
-  pass
+    pass
 PY
-    )"
+)"
   else
     case "$abs/" in
-    "$MOUNT_POSIX_ROOT"/*) rel="${abs#"$MOUNT_POSIX_ROOT/"}" ;;
-    *) rel="" ;;
+      "$MOUNT_POSIX_ROOT"/*) rel="${abs#"$MOUNT_POSIX_ROOT/"}" ;;
+      *) rel="" ;;
     esac
   fi
 
   [[ -n "$rel" ]] || return 1
-  printf "/workspace/%s" "$rel"
+  printf '/workspace/%s' "$rel"
 }
 
 psql_exec() {
-  local flags
-  flags="$(is_tty)"
   local db="$1" user="$2" pass="$3"
   shift 3
-  exec docker exec $flags -e "PGPASSWORD=$pass" "$SERVICE" \
-    psql -h127.0.0.1 -p"$POSTGRES_PORT_IN" -U"$user" ${db:+-d "$db"} "$@"
+
+  local docker_flags=()
+  if is_tty; then
+    docker_flags=(-it)
+  else
+    docker_flags=(-i)
+  fi
+
+  local psql_args=(-h127.0.0.1 -p"$POSTGRES_PORT_IN" -U"$user")
+  [[ -n "$db" ]] && psql_args+=(-d "$db")
+  psql_args+=("$@")
+
+  exec docker exec "${docker_flags[@]}" -e "PGPASSWORD=$pass" "$SERVICE" \
+    psql "${psql_args[@]}"
 }
 
 is_safe_ident() { [[ "$1" =~ ^[A-Za-z0-9_]+$ ]]; }
@@ -356,7 +400,7 @@ main() {
   resolve_mount_root
   msys_no_pathconv
 
-  # Your container env names:
+  # Container env names:
   # POSTGRES_PORT, POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DATABASE
   local PGUSER PGPASS PGDB IMAGE
   PGUSER="$(cenv_any POSTGRES_USER PGUSER || true)"
@@ -380,243 +424,241 @@ main() {
   fi
 
   case "${1:-}" in
-  status)
-    docker ps --filter "name=^/${SERVICE}$" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
-    exit 0
-    ;;
+    status)
+      docker ps -a --filter "name=^/${SERVICE}$" --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
+      exit 0
+      ;;
   esac
 
   local cmd="${1:-}"
   case "$cmd" in
-  dbs)
-    psql_exec "${PGDB:-postgres}" "$PGUSER" "$PGPASS" -v ON_ERROR_STOP=1 -c '\l'
-    ;;
+    dbs)
+      psql_exec "${PGDB:-postgres}" "$PGUSER" "$PGPASS" -v ON_ERROR_STOP=1 -c '\l'
+      ;;
 
-  tables)
-    shift
-    local db="${1:-$PGDB}"
-    [[ -n "$db" ]] || die "tables requires a db name (or set POSTGRES_DATABASE)."
-    psql_exec "$db" "$PGUSER" "$PGPASS" -v ON_ERROR_STOP=1 -c '\dt *.*'
-    ;;
+    tables)
+      shift
+      local db="${1:-$PGDB}"
+      [[ -n "$db" ]] || die "tables requires a db name (or set POSTGRES_DATABASE)."
+      psql_exec "$db" "$PGUSER" "$PGPASS" -v ON_ERROR_STOP=1 -c '\dt *.*'
+      ;;
 
-  create-db)
-    shift
-    local db="${1:-$PGDB}"
-    [[ -n "$db" ]] || die "create-db requires a db name."
-    ensure_db "$db" "$PGUSER" "$PGPASS"
-    ;;
+    create-db)
+      shift
+      local db="${1:-$PGDB}"
+      [[ -n "$db" ]] || die "create-db requires a db name."
+      ensure_db "$db" "$PGUSER" "$PGPASS"
+      ;;
 
-  drop-db)
-    shift
-    local db="${1:-}"
-    [[ -n "$db" ]] || die "drop-db requires a db name."
-    drop_db "$db" "$PGUSER" "$PGPASS"
-    ;;
+    drop-db)
+      shift
+      local db="${1:-}"
+      [[ -n "$db" ]] || die "drop-db requires a db name."
+      drop_db "$db" "$PGUSER" "$PGPASS"
+      ;;
 
-  import)
-    shift
-    local in="${1:-}"
-    shift || true
-    [[ -n "$in" ]] || die "import requires <file.sql|file.sql.gz|NAME>."
+    import)
+      shift
+      local in="${1:-}"
+      shift || true
+      [[ -n "$in" ]] || die "import requires <file.sql|file.sql.gz|NAME>."
 
-    local file="$in"
-    local db="${1:-}"
+      local file="$in"
+      local db="${1:-}"
 
-    # shorthand: "import reporting_db" -> ./reporting_db.sql(.gz), db defaults to reporting_db
-    if [[ ! -f "$file" ]]; then
-      if [[ -f "./${in}.sql" ]]; then
-        file="./${in}.sql"
-        [[ -n "${db:-}" ]] || db="$in"
-      elif [[ -f "./${in}.sql.gz" ]]; then
-        file="./${in}.sql.gz"
-        [[ -n "${db:-}" ]] || db="$in"
+      if [[ ! -f "$file" ]]; then
+        if [[ -f "./${in}.sql" ]]; then
+          file="./${in}.sql"
+          [[ -n "${db:-}" ]] || db="$in"
+        elif [[ -f "./${in}.sql.gz" ]]; then
+          file="./${in}.sql.gz"
+          [[ -n "${db:-}" ]] || db="$in"
+        fi
       fi
-    fi
 
-    [[ -f "$file" ]] || die "file not found: $file"
-    [[ -n "${db:-$PGDB}" ]] || die "import requires a db name (or set POSTGRES_DATABASE)."
-    db="${db:-$PGDB}"
+      [[ -f "$file" ]] || die "file not found: $file"
+      [[ -n "${db:-$PGDB}" ]] || die "import requires a db name (or set POSTGRES_DATABASE)."
+      db="${db:-$PGDB}"
 
-    local ws=""
-    ws="$(to_workspace_path_under_mount "$file" || true)"
-    if [[ -n "$ws" ]]; then
-      if [[ "$file" == *.gz ]]; then
-        run_pg_mount "$IMAGE" sh -lc '
+      local ws=""
+      ws="$(to_workspace_path_under_mount "$file" || true)"
+      if [[ -n "$ws" ]]; then
+        if [[ "$file" == *.gz ]]; then
+          run_pg_mount "$IMAGE" sh -lc '
             f="$1"; db="$2"; user="$3"; pass="$4"; port="$5"
             gunzip -c "$f" | PGPASSWORD="$pass" psql -h127.0.0.1 -p"$port" -U"$user" -d "$db" -v ON_ERROR_STOP=1
           ' sh "$ws" "$db" "$PGUSER" "$PGPASS" "$POSTGRES_PORT_IN"
-      else
-        run_pg_mount "$IMAGE" sh -lc '
+        else
+          run_pg_mount "$IMAGE" sh -lc '
             f="$1"; db="$2"; user="$3"; pass="$4"; port="$5"
             PGPASSWORD="$pass" psql -h127.0.0.1 -p"$port" -U"$user" -d "$db" -v ON_ERROR_STOP=1 -f "$f"
           ' sh "$ws" "$db" "$PGUSER" "$PGPASS" "$POSTGRES_PORT_IN"
-      fi
-    else
-      if [[ "$file" == *.gz ]]; then
-        gunzip -c "$file" | docker exec -i -e "PGPASSWORD=$PGPASS" "$SERVICE" \
-          psql -h127.0.0.1 -p"$POSTGRES_PORT_IN" -U"$PGUSER" -d "$db" -v ON_ERROR_STOP=1
+        fi
       else
-        cat "$file" | docker exec -i -e "PGPASSWORD=$PGPASS" "$SERVICE" \
-          psql -h127.0.0.1 -p"$POSTGRES_PORT_IN" -U"$PGUSER" -d "$db" -v ON_ERROR_STOP=1
+        if [[ "$file" == *.gz ]]; then
+          gunzip -c "$file" | docker exec -i -e "PGPASSWORD=$PGPASS" "$SERVICE" \
+            psql -h127.0.0.1 -p"$POSTGRES_PORT_IN" -U"$PGUSER" -d "$db" -v ON_ERROR_STOP=1
+        else
+          cat "$file" | docker exec -i -e "PGPASSWORD=$PGPASS" "$SERVICE" \
+            psql -h127.0.0.1 -p"$POSTGRES_PORT_IN" -U"$PGUSER" -d "$db" -v ON_ERROR_STOP=1
+        fi
       fi
-    fi
 
-    echo "OK: imported '$file' -> db '$db'" >&2
-    ;;
+      echo "OK: imported '$file' -> db '$db'" >&2
+      ;;
 
-  dump)
-    shift
-    local db="${1:-$PGDB}"
-    [[ -n "$db" ]] || die "dump requires a db name (or set POSTGRES_DATABASE)."
-    local out="${2:-${db}.sql}"
+    dump)
+      shift
+      local db="${1:-$PGDB}"
+      [[ -n "$db" ]] || die "dump requires a db name (or set POSTGRES_DATABASE)."
+      local out="${2:-${db}.sql}"
 
-    if [[ "$out" == *.gz ]]; then
-      run_pg_mount "$IMAGE" sh -lc '
+      if [[ "$out" == *.gz ]]; then
+        run_pg_mount "$IMAGE" sh -lc '
           db="$1"; out="$2"; user="$3"; pass="$4"; port="$5"
           PGPASSWORD="$pass" pg_dump -h127.0.0.1 -p"$port" -U"$user" -d "$db" --no-owner --no-privileges \
             | gzip -c > "/workspace/$out"
         ' sh "$db" "$out" "$PGUSER" "$PGPASS" "$POSTGRES_PORT_IN"
-    else
-      run_pg_mount "$IMAGE" sh -lc '
+      else
+        run_pg_mount "$IMAGE" sh -lc '
           db="$1"; out="$2"; user="$3"; pass="$4"; port="$5"
           PGPASSWORD="$pass" pg_dump -h127.0.0.1 -p"$port" -U"$user" -d "$db" --no-owner --no-privileges \
             > "/workspace/$out"
         ' sh "$db" "$out" "$PGUSER" "$PGPASS" "$POSTGRES_PORT_IN"
-    fi
-    echo "OK: dumped '$db' -> ./$out" >&2
-    ;;
+      fi
+      echo "OK: dumped '$db' -> ./$out" >&2
+      ;;
 
-  dump-all)
-    shift
-    local out="${1:-all.sql}"
-    if [[ "$out" == *.gz ]]; then
-      run_pg_mount "$IMAGE" sh -lc '
+    dump-all)
+      shift
+      local out="${1:-all.sql}"
+      if [[ "$out" == *.gz ]]; then
+        run_pg_mount "$IMAGE" sh -lc '
           out="$1"; user="$2"; pass="$3"; port="$4"
           PGPASSWORD="$pass" pg_dumpall -h127.0.0.1 -p"$port" -U"$user" \
             | gzip -c > "/workspace/$out"
         ' sh "$out" "$PGUSER" "$PGPASS" "$POSTGRES_PORT_IN"
-    else
-      run_pg_mount "$IMAGE" sh -lc '
+      else
+        run_pg_mount "$IMAGE" sh -lc '
           out="$1"; user="$2"; pass="$3"; port="$4"
           PGPASSWORD="$pass" pg_dumpall -h127.0.0.1 -p"$port" -U"$user" \
             > "/workspace/$out"
         ' sh "$out" "$PGUSER" "$PGPASS" "$POSTGRES_PORT_IN"
-    fi
-    echo "OK: dumped all databases -> ./$out" >&2
-    ;;
+      fi
+      echo "OK: dumped all databases -> ./$out" >&2
+      ;;
 
-  roles)
-    shift
-    local out="${1:-globals.sql}"
-    if [[ "$out" == *.gz ]]; then
-      run_pg_mount "$IMAGE" sh -lc '
+    roles)
+      shift
+      local out="${1:-globals.sql}"
+      if [[ "$out" == *.gz ]]; then
+        run_pg_mount "$IMAGE" sh -lc '
           out="$1"; user="$2"; pass="$3"; port="$4"
           PGPASSWORD="$pass" pg_dumpall -h127.0.0.1 -p"$port" -U"$user" --globals-only \
             | gzip -c > "/workspace/$out"
         ' sh "$out" "$PGUSER" "$PGPASS" "$POSTGRES_PORT_IN"
-    else
-      run_pg_mount "$IMAGE" sh -lc '
+      else
+        run_pg_mount "$IMAGE" sh -lc '
           out="$1"; user="$2"; pass="$3"; port="$4"
           PGPASSWORD="$pass" pg_dumpall -h127.0.0.1 -p"$port" -U"$user" --globals-only \
             > "/workspace/$out"
         ' sh "$out" "$PGUSER" "$PGPASS" "$POSTGRES_PORT_IN"
-    fi
-    echo "OK: dumped globals (roles) -> ./$out" >&2
-    ;;
+      fi
+      echo "OK: dumped globals (roles) -> ./$out" >&2
+      ;;
 
-  schema)
-    shift
-    local db="${1:-$PGDB}"
-    [[ -n "$db" ]] || die "schema requires a db name."
-    local out="${2:-${db}.schema.sql}"
-    if [[ "$out" == *.gz ]]; then
-      run_pg_mount "$IMAGE" sh -lc '
+    schema)
+      shift
+      local db="${1:-$PGDB}"
+      [[ -n "$db" ]] || die "schema requires a db name."
+      local out="${2:-${db}.schema.sql}"
+      if [[ "$out" == *.gz ]]; then
+        run_pg_mount "$IMAGE" sh -lc '
           db="$1"; out="$2"; user="$3"; pass="$4"; port="$5"
           PGPASSWORD="$pass" pg_dump -h127.0.0.1 -p"$port" -U"$user" -d "$db" --schema-only --no-owner --no-privileges \
             | gzip -c > "/workspace/$out"
         ' sh "$db" "$out" "$PGUSER" "$PGPASS" "$POSTGRES_PORT_IN"
-    else
-      run_pg_mount "$IMAGE" sh -lc '
+      else
+        run_pg_mount "$IMAGE" sh -lc '
           db="$1"; out="$2"; user="$3"; pass="$4"; port="$5"
           PGPASSWORD="$pass" pg_dump -h127.0.0.1 -p"$port" -U"$user" -d "$db" --schema-only --no-owner --no-privileges \
             > "/workspace/$out"
         ' sh "$db" "$out" "$PGUSER" "$PGPASS" "$POSTGRES_PORT_IN"
-    fi
-    echo "OK: schema dumped '$db' -> ./$out" >&2
-    ;;
+      fi
+      echo "OK: schema dumped '$db' -> ./$out" >&2
+      ;;
 
-  data)
-    shift
-    local db="${1:-$PGDB}"
-    [[ -n "$db" ]] || die "data requires a db name."
-    local out="${2:-${db}.data.sql}"
-    if [[ "$out" == *.gz ]]; then
-      run_pg_mount "$IMAGE" sh -lc '
+    data)
+      shift
+      local db="${1:-$PGDB}"
+      [[ -n "$db" ]] || die "data requires a db name."
+      local out="${2:-${db}.data.sql}"
+      if [[ "$out" == *.gz ]]; then
+        run_pg_mount "$IMAGE" sh -lc '
           db="$1"; out="$2"; user="$3"; pass="$4"; port="$5"
           PGPASSWORD="$pass" pg_dump -h127.0.0.1 -p"$port" -U"$user" -d "$db" --data-only --no-owner --no-privileges \
             | gzip -c > "/workspace/$out"
         ' sh "$db" "$out" "$PGUSER" "$PGPASS" "$POSTGRES_PORT_IN"
-    else
-      run_pg_mount "$IMAGE" sh -lc '
+      else
+        run_pg_mount "$IMAGE" sh -lc '
           db="$1"; out="$2"; user="$3"; pass="$4"; port="$5"
           PGPASSWORD="$pass" pg_dump -h127.0.0.1 -p"$port" -U"$user" -d "$db" --data-only --no-owner --no-privileges \
             > "/workspace/$out"
         ' sh "$db" "$out" "$PGUSER" "$PGPASS" "$POSTGRES_PORT_IN"
-    fi
-    echo "OK: data dumped '$db' -> ./$out" >&2
-    ;;
+      fi
+      echo "OK: data dumped '$db' -> ./$out" >&2
+      ;;
 
-  list)
-    shift
-    local file="${1:-}"
-    [[ -n "$file" ]] || die "list requires a dump file."
-    [[ -f "$file" ]] || die "file not found: $file"
+    list)
+      shift
+      local file="${1:-}"
+      [[ -n "$file" ]] || die "list requires a dump file."
+      [[ -f "$file" ]] || die "file not found: $file"
 
-    local ws=""
-    ws="$(to_workspace_path_under_mount "$file" || true)"
-    if [[ -n "$ws" ]]; then
-      run_pg_mount "$IMAGE" sh -lc '
+      local ws=""
+      ws="$(to_workspace_path_under_mount "$file" || true)"
+      if [[ -n "$ws" ]]; then
+        run_pg_mount "$IMAGE" sh -lc '
           file="$1"; user="$2"; pass="$3"; port="$4"
           PGPASSWORD="$pass" exec pg_restore -h127.0.0.1 -p"$port" -U"$user" -l "$file"
         ' sh "$ws" "$PGUSER" "$PGPASS" "$POSTGRES_PORT_IN"
-    else
-      cat "$file" | docker exec -i -e "PGPASSWORD=$PGPASS" "$SERVICE" \
-        pg_restore -h127.0.0.1 -p"$POSTGRES_PORT_IN" -U"$PGUSER" -l -
-    fi
-    ;;
+      else
+        cat "$file" | docker exec -i -e "PGPASSWORD=$PGPASS" "$SERVICE" \
+          pg_restore -h127.0.0.1 -p"$POSTGRES_PORT_IN" -U"$PGUSER" -l -
+      fi
+      ;;
 
-  restore)
-    shift
-    local file="${1:-}"
-    shift || true
-    [[ -n "$file" ]] || die "restore requires a dump file."
-    [[ -f "$file" ]] || die "file not found: $file"
+    restore)
+      shift
+      local file="${1:-}"
+      shift || true
+      [[ -n "$file" ]] || die "restore requires a dump file."
+      [[ -f "$file" ]] || die "file not found: $file"
 
-    local db="${1:-$PGDB}"
-    [[ -n "$db" ]] || die "restore requires a db name (or set POSTGRES_DATABASE)."
-    ensure_db "$db" "$PGUSER" "$PGPASS"
+      local db="${1:-$PGDB}"
+      [[ -n "$db" ]] || die "restore requires a db name (or set POSTGRES_DATABASE)."
+      ensure_db "$db" "$PGUSER" "$PGPASS"
 
-    local ws=""
-    ws="$(to_workspace_path_under_mount "$file" || true)"
-    if [[ -n "$ws" ]]; then
-      run_pg_mount "$IMAGE" sh -lc '
+      local ws=""
+      ws="$(to_workspace_path_under_mount "$file" || true)"
+      if [[ -n "$ws" ]]; then
+        run_pg_mount "$IMAGE" sh -lc '
           file="$1"; db="$2"; user="$3"; pass="$4"; port="$5"
           PGPASSWORD="$pass" exec pg_restore -h127.0.0.1 -p"$port" -U"$user" -d "$db" \
             --clean --if-exists --no-owner --no-privileges "$file"
         ' sh "$ws" "$db" "$PGUSER" "$PGPASS" "$POSTGRES_PORT_IN"
-    else
-      cat "$file" | docker exec -i -e "PGPASSWORD=$PGPASS" "$SERVICE" \
-        pg_restore -h127.0.0.1 -p"$POSTGRES_PORT_IN" -U"$PGUSER" -d "$db" \
-        --clean --if-exists --no-owner --no-privileges -
-    fi
+      else
+        cat "$file" | docker exec -i -e "PGPASSWORD=$PGPASS" "$SERVICE" \
+          pg_restore -h127.0.0.1 -p"$POSTGRES_PORT_IN" -U"$PGUSER" -d "$db" \
+          --clean --if-exists --no-owner --no-privileges -
+      fi
 
-    echo "OK: restored '$file' -> db '$db'" >&2
-    ;;
+      echo "OK: restored '$file' -> db '$db'" >&2
+      ;;
 
-  *)
-    # passthrough (psql args...)
-    psql_exec "${PGDB:-}" "$PGUSER" "$PGPASS" "$@"
-    ;;
+    *)
+      psql_exec "${PGDB:-}" "$PGUSER" "$PGPASS" "$@"
+      ;;
   esac
 }
 

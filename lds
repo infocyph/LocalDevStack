@@ -4589,10 +4589,12 @@ main() {
 
   case "$cmd" in
   php | composer | node | npm | npx) exec "$DIR/bin/$cmd" "$@" ;;
-  pg | pg_restore | pg-restore | pgrestore | pg_dump | pgdump | pg-dump | psql) exec "$DIR/bin/pg" "$@" ;;
+  pg | psql | pg_restore | pg-restore | pgrestore | pg_dump | pgdump | pg-dump) exec "$DIR/bin/pg" "$@" ;;
   maria | mariadb | mariadbdump | mariadb-dump | mariadb_dump) exec "$DIR/bin/maria" "$@" ;;
   my | mysql | mysqldump | mysql-dump | mysql_dump) exec "$DIR/bin/my" "$@" ;;
   redis | redis-cli) exec "$DIR/bin/redis-cli" "$@" ;;
+  es | elastic | elasticsearch) exec "$DIR/bin/es" "$@" ;;
+  mongo | mongodb | mongosh | mongoimport | mongoexport) exec "$DIR/bin/mongo" "$@" ;;
   *) "cmd_$cmd" "$@" ;;
   esac
 }

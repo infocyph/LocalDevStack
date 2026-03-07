@@ -17,20 +17,81 @@ else
   C_YELLOW=""
   C_DIM=""
 fi
+
 kv() { printf "%s%s%s %s%s%s\n" "$C_CYAN" "$1" "$C_RESET" "$C_YELLOW" "$2" "$C_RESET" >&2; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+SERVER_TOOLS_CONTAINER="${SERVER_TOOLS_CONTAINER:-SERVER_TOOLS}"
 
 normalize_container() {
-  local v="$1"
+  local v="${1:-}"
   [[ -z "$v" ]] && return 0
   if [[ "$v" =~ ^PHP_[0-9]+\.[0-9]+$ ]]; then
-    echo "$v"
+    printf '%s\n' "$v"
   elif [[ "$v" =~ ^[0-9]+\.[0-9]+$ ]]; then
-    echo "PHP_$v"
+    printf 'PHP_%s\n' "$v"
   else
     die "invalid version '$v' (use like 8.4)"
+  fi
+}
+
+container_is_running() {
+  local name="$1"
+  docker ps --format '{{.Names}}' | grep -qx "$name"
+}
+
+running_php_containers() {
+  docker ps --format '{{.Names}}' | awk '/^PHP_[0-9]+\.[0-9]+$/' | sort -u
+}
+
+pick_highest_php_container() {
+  local names
+  names="$(running_php_containers || true)"
+  [[ -n "$names" ]] || return 1
+  printf '%s\n' "$names" | sed 's/^PHP_//' | sort -Vr | head -n1 | awk 'NF{print "PHP_"$0}'
+}
+
+php_container_version() {
+  local name="$1"
+  [[ "$name" =~ ^PHP_([0-9]+\.[0-9]+)$ ]] || return 1
+  printf '%s\n' "${BASH_REMATCH[1]}"
+}
+
+server_tools_php_version() {
+  container_is_running "$SERVER_TOOLS_CONTAINER" || return 1
+  docker exec "$SERVER_TOOLS_CONTAINER" sh -lc 'command -v php >/dev/null 2>&1 && php -r "echo PHP_MAJOR_VERSION, \".\", PHP_MINOR_VERSION;"' 2>/dev/null | tr -d '\r\n'
+}
+
+resolve_host_pwd() {
+  local host="${WORKDIR_WIN:-${WORKING_DIR:-}}"
+  if [[ -z "$host" ]]; then
+    host="$PWD"
+  fi
+  [[ -n "$host" ]] || host="$REPO_ROOT"
+
+  if command -v cygpath >/dev/null 2>&1; then
+    [[ "$host" == /* ]] && host="$(cygpath -w "$host")"
+  fi
+
+  case "$host" in
+    *"Program Files"/Git/workspace*|*"Program Files\\Git\\workspace"*) host="$REPO_ROOT" ;;
+  esac
+
+  printf '%s' "$host"
+}
+
+is_msys() {
+  case "${OSTYPE:-}" in
+    msys*|cygwin*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+msys_no_pathconv() {
+  if is_msys; then
+    export MSYS_NO_PATHCONV=1
+    export MSYS2_ARG_CONV_EXCL='*'
   fi
 }
 
@@ -41,17 +102,15 @@ relpath_under_pwd() {
   abs="$(cd "$(dirname "$p")" && pwd)/$(basename "$p")"
 
   if command -v python3 >/dev/null 2>&1; then
-    rel="$(
-      python3 - "$cwd" "$abs" <<'PY' 2>/dev/null || true
+    rel="$({ python3 - "$cwd" "$abs" <<'PY'
 import os,sys
 cwd=sys.argv[1]; p=sys.argv[2]
 try:
-  r=os.path.relpath(p,cwd)
-  print(r)
+  print(os.path.relpath(p, cwd))
 except Exception:
   pass
 PY
-    )"
+    } 2>/dev/null || true)"
   else
     if [[ "$abs" == "$cwd/"* ]]; then
       rel="${abs#"$cwd/"}"
@@ -61,7 +120,7 @@ PY
   fi
 
   [[ -n "${rel:-}" && "$rel" != /* && "$rel" != ..* ]] || return 1
-  printf "%s" "$rel"
+  printf '%s' "$rel"
 }
 
 port_in_use() {
@@ -81,39 +140,9 @@ port_in_use() {
   return 1
 }
 
-pick_highest_php_container() {
-  local names
-  names="$(docker ps --format '{{.Names}}' | awk '/^PHP_[0-9]+\.[0-9]+$/')"
-  [[ -n "$names" ]] || return 1
-  printf "%s\n" "$names" | sed 's/^PHP_//' | sort -Vr | head -n1 | awk 'NF{print "PHP_"$0}'
-}
-
-resolve_host_pwd() {
-  local host="${WORKDIR_WIN:-${WORKING_DIR:-}}"
-  if [[ -z "${host}" ]]; then
-    host="$PWD"
-  fi
-  [[ -n "${host}" ]] || host="$REPO_ROOT"
-
-  if command -v cygpath >/dev/null 2>&1; then
-    [[ "$host" == /* ]] && host="$(cygpath -w "$host")"
-  fi
-
-  printf '%s' "$host"
-}
-
-is_msys() {
-  case "${OSTYPE:-}" in
-  msys* | cygwin*) return 0 ;;
-  *) return 1 ;;
-  esac
-}
-
-msys_no_pathconv() {
-  if is_msys; then
-    export MSYS_NO_PATHCONV=1
-    export MSYS2_ARG_CONV_EXCL='*'
-  fi
+pick_container_network() {
+  local name="$1"
+  docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{println $k}}{{end}}' "$name" 2>/dev/null | awk 'NF{print; exit}'
 }
 
 EXPLICIT_VER=""
@@ -121,38 +150,74 @@ ARGS=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-  -V | --v | --php)
-    [[ -n "${2:-}" ]] || die "$1 requires a version (e.g. $1 8.4)"
-    EXPLICIT_VER="$2"
-    shift 2
-    ;;
-  --)
-    shift
-    ARGS+=("$@")
-    break
-    ;;
-  *)
-    ARGS+=("$1")
-    shift
-    ;;
+    -V|--v|--php)
+      [[ -n "${2:-}" ]] || die "$1 requires a version (e.g. $1 8.4)"
+      EXPLICIT_VER="$2"
+      shift 2
+      ;;
+    --)
+      shift
+      ARGS+=("$@")
+      break
+      ;;
+    *)
+      ARGS+=("$1")
+      shift
+      ;;
   esac
 done
 
-TARGET="$(normalize_container "$EXPLICIT_VER")"
+TARGET_CONTAINER=""
+TARGET_IMAGE=""
+NETWORK_SOURCE_CONTAINER=""
+RUNTIME_LABEL=""
+SERVER_TOOLS_VERSION="$(server_tools_php_version || true)"
+NORMALIZED_EXPLICIT="$(normalize_container "$EXPLICIT_VER")"
 
-if [[ -n "$TARGET" ]]; then
-  docker ps --format '{{.Names}}' | grep -qx "$TARGET" || die "container '$TARGET' is not running."
+if [[ -n "$NORMALIZED_EXPLICIT" ]]; then
+  if container_is_running "$NORMALIZED_EXPLICIT"; then
+    TARGET_CONTAINER="$NORMALIZED_EXPLICIT"
+    NETWORK_SOURCE_CONTAINER="$NORMALIZED_EXPLICIT"
+    TARGET_IMAGE="$(docker inspect -f '{{.Config.Image}}' "$NORMALIZED_EXPLICIT" 2>/dev/null)" || die "failed to inspect '$NORMALIZED_EXPLICIT'."
+    RUNTIME_LABEL="$NORMALIZED_EXPLICIT"
+  elif [[ -n "$SERVER_TOOLS_VERSION" && "$SERVER_TOOLS_VERSION" == "$(php_container_version "$NORMALIZED_EXPLICIT")" ]]; then
+    TARGET_CONTAINER="$SERVER_TOOLS_CONTAINER"
+    NETWORK_SOURCE_CONTAINER="$SERVER_TOOLS_CONTAINER"
+    TARGET_IMAGE="$(docker inspect -f '{{.Config.Image}}' "$SERVER_TOOLS_CONTAINER" 2>/dev/null)" || die "failed to inspect '$SERVER_TOOLS_CONTAINER'."
+    RUNTIME_LABEL="$SERVER_TOOLS_CONTAINER (php $SERVER_TOOLS_VERSION)"
+  else
+    die "requested PHP ${EXPLICIT_VER} is not available in a running PHP container or $SERVER_TOOLS_CONTAINER."
+  fi
 else
-  TARGET="$(pick_highest_php_container)" || die "no PHP container is running (expected names like PHP_8.4)."
+  if TARGET_CONTAINER="$(pick_highest_php_container)"; then
+    NETWORK_SOURCE_CONTAINER="$TARGET_CONTAINER"
+    TARGET_IMAGE="$(docker inspect -f '{{.Config.Image}}' "$TARGET_CONTAINER" 2>/dev/null)" || die "failed to inspect '$TARGET_CONTAINER'."
+    RUNTIME_LABEL="$TARGET_CONTAINER"
+  elif [[ -n "$SERVER_TOOLS_VERSION" ]]; then
+    TARGET_CONTAINER="$SERVER_TOOLS_CONTAINER"
+    NETWORK_SOURCE_CONTAINER="$SERVER_TOOLS_CONTAINER"
+    TARGET_IMAGE="$(docker inspect -f '{{.Config.Image}}' "$SERVER_TOOLS_CONTAINER" 2>/dev/null)" || die "failed to inspect '$SERVER_TOOLS_CONTAINER'."
+    RUNTIME_LABEL="$SERVER_TOOLS_CONTAINER (php $SERVER_TOOLS_VERSION)"
+  else
+    die "no PHP container is running and $SERVER_TOOLS_CONTAINER has no usable php runtime."
+  fi
 fi
 
-IMAGE="$(docker inspect -f '{{.Config.Image}}' "$TARGET" 2>/dev/null)" || die "failed to inspect '$TARGET'."
+[[ -n "$TARGET_IMAGE" ]] || die "failed to resolve runtime image."
 
-kv "Container:" "$TARGET"
-kv "Image:" "$IMAGE"
+kv "Runtime:" "$RUNTIME_LABEL"
+kv "Image:" "$TARGET_IMAGE"
 
 HOST_PWD="$(resolve_host_pwd)"
 msys_no_pathconv
+
+common_run_flags() {
+  local -n _out="$1"
+  _out=(--rm -v "$HOST_PWD":/workspace -w /workspace)
+  [[ -t 0 ]] && _out+=(-it) || _out+=(-i)
+  _out+=(-u "$(id -u):$(id -g)")
+  _out+=(-e HOME=/tmp/php-home)
+}
 
 serve_mode() {
   local host="127.0.0.1"
@@ -163,35 +228,35 @@ serve_mode() {
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
-    --host=*) host="${1#*=}" ;;
-    --host)
-      shift
-      host="${1:-}"
-      ;;
-    --port=*) port="${1#*=}" ;;
-    --port)
-      shift
-      port="${1:-}"
-      ;;
-    --root=*) root_dir="${1#*=}" ;;
-    --root)
-      shift
-      root_dir="${1:-}"
-      ;;
-    --router=*) router_file="${1#*=}" ;;
-    --router)
-      shift
-      router_file="${1:-}"
-      ;;
-    -v | --verbose) verbose=true ;;
-    *) die "unknown serve option: $1" ;;
+      --host=*) host="${1#*=}" ;;
+      --host)
+        shift
+        host="${1:-}"
+        ;;
+      --port=*) port="${1#*=}" ;;
+      --port)
+        shift
+        port="${1:-}"
+        ;;
+      --root=*) root_dir="${1#*=}" ;;
+      --root)
+        shift
+        root_dir="${1:-}"
+        ;;
+      --router=*) router_file="${1#*=}" ;;
+      --router)
+        shift
+        router_file="${1:-}"
+        ;;
+      -v|--verbose) verbose=true ;;
+      *) die "unknown serve option: $1" ;;
     esac
     shift
   done
 
   [[ -n "${host:-}" ]] || die "serve: --host requires a value"
   [[ "$port" =~ ^[0-9]+$ ]] || die "serve: invalid --port '$port'"
-  ((port >= 1 && port <= 65535)) || die "serve: port out of range: $port"
+  (( port >= 1 && port <= 65535 )) || die "serve: port out of range: $port"
 
   if [[ "$root_dir" != /* ]]; then root_dir="$PWD/$root_dir"; fi
   [[ -d "$root_dir" ]] || die "serve: root directory not found: $root_dir"
@@ -251,19 +316,22 @@ serve_mode() {
     publish=(-p "${host}:${port}:${port}")
   fi
 
-  local RUN_FLAGS=(--rm -v "$HOST_PWD":/workspace -w /workspace)
-  [[ -t 0 ]] && RUN_FLAGS+=(-it) || RUN_FLAGS+=(-i)
-  RUN_FLAGS+=(-u "$(id -u):$(id -g)")
-  RUN_FLAGS+=("${publish[@]}")
+  local network_name=""
+  network_name="$(pick_container_network "$NETWORK_SOURCE_CONTAINER" || true)"
+
+  local run_flags=()
+  common_run_flags run_flags
+  run_flags+=("${publish[@]}")
+  [[ -n "$network_name" ]] && run_flags+=(--network "$network_name")
 
   if [[ -n "$router_rel" ]]; then
-    exec docker run "${RUN_FLAGS[@]}" "$IMAGE" php -S "0.0.0.0:${port}" -t "/workspace/${found_rel#./}" "/workspace/${router_rel#./}"
+    exec docker run "${run_flags[@]}" "$TARGET_IMAGE" php -S "0.0.0.0:${port}" -t "/workspace/${found_rel#./}" "/workspace/${router_rel#./}"
   fi
 
   if [[ "$found_rel" == "." ]]; then
-    exec docker run "${RUN_FLAGS[@]}" "$IMAGE" php -S "0.0.0.0:${port}"
+    exec docker run "${run_flags[@]}" "$TARGET_IMAGE" php -S "0.0.0.0:${port}"
   else
-    exec docker run "${RUN_FLAGS[@]}" "$IMAGE" php -S "0.0.0.0:${port}" -t "/workspace/${found_rel#./}"
+    exec docker run "${run_flags[@]}" "$TARGET_IMAGE" php -S "0.0.0.0:${port}" -t "/workspace/${found_rel#./}"
   fi
 }
 
@@ -271,8 +339,12 @@ if [[ "${ARGS[0]:-}" == "serve" ]]; then
   serve_mode "${ARGS[@]:1}"
 fi
 
-RUN_FLAGS=(--rm -v "$HOST_PWD":/workspace -w /workspace)
-[[ -t 0 ]] && RUN_FLAGS+=(-it) || RUN_FLAGS+=(-i)
-RUN_FLAGS+=(-u "$(id -u):$(id -g)")
+RUN_FLAGS=()
+common_run_flags RUN_FLAGS
+RUN_FLAGS+=(--network "container:${NETWORK_SOURCE_CONTAINER}")
 
-exec docker run "${RUN_FLAGS[@]}" "$IMAGE" php "${ARGS[@]}"
+if [[ ${#ARGS[@]} -eq 0 ]]; then
+  exec docker run "${RUN_FLAGS[@]}" "$TARGET_IMAGE" php
+fi
+
+exec docker run "${RUN_FLAGS[@]}" "$TARGET_IMAGE" php "${ARGS[@]}"

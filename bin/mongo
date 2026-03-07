@@ -1,0 +1,381 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SERVICE_DEFAULT="MONGODB"
+WORKSPACE_MOUNT="/workspace"
+
+trim() {
+  local s="${1-}"
+  s="${s#${s%%[![:space:]]*}}"
+  s="${s%${s##*[![:space:]]}}"
+  printf '%s' "$s"
+}
+
+err() {
+  echo "[mongo] $*" >&2
+  exit 1
+}
+
+warn() {
+  echo "[mongo] $*" >&2
+}
+
+is_msys() {
+  case "$(uname -s 2>/dev/null || true)" in
+    MINGW*|MSYS*|CYGWIN*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+repo_root() {
+  git rev-parse --show-toplevel 2>/dev/null || pwd
+}
+
+load_env() {
+  local env_file="${LDS_ENV_FILE:-.env}"
+  [[ -f "$env_file" ]] || return 0
+
+  local line key val
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+    [[ "$line" == export* ]] && line="${line#export }"
+    [[ "$line" == *=* ]] || continue
+
+    key="${line%%=*}"
+    val="${line#*=}"
+    key="$(trim "$key")"
+    val="$(trim "$val")"
+
+    [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+    case "$key" in
+      MONGODB_SERVICE|MONGODB_ROOT_USERNAME|MONGODB_ROOT_PASSWORD|MONGO_INITDB_ROOT_USERNAME|MONGO_INITDB_ROOT_PASSWORD|WORKING_DIR|WORKDIR|WORKDIR_WIN)
+        ;;
+      *)
+        continue
+        ;;
+    esac
+
+    if [[ "$val" == \"*\" && "$val" == *\" ]]; then
+      val="${val:1:${#val}-2}"
+    elif [[ "$val" == \'*\' && "$val" == *\' ]]; then
+      val="${val:1:${#val}-2}"
+    fi
+
+    export "$key=$val"
+  done < "$env_file"
+}
+
+container_running() {
+  local service="$1"
+  [[ -n "$service" ]] || return 1
+  [[ "$(docker inspect -f '{{.State.Running}}' "$service" 2>/dev/null || true)" == "true" ]]
+}
+
+container_env() {
+  local service="$1" key="$2"
+  docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$service" 2>/dev/null \
+    | awk -F= -v k="$key" '$1==k {sub($1"=", ""); print; exit}'
+}
+
+service_name() {
+  printf '%s' "${MONGODB_SERVICE:-$SERVICE_DEFAULT}"
+}
+
+mongo_user() {
+  local service="$1"
+  local v
+  for v in \
+    "${MONGODB_ROOT_USERNAME:-}" \
+    "${MONGO_INITDB_ROOT_USERNAME:-}" \
+    "$(container_env "$service" MONGO_INITDB_ROOT_USERNAME)"; do
+    [[ -n "$v" ]] && { printf '%s' "$v"; return 0; }
+  done
+  printf 'root'
+}
+
+mongo_pass() {
+  local service="$1"
+  local v
+  for v in \
+    "${MONGODB_ROOT_PASSWORD:-}" \
+    "${MONGO_INITDB_ROOT_PASSWORD:-}" \
+    "$(container_env "$service" MONGO_INITDB_ROOT_PASSWORD)"; do
+    [[ -n "$v" ]] && { printf '%s' "$v"; return 0; }
+  done
+  printf '12345'
+}
+
+mongo_image() {
+  docker inspect -f '{{.Config.Image}}' "$1" 2>/dev/null
+}
+
+workspace_host() {
+  local wd="${WORKDIR_WIN:-${WORKING_DIR:-${WORKDIR:-$PWD}}}"
+
+  if is_msys; then
+    if [[ "$wd" == *"/Program Files/Git/workspace"* ]] || [[ "$wd" == "/workspace" ]]; then
+      wd="$(repo_root)"
+    fi
+    if command -v cygpath >/dev/null 2>&1; then
+      cygpath -aw "$wd"
+      return 0
+    fi
+  fi
+
+  printf '%s' "$wd"
+}
+
+inside_workspace_path() {
+  local input="$1"
+  local host_root
+  host_root="$(workspace_host)"
+
+  [[ -n "$input" ]] || err "missing file path"
+
+  if [[ "$input" != /* ]]; then
+    input="$PWD/$input"
+  fi
+  input="$(cd "$(dirname "$input")" 2>/dev/null && pwd)/$(basename "$input")"
+
+  local host_root_norm="$host_root"
+  if is_msys && command -v cygpath >/dev/null 2>&1; then
+    host_root_norm="$(cygpath -am "$host_root")"
+    input="$(cygpath -am "$input")"
+  fi
+
+  case "$input" in
+    "$host_root_norm"/*)
+      printf '%s/%s' "$WORKSPACE_MOUNT" "${input#"$host_root_norm"/}"
+      ;;
+    "$host_root_norm")
+      printf '%s' "$WORKSPACE_MOUNT"
+      ;;
+    *)
+      err "file must be under workspace: $host_root_norm"
+      ;;
+  esac
+}
+
+common_uri() {
+  local service="$1"
+  local user pass
+  user="$(mongo_user "$service")"
+  pass="$(mongo_pass "$service")"
+  printf 'mongodb://%s:%s@127.0.0.1:27017/admin?authSource=admin' "$user" "$pass"
+}
+
+mongosh_args() {
+  local service="$1" db="${2:-admin}"
+  local user pass
+  user="$(mongo_user "$service")"
+  pass="$(mongo_pass "$service")"
+  printf '%s\n' --host 127.0.0.1 --port 27017 --username "$user" --password "$pass" --authenticationDatabase admin "$db"
+}
+
+run_mongosh() {
+  local service="$1"; shift
+  local -a args=( "$@" )
+  docker exec -it "$service" mongosh "${args[@]}"
+}
+
+run_mongosh_non_tty() {
+  local service="$1"; shift
+  local -a args=( "$@" )
+  docker exec -i "$service" mongosh "${args[@]}"
+}
+
+run_helper() {
+  local service="$1"; shift
+  local image
+  image="$(mongo_image "$service")"
+  [[ -n "$image" ]] || err "unable to inspect image for $service"
+
+  local host_ws
+  host_ws="$(workspace_host)"
+
+  local -a cmd=( docker run --rm )
+  if is_msys; then
+    cmd+=( -e MSYS_NO_PATHCONV=1 -e MSYS2_ARG_CONV_EXCL='*' )
+  fi
+  cmd+=(
+    --network "container:$service"
+    -v "$host_ws:$WORKSPACE_MOUNT"
+    -w "$WORKSPACE_MOUNT"
+    "$image"
+    "$@"
+  )
+  "${cmd[@]}"
+}
+
+require_db_name() {
+  local db="$1"
+  [[ -n "$db" ]] || err "database name is required"
+  [[ "$db" =~ ^[A-Za-z0-9._-]+$ ]] || err "invalid database name: $db"
+}
+
+require_collection_name() {
+  local coll="$1"
+  [[ -n "$coll" ]] || err "collection name is required"
+  [[ "$coll" =~ ^[A-Za-z0-9._-]+$ ]] || err "invalid collection name: $coll"
+}
+
+print_help() {
+  cat <<'HELP'
+Usage:
+  mongo                           Open mongosh (admin)
+  mongo shell [db]                Open mongosh for a database
+  mongo status                    Ping server
+  mongo dbs                       List databases
+  mongo collections [db]          List collections
+  mongo eval <js> [db]            Execute JavaScript
+  mongo create-db <db>            Create database lazily via temp collection
+  mongo drop-db <db>              Drop database
+  mongo import <db> <collection> <file> [--drop] [--type json|jsonl|csv]
+  mongo export <db> <collection> [file] [--jsonArray]
+
+Notes:
+  - File paths for import/export must be inside the current workspace.
+  - Import/export run in a one-off helper container from the same Mongo image.
+HELP
+}
+
+main() {
+  load_env
+
+  local service
+  service="$(service_name)"
+  container_running "$service" || err "$service is not running"
+
+  local cmd="${1:-shell}"
+  if [[ $# -gt 0 ]]; then shift; fi
+
+  case "$cmd" in
+    help|-h|--help)
+      print_help
+      ;;
+    shell)
+      local db="${1:-admin}"
+      run_mongosh "$service" $(mongosh_args "$service" "$db")
+      ;;
+    status)
+      run_mongosh_non_tty "$service" $(mongosh_args "$service" admin) --quiet --eval 'db.adminCommand({ ping: 1 })'
+      ;;
+    dbs)
+      run_mongosh_non_tty "$service" $(mongosh_args "$service" admin) --quiet --eval 'db.adminCommand({ listDatabases: 1 }).databases.forEach(d => print(d.name))'
+      ;;
+    collections)
+      local db="${1:-admin}"
+      run_mongosh_non_tty "$service" $(mongosh_args "$service" "$db") --quiet --eval 'db.getCollectionNames().forEach(c => print(c))'
+      ;;
+    eval)
+      local js="${1:-}"
+      local db="${2:-admin}"
+      [[ -n "$js" ]] || err "JavaScript expression is required"
+      run_mongosh_non_tty "$service" $(mongosh_args "$service" "$db") --quiet --eval "$js"
+      ;;
+    create-db)
+      local db="${1:-}"
+      require_db_name "$db"
+      run_mongosh_non_tty "$service" $(mongosh_args "$service" "$db") --quiet --eval 'db.__lds_init.insertOne({createdAt:new Date()}); db.__lds_init.deleteMany({}); print(db.getName())'
+      ;;
+    drop-db)
+      local db="${1:-}"
+      require_db_name "$db"
+      run_mongosh_non_tty "$service" $(mongosh_args "$service" "$db") --quiet --eval 'db.dropDatabase()'
+      ;;
+    import)
+      local db="${1:-}" coll="${2:-}" src="${3:-}"
+      shift $(( $# >= 3 ? 3 : $# )) || true
+      require_db_name "$db"
+      require_collection_name "$coll"
+      [[ -n "$src" ]] || err "import file is required"
+      [[ -f "$src" ]] || err "import file not found: $src"
+
+      local path type ext
+      path="$(inside_workspace_path "$src")"
+      type="json"
+      ext="${src##*.}"
+      case "$ext" in
+        csv|CSV) type="csv" ;;
+        jsonl|ndjson|JSONL|NDJSON) type="json" ;;
+        json|JSON) type="json" ;;
+      esac
+
+      local -a extra=()
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --type)
+            shift
+            [[ $# -gt 0 ]] || err "--type requires a value"
+            type="$1"
+            ;;
+          --drop)
+            extra+=( "$1" )
+            ;;
+          *)
+            extra+=( "$1" )
+            ;;
+        esac
+        shift || true
+      done
+
+      if [[ "$type" == "json" ]]; then
+        case "$ext" in
+          jsonl|ndjson|JSONL|NDJSON) extra+=( --jsonArray=false ) ;;
+          json|JSON) : ;;
+        esac
+      fi
+
+      run_helper "$service" mongoimport \
+        --uri "$(common_uri "$service")" \
+        --db "$db" \
+        --collection "$coll" \
+        --file "$path" \
+        --type "$type" \
+        "${extra[@]}"
+      ;;
+    export)
+      local db="${1:-}" coll="${2:-}" out="${3:-}"
+      shift $(( $# >= 2 ? 2 : $# )) || true
+      require_db_name "$db"
+      require_collection_name "$coll"
+
+      if [[ -n "$out" && "$out" != --* ]]; then
+        shift || true
+        local host_out dir_in_ws file_in_ws
+        host_out="$out"
+        if [[ "$host_out" != /* ]]; then
+          host_out="$PWD/$host_out"
+        fi
+        mkdir -p "$(dirname "$host_out")"
+        dir_in_ws="$(inside_workspace_path "$(dirname "$host_out")")"
+        file_in_ws="$dir_in_ws/$(basename "$host_out")"
+
+        run_helper "$service" mongoexport \
+          --uri "$(common_uri "$service")" \
+          --db "$db" \
+          --collection "$coll" \
+          --out "$file_in_ws" \
+          "$@"
+      else
+        run_helper "$service" mongoexport \
+          --uri "$(common_uri "$service")" \
+          --db "$db" \
+          --collection "$coll" \
+          --out - \
+          "$@"
+      fi
+      ;;
+    *)
+      # convenience: `mongo mydb` opens shell for db
+      if [[ $# -eq 0 && "$cmd" =~ ^[A-Za-z0-9._-]+$ ]]; then
+        run_mongosh "$service" $(mongosh_args "$service" "$cmd")
+      else
+        err "unknown command: $cmd"
+      fi
+      ;;
+  esac
+}
+
+main "$@"
