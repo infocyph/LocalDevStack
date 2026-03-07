@@ -11,9 +11,15 @@ set -euo pipefail
 ###############################################################################
 
 # Color defaults (overridden later by init_colors); keep safe under set -u
-BOLD="${BOLD:-}"; DIM="${DIM:-}"
-RED="${RED:-}"; GREEN="${GREEN:-}"; CYAN="${CYAN:-}"; YELLOW="${YELLOW:-}"
-BLUE="${BLUE:-}"; MAGENTA="${MAGENTA:-}"; NC="${NC:-}"
+BOLD="${BOLD:-}"
+DIM="${DIM:-}"
+RED="${RED:-}"
+GREEN="${GREEN:-}"
+CYAN="${CYAN:-}"
+YELLOW="${YELLOW:-}"
+BLUE="${BLUE:-}"
+MAGENTA="${MAGENTA:-}"
+NC="${NC:-}"
 
 die() {
   printf "%bError:%b %s
@@ -56,8 +62,9 @@ need_bin() {
 # Commands that must NEVER be proxied to SERVER_TOOLS (host control plane / privileged / filesystem)
 _is_host_only_cmd() {
   case "${1:-}" in
-    docker|sudo|su|systemctl|service|ip|iptables|nft|sysctl|mount|umount|modprobe|insmod|rmmod|rm|mv|cp|chmod|chown)
-      return 0 ;;
+  docker | sudo | su | systemctl | service | ip | iptables | nft | sysctl | mount | umount | modprobe | insmod | rmmod | rm | mv | cp | chmod | chown)
+    return 0
+    ;;
   esac
   return 1
 }
@@ -83,11 +90,15 @@ _server_tools_has() {
 lds_tools_cmd() {
   local cmd="${1:-}"
   shift || true
-  [[ -n "$cmd" ]] || { echo "lds_tools_cmd: missing command" >&2; return 2; }
+  [[ -n "$cmd" ]] || {
+    echo "lds_tools_cmd: missing command" >&2
+    return 2
+  }
 
   # 1) host binary wins
   if has_bin "$cmd"; then
-    local p; p="$(bin_path "$cmd")"
+    local p
+    p="$(bin_path "$cmd")"
     "$p" "$@"
     return $?
   fi
@@ -158,7 +169,10 @@ need() {
     IFS='|,' read -ra alts <<<"$group"
     found=0
     for cmd in "${alts[@]}"; do
-      has_bin "$cmd" && { found=1; break; }
+      has_bin "$cmd" && {
+        found=1
+        break
+      }
     done
     ((found)) && continue
     local miss=${alts[*]}
@@ -294,11 +308,10 @@ fi
 # - --quiet suppresses non-error output
 QUIET=0
 
-say()  { ((QUIET)) || printf '%b\n' "$*"; }
-ok()   { ((QUIET)) || printf '%b\n' "${GREEN}$*${NC}"; }
+say() { ((QUIET)) || printf '%b\n' "$*"; }
+ok() { ((QUIET)) || printf '%b\n' "${GREEN}$*${NC}"; }
 warn() { ((QUIET)) || printf '%b\n' "${YELLOW}$*${NC}"; }
-err()  { printf '%b\n' "${RED}$*${NC}" >&2; }
-
+err() { printf '%b\n' "${RED}$*${NC}" >&2; }
 
 # Default behavior: QUIET
 VERBOSE=0
@@ -320,7 +333,7 @@ on_error() {
   local fn="${FUNCNAME[1]:-main}"
   local src="${BASH_SOURCE[1]:-$0}"
 
-  printf "\n%bError:%b %s:%s in %s() (exit %d)\n"     "$RED" "$NC" "$src" "$line" "$fn" "$code" >&2
+  printf "\n%bError:%b %s:%s in %s() (exit %d)\n" "$RED" "$NC" "$src" "$line" "$fn" "$code" >&2
   printf "%bCommand:%b %s\n" "$RED" "$NC" "$cmd" >&2
 
   if ((VERBOSE)); then
@@ -328,7 +341,7 @@ on_error() {
     local i=1
     while caller "$i" >/dev/null 2>&1; do
       caller "$i" >&2
-      i=$((i+1))
+      i=$((i + 1))
     done
   fi
   printf "\n" >&2
@@ -355,7 +368,7 @@ load_extras() {
   [[ -d "$EXTRAS_DIR" ]] || return 0
 
   mapfile -t __EXTRA_FILES < <(
-    find "$EXTRAS_DIR" -maxdepth 1 -type f \( -name '*.yaml' -o -name '*.yml' \) -print 2>/dev/null       | sort       | sed '/^[[:space:]]*$/d'
+    find "$EXTRAS_DIR" -maxdepth 1 -type f \( -name '*.yaml' -o -name '*.yml' \) -print 2>/dev/null | sort | sed '/^[[:space:]]*$/d'
   )
 }
 
@@ -376,16 +389,16 @@ docker_compose() {
   for f in "${__EXTRA_FILES[@]:-}"; do
     [[ -f "$f" ]] || continue
     case "$f" in
-    *.yml|*.yaml) extra_f+=(-f "$f") ;;
+    *.yml | *.yaml) extra_f+=(-f "$f") ;;
     esac
   done
 
   "${__LDS_DC_BIN[@]}" \
-  --project-directory "$DIR" \
-  -f "$COMPOSE_FILE" \
-  "${extra_f[@]}" \
-  --env-file "$ENV_DOCKER" \
-  "$@"
+    --project-directory "$DIR" \
+    -f "$COMPOSE_FILE" \
+    "${extra_f[@]}" \
+    --env-file "$ENV_DOCKER" \
+    "$@"
 }
 
 # helper: print project name
@@ -401,17 +414,17 @@ dc_cmd() {
   local -a quiet=()
   if ((VERBOSE == 0)); then
     case "$sub" in
-      up)    quiet+=(--quiet-pull) ;;
-      pull)  quiet+=(-q) ;;
-      build) quiet+=(--quiet) ;;
+    up) quiet+=(--quiet-pull) ;;
+    pull) quiet+=(-q) ;;
+    build) quiet+=(--quiet) ;;
     esac
   fi
 
   docker_compose "$sub" "${quiet[@]}" "$@"
 }
 
-dc_up()    { dc_cmd up "$@"; }
-dc_pull()  { dc_cmd pull "$@"; }
+dc_up() { dc_cmd up "$@"; }
+dc_pull() { dc_cmd pull "$@"; }
 dc_build() { dc_cmd build "$@"; }
 
 # helper for our own minimal logging (still shows in quiet mode)
@@ -590,13 +603,14 @@ fix_perms() {
 mkhost() { docker exec SERVER_TOOLS mkhost "$@"; }
 rmhost() { docker exec SERVER_TOOLS rmhost "$@"; }
 php_reload_or_restart_project() {
-  local project; project="$(lds_project)"
+  local project
+  project="$(lds_project)"
   [[ -n "$project" ]] || return 0
 
   local -a php_names=()
   mapfile -t php_names < <(
-    docker ps --format '{{.Names}}\t{{.Label "com.docker.compose.project"}}' 2>/dev/null \
-      | awk -F'\t' -v pr="$project" '$2==pr && $1 ~ /^PHP_/ {print $1}'
+    docker ps --format '{{.Names}}\t{{.Label "com.docker.compose.project"}}' 2>/dev/null |
+      awk -F'\t' -v pr="$project" '$2==pr && $1 ~ /^PHP_/ {print $1}'
   )
   ((${#php_names[@]})) || return 0
 
@@ -681,15 +695,24 @@ delete_domain() {
   # if rmhost also returns exact profile names here, this is fine too.)
   if [[ -n "$php_cont" ]]; then
     local IFS=',' p
-    for p in $php_cont; do p="$(echo "$p" | xargs)"; [[ -n "$p" ]] && modify_profiles remove "$p"; done
+    for p in $php_cont; do
+      p="$(echo "$p" | xargs)"
+      [[ -n "$p" ]] && modify_profiles remove "$p"
+    done
   fi
   if [[ -n "$apache_cont" ]]; then
     local IFS=',' p
-    for p in $apache_cont; do p="$(echo "$p" | xargs)"; [[ -n "$p" ]] && modify_profiles remove "$p"; done
+    for p in $apache_cont; do
+      p="$(echo "$p" | xargs)"
+      [[ -n "$p" ]] && modify_profiles remove "$p"
+    done
   fi
   if [[ -n "$node_cont" ]]; then
     local IFS=',' p
-    for p in $node_cont; do p="$(echo "$p" | xargs)"; [[ -n "$p" ]] && modify_profiles remove "$p"; done
+    for p in $node_cont; do
+      p="$(echo "$p" | xargs)"
+      [[ -n "$p" ]] && modify_profiles remove "$p"
+    done
   fi
 
   rmhost --RESET
@@ -904,104 +927,6 @@ process_all() {
   flush_envs
   flush_profiles
   printf "\n%b✅ Selected services configured!%b\n" "$GREEN" "$NC"
-}
-
-###############################################################################
-# 4. CONTAINER SHELL HELPERS (PHP / NODE)
-###############################################################################
-launch_php() {
-  local domain=$1 suffix
-  local nconf="$DIR/configuration/nginx/$domain.conf"
-  local aconf="$DIR/configuration/apache/$domain.conf"
-  [[ -f $nconf ]] || die "No Nginx config for $domain"
-
-  local docroot php
-  if grep -q fastcgi_pass "$nconf"; then
-    php=$(grep -Eo 'fastcgi_pass ([^:]+):9000' "$nconf" | awk '{print $2}' | sed 's/:9000$//')
-    docroot=$(grep -m1 -Eo 'root [^;]+' "$nconf" | awk '{print $2}')
-  else
-    [[ -f $aconf ]] || die "No Apache config for $domain"
-    docroot=$(grep -m1 -Eo 'DocumentRoot [^ ]+' "$aconf" | awk '{print $2}')
-    php=$(grep -Eo 'proxy:fcgi://([^:]+):9000' "$aconf" | sed 's/.*:\/\/\([^:]*\):.*/\1/')
-  fi
-
-  [[ $php ]] || die "Could not detect PHP container for $domain"
-  [[ $docroot ]] || docroot=/app
-  for suffix in public dist public_html; do
-    [[ $docroot == */$suffix ]] && {
-      docroot=${docroot%/*}
-      break
-    }
-  done
-
-  php=$(echo "$php" | tr ' \n' '\n' | awk 'NF && !seen[$0]++' | paste -sd' ' -)
-  docker exec -it "$php" bash --login -c "cd '$docroot' && exec bash"
-}
-
-# -----------------------------------------------------------------------------
-# Node shell (always /app)
-# -----------------------------------------------------------------------------
-launch_node() {
-  local domain="${1:-}"
-  [[ -n "$domain" ]] || die "Usage: lds core <domain>"
-
-  local nconf="$DIR/configuration/nginx/$domain.conf"
-  [[ -f "$nconf" ]] || die "No Nginx config for $domain"
-
-  # Expect: proxy_pass http://node_<token>:<port>;
-  local upstream host token ctr
-  upstream="$(
-    grep -m1 -Eo 'proxy_pass[[:space:]]+http://[^;]+' "$nconf" 2>/dev/null |
-      awk '{print $2}' |
-      sed 's|^http://||'
-  )"
-
-  [[ -n "${upstream:-}" ]] || die "Could not detect node upstream for $domain"
-  host="${upstream%%:*}" # node_resume_sparkle_localhost
-
-  [[ -n "${host:-}" ]] || die "Could not parse upstream host for $domain"
-
-  # Standard mapping: node_<token> -> NODE_<TOKEN>
-  ctr=""
-  if docker inspect "$host" >/dev/null 2>&1; then
-    ctr="$host"
-  elif [[ "$host" == node_* ]]; then
-    token="${host#node_}"
-    ctr="NODE_${token^^}"
-    docker inspect "$ctr" >/dev/null 2>&1 || ctr=""
-  fi
-
-  [[ -n "${ctr:-}" ]] || die "Node container not found for upstream '$host' (domain: $domain)"
-  docker inspect -f '{{.State.Running}}' "$ctr" 2>/dev/null | grep -qx true || die "Container not running: $ctr"
-
-  docker exec -it "$ctr" sh -lc '
-    cd /app 2>/dev/null || cd / || true
-    if command -v bash >/dev/null 2>&1; then exec bash --login; fi
-    exec sh
-  '
-}
-
-conf_node_container() {
-  local f="$1"
-
-  # Nginx node vhost: proxy_pass http://node_<token>:<port>;
-  local host token ctr
-
-  host="$(
-    grep -m1 -Eo 'proxy_pass[[:space:]]+http://[^;]+' "$f" 2>/dev/null |
-      awk '{print $2}' |
-      sed 's|^http://||' |
-      awk -F: '{print $1}'
-  )"
-
-  [[ -n "${host:-}" ]] || return 0
-  [[ "$host" == node_* ]] || return 0
-
-  token="${host#node_}"
-  ctr="NODE_${token^^}"
-
-  docker inspect "$ctr" >/dev/null 2>&1 || return 0
-  printf '%s' "$ctr"
 }
 
 ###############################################################################
@@ -1544,7 +1469,6 @@ cmd_start() {
   http_reload
 }
 
-
 cmd_stop() { docker_compose down; }
 
 cmd_down() {
@@ -1554,13 +1478,26 @@ cmd_down() {
   local -a args=()
   while [[ "${1:-}" ]]; do
     case "$1" in
-      --yes|-y) yes=1; shift ;;
-      --volumes|-v) vols=1; args+=("--volumes"); shift ;;
-      --remove-orphans) args+=("--remove-orphans"); shift ;;
-      *) args+=("$1"); shift ;;
+    --yes | -y)
+      yes=1
+      shift
+      ;;
+    --volumes | -v)
+      vols=1
+      args+=("--volumes")
+      shift
+      ;;
+    --remove-orphans)
+      args+=("--remove-orphans")
+      shift
+      ;;
+    *)
+      args+=("$1")
+      shift
+      ;;
     esac
   done
-  if ((vols)) && ((yes==0)); then
+  if ((vols)) && ((yes == 0)); then
     die "Refusing: down --volumes requires --yes"
   fi
   docker_compose down "${args[@]}"
@@ -1576,7 +1513,7 @@ cmd_reboot() { cmd_restart; }
 # 6a. STATUS / PS / STATS
 # ─────────────────────────────────────────────────────────────────────────────
 cmd_ps() {
-  if (( $# )); then
+  if (($#)); then
     docker_compose ps "$@"
   else
     docker_compose ps
@@ -1590,20 +1527,23 @@ _status_show_stats() {
   # pass container names derived from compose itself.
   local -a names=()
   if [[ -n "$svc" ]]; then
-    local s; s="$(resolve_service "$svc" 2>/dev/null || true)"
-    [[ -n "$s" ]] || { printf "(no matching containers)\n"; return 0; }
+    local s
+    s="$(resolve_service "$svc" 2>/dev/null || true)"
+    [[ -n "$s" ]] || {
+      printf "(no matching containers)\n"
+      return 0
+    }
     mapfile -t names < <(docker_compose ps "$s" --format '{{.Name}}' 2>/dev/null | sed '/^[[:space:]]*$/d')
   else
     mapfile -t names < <(docker_compose ps --format '{{.Name}}' 2>/dev/null | sed '/^[[:space:]]*$/d')
   fi
 
-  if (( ${#names[@]} )); then
+  if ((${#names[@]})); then
     docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.NetIO}}\t{{.BlockIO}}" "${names[@]}"
   else
     printf "(no matching containers)\n"
   fi
 }
-
 
 # Internal: list container IDs for current compose project
 _status_project_cids() {
@@ -1619,7 +1559,10 @@ _status_project_names() {
 _status_show_problems() {
   local -a cids=()
   mapfile -t cids < <(docker_compose ps -q 2>/dev/null | sed '/^[[:space:]]*$/d')
-  (( ${#cids[@]} == 0 )) && { printf "(none)\n"; return 0; }
+  ((${#cids[@]} == 0)) && {
+    printf "(none)\n"
+    return 0
+  }
 
   # Collect rows as TAB-separated fields
   # name | state | health | restart | exit | finishedAt
@@ -1641,9 +1584,9 @@ _status_show_problems() {
     if [[ "$state" != "running" || "$health" == "unhealthy" ]]; then
       rows+=("$name"$'\t'"$state"$'\t'"${health:-'-'}"$'\t'"${restart:-0}"$'\t'"${exitcode:-0}"$'\t'"${finishedAt:-'-'}")
     fi
-  done <<< "$raw"
+  done <<<"$raw"
 
-  if (( ${#rows[@]} == 0 )); then
+  if ((${#rows[@]} == 0)); then
     printf "(none)\n"
     return 0
   fi
@@ -1652,7 +1595,7 @@ _status_show_problems() {
   printf "  %-18s  %-10s  %-10s  %-7s  %-18s\n" "NAME" "STATE" "HEALTH" "RESTART" "LAST_EXIT"
 
   for line in "${rows[@]}"; do
-    IFS=$'\t' read -r name state health restart exitcode finishedAt <<< "$line"
+    IFS=$'\t' read -r name state health restart exitcode finishedAt <<<"$line"
     # LAST_EXIT: show exit code; add finishedAt for non-running states (helps debugging)
     local last="code=${exitcode}"
     [[ "$state" != "running" && "$finishedAt" != "-" ]] && last+=" @${finishedAt}"
@@ -1665,14 +1608,17 @@ _status_show_problems() {
 _status_show_top_consumers() {
   local -a names=()
   mapfile -t names < <(_status_project_names)
-  if (( ${#names[@]} == 0 )); then
+  if ((${#names[@]} == 0)); then
     printf "(none)\n"
     return 0
   fi
 
   local stats
   stats="$(docker stats --no-stream --format '{{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}' "${names[@]}" 2>/dev/null || true)"
-  [[ -n "$stats" ]] || { printf "(no stats)\n"; return 0; }
+  [[ -n "$stats" ]] || {
+    printf "(no stats)\n"
+    return 0
+  }
 
   _to_bytes() {
     local v="$1"
@@ -1699,8 +1645,8 @@ _status_show_top_consumers() {
   printf "%s\n" "$stats" | awk -F'\t' '
     {name=$1; cpu=$2; mem=$3; split(mem,a,"/"); gsub(/^[[:space:]]+|[[:space:]]+$/,"",a[1]); print name "\t" cpu "\t" a[1]}
   ' | while IFS=$'\t' read -r n cpu mem; do
-      printf "%s\t%s\t%s\t%s\n" "$n" "$cpu" "$mem" "$(_to_bytes "$mem")"
-    done | sort -t$'\t' -k4,4nr | head -n 5 | awk -F'\t' '{printf "    %-16s  CPU=%-7s  MEM=%s\n",$1,$2,$3}'
+    printf "%s\t%s\t%s\t%s\n" "$n" "$cpu" "$mem" "$(_to_bytes "$mem")"
+  done | sort -t$'\t' -k4,4nr | head -n 5 | awk -F'\t' '{printf "    %-16s  CPU=%-7s  MEM=%s\n",$1,$2,$3}'
 
   printf "  %bTop by CPU:%b\n" "$BOLD" "$NC"
   printf "%s\n" "$stats" | awk -F'\t' '
@@ -1712,7 +1658,7 @@ _status_show_top_consumers() {
 _status_show_volumes() {
   local -a cids=()
   mapfile -t cids < <(_status_project_cids)
-  if (( ${#cids[@]} == 0 )); then
+  if ((${#cids[@]} == 0)); then
     printf "(none)\n"
     return 0
   fi
@@ -1734,7 +1680,7 @@ _status_show_volumes() {
   local -a vols=()
   mapfile -t vols < <(printf "%s\n" "${!v2c[@]}" | sort)
 
-  if (( ${#vols[@]} == 0 )); then
+  if ((${#vols[@]} == 0)); then
     printf "(none)\n"
     return 0
   fi
@@ -1767,14 +1713,14 @@ _status_show_volumes() {
   for line in "${rows[@]}"; do
     IFS=$'\t' read -r name drv <<<"$line"
     ((${#name} > w_name)) && w_name=${#name}
-    ((${#drv}  > w_drv))  && w_drv=${#drv}
+    ((${#drv} > w_drv)) && w_drv=${#drv}
   done
-  (( w_name > 36 )) && w_name=36
-  (( w_drv  > 12 )) && w_drv=12
+  ((w_name > 36)) && w_name=36
+  ((w_drv > 12)) && w_drv=12
 
   printf "  %b%-*s%b  %b%-*s%b  %b%-8s%b  %b%-6s%b  %b%s%b\n" \
     "$BOLD" "$w_name" "VOLUME" "$NC" \
-    "$BOLD" "$w_drv"  "DRIVER" "$NC" \
+    "$BOLD" "$w_drv" "DRIVER" "$NC" \
     "$BOLD" "SIZE" "$NC" \
     "$BOLD" "LINKS" "$NC" \
     "$BOLD" "MOUNTED_BY" "$NC"
@@ -1791,30 +1737,36 @@ _status_show_volumes() {
     local shown="$mb" extra=""
     local cnt
     cnt="$(printf '%s' "$mb" | awk -F',' '{print NF}')"
-    if (( cnt > 3 )); then
+    if ((cnt > 3)); then
       shown="$(printf '%s' "$mb" | awk -F',' '{print $1","$2","$3}')"
       extra=",…(+${cnt}-3)"
-      extra=",…(+$(($cnt-3)))"
+      extra=",…(+$(($cnt - 3)))"
     fi
 
-    local n="$name"; ((${#n} > w_name)) && n="${n:0:w_name-1}…"
-    local d="$drv";  ((${#d} > w_drv))  && d="${d:0:w_drv-1}…"
+    local n="$name"
+    ((${#n} > w_name)) && n="${n:0:w_name-1}…"
+    local d="$drv"
+    ((${#d} > w_drv)) && d="${d:0:w_drv-1}…"
 
     printf "  %-*s  %-*s  %-8s  %-6s  %s%s\n" \
       "$w_name" "$n" "$w_drv" "${d:-'-'}" "$sz" "$lk" "$shown" "$extra"
   done
 
-  (( any_size )) || printf "\n  %bNote:%b volume sizes unavailable (docker system df -v did not provide volume table)\n" "$YELLOW" "$NC"
+  ((any_size)) || printf "\n  %bNote:%b volume sizes unavailable (docker system df -v did not provide volume table)\n" "$YELLOW" "$NC"
 }
 
 # 4) Networks + IPs
 _status_show_networks() {
-  local project; project="$(lds_project)"
+  local project
+  project="$(lds_project)"
 
   # Project containers (fast, single compose call)
   local -a cids=()
   mapfile -t cids < <(_status_project_cids)
-  (( ${#cids[@]} )) || { printf "    (none)\n"; return 0; }
+  ((${#cids[@]})) || {
+    printf "    (none)\n"
+    return 0
+  }
 
   printf "  %bNetworks:%b\n" "$BOLD" "$NC"
 
@@ -1825,9 +1777,9 @@ _status_show_networks() {
   if [[ -z "$nets" ]]; then
     nets="$(
       docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{"\n"}}{{end}}' \
-        "${cids[@]}" 2>/dev/null \
-        | sed '/^[[:space:]]*$/d' \
-        | sort -u
+        "${cids[@]}" 2>/dev/null |
+        sed '/^[[:space:]]*$/d' |
+        sort -u
     )"
   fi
 
@@ -1848,7 +1800,7 @@ _status_show_networks() {
 
       printf "    %-22s %-8s %-18s %-18s %-6s\n" \
         "$n" "${driver:-'-'}" "${subnet:-'-'}" "${gateway:-'-'}" "${cnt:-0}"
-    done <<< "$nets"
+    done <<<"$nets"
   fi
 
   printf "  %bContainer IPs:%b\n" "$BOLD" "$NC"
@@ -1871,7 +1823,10 @@ _status_show_networks() {
 
 # 5) Optional endpoint probes (gated)
 _status_show_probes() {
-  ((${LDS_STATUS_PROBE:-0})) || { printf "(disabled; set LDS_STATUS_PROBE=1)\n"; return 0; }
+  ((${LDS_STATUS_PROBE:-0})) || {
+    printf "(disabled; set LDS_STATUS_PROBE=1)\n"
+    return 0
+  }
   if ! has_tool curl; then
     printf "(curl missing)\n"
     return 0
@@ -1880,7 +1835,7 @@ _status_show_probes() {
   local -a urls=()
   mapfile -t urls < <(_status_urls 2>/dev/null || true)
 
-  if (( ${#urls[@]} == 0 )); then
+  if ((${#urls[@]} == 0)); then
     printf "(no urls)\n"
     return 0
   fi
@@ -1898,7 +1853,10 @@ _status_show_probes() {
 _status_show_recent_errors() {
   local -a cids=()
   mapfile -t cids < <(_status_project_cids)
-  (( ${#cids[@]} )) || { printf "(none)\n"; return 0; }
+  ((${#cids[@]})) || {
+    printf "(none)\n"
+    return 0
+  }
 
   local -a bad=()
   local cid st health
@@ -1910,7 +1868,7 @@ _status_show_recent_errors() {
     fi
   done
 
-  if (( ${#bad[@]} == 0 )); then
+  if ((${#bad[@]} == 0)); then
     printf "(none)\n"
     return 0
   fi
@@ -1925,7 +1883,8 @@ _status_show_recent_errors() {
 
 # 7) Drift / hygiene checks
 _status_show_drift() {
-  local project; project="$(lds_project)"
+  local project
+  project="$(lds_project)"
 
   local -a compose_names=()
   mapfile -t compose_names < <(docker_compose ps -a --format '{{.Name}}' 2>/dev/null | sed '/^[[:space:]]*$/d' || true)
@@ -1942,7 +1901,7 @@ _status_show_drift() {
     [[ -n "${have[$n]+x}" ]] || orphans+=("$n")
   done
 
-  if (( ${#orphans[@]} )); then
+  if ((${#orphans[@]})); then
     printf "  %bOrphan containers:%b %s\n" "$YELLOW" "$NC" "${orphans[*]}"
   else
     printf "  %bOrphan containers:%b (none)\n" "$GREEN" "$NC"
@@ -1953,10 +1912,10 @@ _status_show_drift() {
 
   local -a cids=()
   mapfile -t cids < <(_status_project_cids)
-  if (( ${#cids[@]} )); then
+  if ((${#cids[@]})); then
     mapfile -t v_mnt < <(
-      docker inspect -f '{{range .Mounts}}{{if eq .Type "volume"}}{{.Name}}{{"\\n"}}{{end}}{{end}}' "${cids[@]}" 2>/dev/null \
-        | sed '/^[[:space:]]*$/d' | awk '!seen[$0]++'
+      docker inspect -f '{{range .Mounts}}{{if eq .Type "volume"}}{{.Name}}{{"\\n"}}{{end}}{{end}}' "${cids[@]}" 2>/dev/null |
+        sed '/^[[:space:]]*$/d' | awk '!seen[$0]++'
     )
   fi
   declare -A m=()
@@ -1967,9 +1926,9 @@ _status_show_drift() {
     [[ -n "${m[$n]+x}" ]] || unused+=("$n")
   done
 
-  if (( ${#v_lab[@]} == 0 )); then
+  if ((${#v_lab[@]} == 0)); then
     printf "  %bLabeled volumes:%b (none)\n" "$DIM" "$NC"
-  elif (( ${#unused[@]} )); then
+  elif ((${#unused[@]})); then
     printf "  %bUnused labeled volumes:%b %s\n" "$YELLOW" "$NC" "${unused[*]}"
   else
     printf "  %bUnused labeled volumes:%b (none)\n" "$GREEN" "$NC"
@@ -2019,19 +1978,19 @@ _status_checks() {
 
   # Print exactly two lines (tab separated)
   printf "%bSystem%b\t" "$CYAN" "$NC"
-  if (( ${#sys_bad[@]} )); then
+  if ((${#sys_bad[@]})); then
     printf "%b!%b %s" "$YELLOW" "$NC" "${sys_bad[*]}"
-    if (( ${#sys_ok[@]} )); then printf "%b | %b" "$DIM" "$NC"; fi
+    if ((${#sys_ok[@]})); then printf "%b | %b" "$DIM" "$NC"; fi
   fi
-  (( ${#sys_ok[@]} )) && printf "%b✓%b %s" "$GREEN" "$NC" "${sys_ok[*]}"
+  ((${#sys_ok[@]})) && printf "%b✓%b %s" "$GREEN" "$NC" "${sys_ok[*]}"
   printf "\n"
 
   printf "%bProject%b\t" "$CYAN" "$NC"
-  if (( ${#proj_bad[@]} )); then
+  if ((${#proj_bad[@]})); then
     printf "%b!%b %s" "$YELLOW" "$NC" "${proj_bad[*]}"
-    if (( ${#proj_ok[@]} )); then printf "%b | %b" "$DIM" "$NC"; fi
+    if ((${#proj_ok[@]})); then printf "%b | %b" "$DIM" "$NC"; fi
   fi
-  (( ${#proj_ok[@]} )) && printf "%b✓%b %s" "$GREEN" "$NC" "${proj_ok[*]}"
+  ((${#proj_ok[@]})) && printf "%b✓%b %s" "$GREEN" "$NC" "${proj_ok[*]}"
   printf "\n"
 }
 _status_show_disk() {
@@ -2053,12 +2012,18 @@ _human_bytes() {
 # Internal: directory size in bytes (portable-ish across GNU/BSD du)
 _dir_size_bytes() {
   local p="${1:-}"
-  [[ -n "$p" && -d "$p" ]] || { printf '0'; return 0; }
+  [[ -n "$p" && -d "$p" ]] || {
+    printf '0'
+    return 0
+  }
 
   # GNU du supports -b; BSD does not.
   local out
   if out="$(du -sb "$p" 2>/dev/null | awk '{print $1}' 2>/dev/null)"; then
-    [[ -n "$out" ]] && { printf '%s' "$out"; return 0; }
+    [[ -n "$out" ]] && {
+      printf '%s' "$out"
+      return 0
+    }
   fi
 
   # Fallback: du -sk * 1024
@@ -2069,7 +2034,8 @@ _dir_size_bytes() {
 
 # Internal: volumes list + sizes for this compose project
 _status_show_volumes() {
-  local project; project="$(lds_project)"
+  local project
+  project="$(lds_project)"
 
   # 1) volumes by compose label (if any)
   local -a vols=()
@@ -2081,22 +2047,22 @@ _status_show_volumes() {
   local -a cids=()
   mapfile -t cids < <(docker_compose ps -q 2>/dev/null | sed '/^[[:space:]]*$/d')
 
-  if (( ${#cids[@]} > 0 )); then
+  if ((${#cids[@]} > 0)); then
     local v
     while IFS= read -r v; do
       [[ -n "$v" ]] && vols+=("$v")
     done < <(
-      docker inspect -f '{{range .Mounts}}{{if eq .Type "volume"}}{{.Name}}{{"\n"}}{{end}}{{end}}' "${cids[@]}" 2>/dev/null \
-        | sed '/^[[:space:]]*$/d'
+      docker inspect -f '{{range .Mounts}}{{if eq .Type "volume"}}{{.Name}}{{"\n"}}{{end}}{{end}}' "${cids[@]}" 2>/dev/null |
+        sed '/^[[:space:]]*$/d'
     )
   fi
 
   # uniq
-  if (( ${#vols[@]} > 0 )); then
+  if ((${#vols[@]} > 0)); then
     mapfile -t vols < <(printf "%s\n" "${vols[@]}" | awk '!seen[$0]++')
   fi
 
-  if (( ${#vols[@]} == 0 )); then
+  if ((${#vols[@]} == 0)); then
     printf "(none)\n"
     return 0
   fi
@@ -2128,7 +2094,7 @@ _status_show_volumes() {
     docker volume inspect -f '{{.Name}}	{{.Driver}}' "${vols[@]}" 2>/dev/null | sed '/^[[:space:]]*$/d'
   )
 
-  if (( ${#rows[@]} == 0 )); then
+  if ((${#rows[@]} == 0)); then
     printf "(none)\n"
     return 0
   fi
@@ -2138,14 +2104,14 @@ _status_show_volumes() {
   for line in "${rows[@]}"; do
     IFS=$'\t' read -r name drv <<<"$line"
     ((${#name} > w_name)) && w_name=${#name}
-    ((${#drv}  > w_drv))  && w_drv=${#drv}
+    ((${#drv} > w_drv)) && w_drv=${#drv}
   done
-  (( w_name > 40 )) && w_name=40
-  (( w_drv  > 12 )) && w_drv=12
+  ((w_name > 40)) && w_name=40
+  ((w_drv > 12)) && w_drv=12
 
   printf "  %b%-*s%b  %b%-*s%b  %b%s%b\n" \
     "$BOLD" "$w_name" "NAME" "$NC" \
-    "$BOLD" "$w_drv"  "DRIVER" "$NC" \
+    "$BOLD" "$w_drv" "DRIVER" "$NC" \
     "$BOLD" "SIZE" "$NC"
 
   local total_note=0
@@ -2154,18 +2120,18 @@ _status_show_volumes() {
 
     local n_disp="$name" d_disp="$drv"
     if ((${#n_disp} > w_name)); then n_disp="${n_disp:0:w_name-1}…"; fi
-    if ((${#d_disp} > w_drv));  then d_disp="${d_disp:0:w_drv-1}…"; fi
+    if ((${#d_disp} > w_drv)); then d_disp="${d_disp:0:w_drv-1}…"; fi
 
     local sz="${__VOL_SZ[$name]:--}"
     [[ "$sz" != "-" ]] && total_note=1
 
     printf "  %-*s  %-*s  %s\n" \
       "$w_name" "$n_disp" \
-      "$w_drv"  "${d_disp:-'-'}" \
+      "$w_drv" "${d_disp:-'-'}" \
       "$sz"
   done
 
-  if (( total_note == 0 )); then
+  if ((total_note == 0)); then
     printf "\n  %bNote:%b volume sizes unavailable (docker system df -v did not provide volume table)\n" \
       "$YELLOW" "$NC"
   fi
@@ -2204,17 +2170,17 @@ _status_health_line() {
   # Prefer health when present, otherwise State.Status
   if [[ -n "$health" ]]; then
     case "$health" in
-      healthy)   printf '%b%s%b' "$GREEN" "$line" "$NC" ;;
-      starting)  printf '%b%s%b' "$YELLOW" "$line" "$NC" ;;
-      unhealthy) printf '%b%s%b' "$RED" "$line" "$NC" ;;
-      *)         printf '%b%s%b' "$MAGENTA" "$line" "$NC" ;;
+    healthy) printf '%b%s%b' "$GREEN" "$line" "$NC" ;;
+    starting) printf '%b%s%b' "$YELLOW" "$line" "$NC" ;;
+    unhealthy) printf '%b%s%b' "$RED" "$line" "$NC" ;;
+    *) printf '%b%s%b' "$MAGENTA" "$line" "$NC" ;;
     esac
   else
     case "$st" in
-      running) printf '%b%s%b' "$GREEN" "$line" "$NC" ;;
-      exited|dead) printf '%b%s%b' "$RED" "$line" "$NC" ;;
-      created|paused|restarting) printf '%b%s%b' "$YELLOW" "$line" "$NC" ;;
-      *) printf '%b%s%b' "$MAGENTA" "$line" "$NC" ;;
+    running) printf '%b%s%b' "$GREEN" "$line" "$NC" ;;
+    exited | dead) printf '%b%s%b' "$RED" "$line" "$NC" ;;
+    created | paused | restarting) printf '%b%s%b' "$YELLOW" "$line" "$NC" ;;
+    *) printf '%b%s%b' "$MAGENTA" "$line" "$NC" ;;
     esac
   fi
 }
@@ -2223,7 +2189,8 @@ _status_health_line() {
 _status_core() {
   local json="$1" quiet="$2"
 
-  local project; project="$(lds_project)"
+  local project
+  project="$(lds_project)"
 
   local profiles=""
   if [[ -r "$ENV_DOCKER" ]]; then
@@ -2233,8 +2200,8 @@ _status_core() {
   # containers (Name \t Service \t State \t Health)
   local -a ctrs=()
   mapfile -t ctrs < <(
-    docker_compose ps -a --format '{{.Name}}\t{{.Service}}\t{{.State}}\t{{.Health}}' 2>/dev/null \
-      | sed '/^[[:space:]]*$/d'
+    docker_compose ps -a --format '{{.Name}}\t{{.Service}}\t{{.State}}\t{{.Health}}' 2>/dev/null |
+      sed '/^[[:space:]]*$/d'
   )
 
   # urls
@@ -2270,7 +2237,7 @@ _status_core() {
     local s="$1"
     case "$s" in
     running) printf '%s' "$GREEN" ;;
-    exited|dead) printf '%s' "$RED" ;;
+    exited | dead) printf '%s' "$RED" ;;
     restarting) printf '%s' "$YELLOW" ;;
     *) printf '%s' "$DIM" ;;
     esac
@@ -2294,7 +2261,7 @@ _status_core() {
   local total running
   total=${#ctrs[@]}
   running=0
-  if (( total )); then
+  if ((total)); then
     local line _n _svc st _h
     for line in "${ctrs[@]}"; do
       IFS=$'\t' read -r _n _svc st _h <<<"$line"
@@ -2303,7 +2270,7 @@ _status_core() {
   fi
 
   # ---- JSON mode ----
-  if (( json )); then
+  if ((json)); then
     printf '{'
     printf '"project":"%s",' "$(_json_escape "$project")"
     printf '"profiles":"%s",' "$(_json_escape "$profiles")"
@@ -2313,16 +2280,16 @@ _status_core() {
     local first=1 line name svc state health
     for line in "${ctrs[@]}"; do
       IFS=$'\t' read -r name svc state health <<<"$line"
-      (( first )) || printf ','
+      ((first)) || printf ','
       first=0
 
       local health_disp="${health:-}"
       [[ -z "$health_disp" || "$health_disp" == "null" ]] && health_disp='-'
 
       printf '{'
-      printf '"name":"%s",'   "$(_json_escape "$name")"
+      printf '"name":"%s",' "$(_json_escape "$name")"
       printf '"service":"%s",' "$(_json_escape "$svc")"
-      printf '"state":"%s",'  "$(_json_escape "$state")"
+      printf '"state":"%s",' "$(_json_escape "$state")"
       printf '"health":"%s",' "$(_json_escape "$health_disp")"
       printf '"health_icon":"%s"' "$(_json_escape "$(_health_icon "$health_disp")")"
       printf '}'
@@ -2336,7 +2303,7 @@ _status_core() {
     local u
     for u in "${urls[@]}"; do
       [[ -n "$u" ]] || continue
-      (( first )) || printf ','
+      ((first)) || printf ','
       first=0
       printf '"%s"' "$(_json_escape "$u")"
     done
@@ -2347,7 +2314,7 @@ _status_core() {
   fi
 
   # ---- Quiet mode ----
-  if (( quiet )); then
+  if ((quiet)); then
     return 0
   fi
 
@@ -2365,14 +2332,14 @@ _status_core() {
     for line in "${ctrs[@]}"; do
       IFS=$'\t' read -r name svc state health <<<"$line"
       ((${#name} > w_name)) && w_name=${#name}
-      ((${#svc}  > w_svc))  && w_svc=${#svc}
+      ((${#svc} > w_svc)) && w_svc=${#svc}
     done
-    (( w_name > 34 )) && w_name=34
-    (( w_svc  > 18 )) && w_svc=18
+    ((w_name > 34)) && w_name=34
+    ((w_svc > 18)) && w_svc=18
 
     printf "  %b%-*s%b  %b%-*s%b  %b%-10s%b  %b%s%b\n" \
       "$BOLD" "$w_name" "NAME" "$NC" \
-      "$BOLD" "$w_svc"  "SERVICE" "$NC" \
+      "$BOLD" "$w_svc" "SERVICE" "$NC" \
       "$BOLD" "STATE" "$NC" \
       "$BOLD" "HEALTH" "$NC"
 
@@ -2390,11 +2357,12 @@ _status_core() {
       local health_disp="${health:-}"
       [[ -z "$health_disp" || "$health_disp" == "null" ]] && health_disp='-'
 
-      local hi; hi="$(_health_icon "$health_disp")"
+      local hi
+      hi="$(_health_icon "$health_disp")"
 
       printf "  %-*s  %-*s  %b%-10s%b  %b%s %s%b\n" \
         "$w_name" "$name_disp" \
-        "$w_svc"  "$svc_disp" \
+        "$w_svc" "$svc_disp" \
         "$stc" "${state:-'-'}" "$NC" \
         "$hc" "$hi" "$health_disp" "$NC"
     done
@@ -2418,15 +2386,21 @@ cmd_status() {
   local json=0 quiet=0
   while [[ "${1:-}" ]]; do
     case "$1" in
-    --json) json=1; shift ;;
-    --quiet|-q) quiet=1; shift ;;
+    --json)
+      json=1
+      shift
+      ;;
+    --quiet | -q)
+      quiet=1
+      shift
+      ;;
     *) break ;;
     esac
   done
 
   # JSON output is intentionally scoped to core stack info only.
   _status_core "$json" "$quiet"
-  if (( json )) || (( quiet )); then
+  if ((json)) || ((quiet)); then
     return 0
   fi
 
@@ -2487,10 +2461,22 @@ cmd_logs() {
   local svc="" follow=0 since="" grep_pat=""
   while [[ "${1:-}" ]]; do
     case "$1" in
-      -f|--follow) follow=1; shift ;;
-      --since) since="${2:-}"; shift 2 ;;
-      --grep) grep_pat="${2:-}"; shift 2 ;;
-      *) svc="${1:-}"; shift ;;
+    -f | --follow)
+      follow=1
+      shift
+      ;;
+    --since)
+      since="${2:-}"
+      shift 2
+      ;;
+    --grep)
+      grep_pat="${2:-}"
+      shift 2
+      ;;
+    *)
+      svc="${1:-}"
+      shift
+      ;;
     esac
   done
 
@@ -2499,7 +2485,8 @@ cmd_logs() {
   [[ -n "$since" ]] && args+=("--since" "$since")
 
   if [[ -n "$svc" ]]; then
-    local s; s="$(resolve_service "$svc" || true)"
+    local s
+    s="$(resolve_service "$svc" || true)"
     [[ -n "$s" ]] || die "Unknown service: $svc"
     if [[ -n "$grep_pat" ]]; then
       docker_compose logs "${args[@]}" "$s" 2>&1 | text_grep "$grep_pat"
@@ -2520,14 +2507,14 @@ cmd_open() {
   [[ -n "$target" ]] || die "open <mail|db|redis|kibana|domain>"
   local url=""
   case "${target,,}" in
-    mail|mailpit|webmail) url="https://webmail.localhost" ;;
-    db|cloudbeaver) url="https://db.localhost" ;;
-    redis|redisinsight|redis-insight|rds) url="http://ri.localhost" ;;
-    mongo|me|mongoexpress|mongo-express) url="http://me.localhost" ;;
-    kibana|kbn) url="http://kibana.localhost" ;;
-    *)
-      url="https://${target}"
-      ;;
+  mail | mailpit | webmail) url="https://webmail.localhost" ;;
+  db | cloudbeaver) url="https://db.localhost" ;;
+  redis | redisinsight | redis-insight | rds) url="http://ri.localhost" ;;
+  mongo | me | mongoexpress | mongo-express) url="http://me.localhost" ;;
+  kibana | kbn) url="http://kibana.localhost" ;;
+  *)
+    url="https://${target}"
+    ;;
   esac
   open_url "$url"
 }
@@ -2557,40 +2544,40 @@ cmd_profiles() {
   local action="${1:-list}"
   shift || true
   case "${action,,}" in
-    list|"")
-      local cur=""
-      [[ -r "$ENV_DOCKER" ]] && cur="$(grep -E '^COMPOSE_PROFILES=' "$ENV_DOCKER" | tail -n1 | cut -d= -f2- | tr -d '\r' || true)"
-      printf "%bEnabled profiles:%b %s
+  list | "")
+    local cur=""
+    [[ -r "$ENV_DOCKER" ]] && cur="$(grep -E '^COMPOSE_PROFILES=' "$ENV_DOCKER" | tail -n1 | cut -d= -f2- | tr -d '\r' || true)"
+    printf "%bEnabled profiles:%b %s
 " "$CYAN" "$NC" "${cur:-<none>}"
-      printf "%bAvailable profiles:%b
+    printf "%bAvailable profiles:%b
 " "$CYAN" "$NC"
-      printf '  - %s
+    printf '  - %s
 ' "${SERVICES[@]}" | LC_ALL=C sort -u
-      # warn if enabled profile has no mention in compose
-      if [[ -n "$cur" ]]; then
-        local p
-        IFS=',' read -r -a __ps <<<"$cur"
-        for p in "${__ps[@]}"; do
-          p="${p//[[:space:]]/}"
-          [[ -n "$p" ]] || continue
-          _known_profile "$p" || printf "%b[warn]%b enabled profile '%s' has no matching services in compose
+    # warn if enabled profile has no mention in compose
+    if [[ -n "$cur" ]]; then
+      local p
+      IFS=',' read -r -a __ps <<<"$cur"
+      for p in "${__ps[@]}"; do
+        p="${p//[[:space:]]/}"
+        [[ -n "$p" ]] || continue
+        _known_profile "$p" || printf "%b[warn]%b enabled profile '%s' has no matching services in compose
 " "$YELLOW" "$NC" "$p"
-        done
-      fi
-      ;;
-    add)
-      [[ $# -gt 0 ]] || die "profiles add <profile...>"
-      for p in "$@"; do
-        modify_profiles add "$p"
       done
-      ;;
-    remove|rm|del)
-      [[ $# -gt 0 ]] || die "profiles remove <profile...>"
-      modify_profiles remove "$@"
-      ;;
-    *)
-      die "profiles <list|add|remove>"
-      ;;
+    fi
+    ;;
+  add)
+    [[ $# -gt 0 ]] || die "profiles add <profile...>"
+    for p in "$@"; do
+      modify_profiles add "$p"
+    done
+    ;;
+  remove | rm | del)
+    [[ $# -gt 0 ]] || die "profiles remove <profile...>"
+    modify_profiles remove "$@"
+    ;;
+  *)
+    die "profiles <list|add|remove>"
+    ;;
   esac
 }
 
@@ -2611,41 +2598,47 @@ cmd_diag() {
   shift || true
 
   case "${sub,,}" in
-    dns)
-      local dom="${1:-}"; [[ -n "$dom" ]] || die "diag dns <domain>"
-      local qdom; qdom="$(_shq "$dom")"
-      _tools_exec "dig +short $qdom; echo; nslookup $qdom 2>/dev/null || true; echo; getent hosts $qdom 2>/dev/null || true"
-      ;;
-    route|net)
-      _tools_exec "ip r; echo; ip a; echo; ss -tulpen 2>/dev/null || netstat -tulpen 2>/dev/null || true"
-      ;;
-    tcp)
-      local h="${1:-}"; local p="${2:-}"
-      [[ -n "$h" && -n "$p" ]] || die "diag tcp <host> <port>"
-      _tools_exec "nc -vz -w2 $(_shq "$h") $(_shq "$p")"
-      ;;
-    http)
-      local url="${1:-}"; shift || true
-      [[ -n "$url" ]] || die "diag http <url> [curl-args...]"
-      local -a qargs=()
-      local a
-      for a in "$@"; do qargs+=("$(printf '%q' "$a")"); done
-      _tools_exec "curl -vkI $(_shq "$url") ${qargs[*]}"
-      ;;
-    tls)
-      local dom="${1:-}"; [[ -n "$dom" ]] || die "diag tls <domain>"
-      local qdom; qdom="$(_shq "$dom")"
-      _tools_exec "echo | openssl s_client -connect ${qdom}:443 -servername $qdom -showcerts 2>/dev/null | sed -n '1,60p'"
-      ;;
-    *)
-      die "diag <dns|route|net|tcp|http|tls>"
-      ;;
+  dns)
+    local dom="${1:-}"
+    [[ -n "$dom" ]] || die "diag dns <domain>"
+    local qdom
+    qdom="$(_shq "$dom")"
+    _tools_exec "dig +short $qdom; echo; nslookup $qdom 2>/dev/null || true; echo; getent hosts $qdom 2>/dev/null || true"
+    ;;
+  route | net)
+    _tools_exec "ip r; echo; ip a; echo; ss -tulpen 2>/dev/null || netstat -tulpen 2>/dev/null || true"
+    ;;
+  tcp)
+    local h="${1:-}"
+    local p="${2:-}"
+    [[ -n "$h" && -n "$p" ]] || die "diag tcp <host> <port>"
+    _tools_exec "nc -vz -w2 $(_shq "$h") $(_shq "$p")"
+    ;;
+  http)
+    local url="${1:-}"
+    shift || true
+    [[ -n "$url" ]] || die "diag http <url> [curl-args...]"
+    local -a qargs=()
+    local a
+    for a in "$@"; do qargs+=("$(printf '%q' "$a")"); done
+    _tools_exec "curl -vkI $(_shq "$url") ${qargs[*]}"
+    ;;
+  tls)
+    local dom="${1:-}"
+    [[ -n "$dom" ]] || die "diag tls <domain>"
+    local qdom
+    qdom="$(_shq "$dom")"
+    _tools_exec "echo | openssl s_client -connect ${qdom}:443 -servername $qdom -showcerts 2>/dev/null | sed -n '1,60p'"
+    ;;
+  *)
+    die "diag <dns|route|net|tcp|http|tls>"
+    ;;
   esac
 }
 
-
 cmd_sniff() {
-  local url="${1:-}"; shift || true
+  local url="${1:-}"
+  shift || true
   [[ -n "$url" ]] || die "sniff <url> [curl-args...]"
   local -a qargs=()
   local a
@@ -2661,32 +2654,34 @@ cmd_secrets() { docker exec -it SERVER_TOOLS senv "$@"; }
 cmd_cert() { docker exec -it SERVER_TOOLS certify "$@"; }
 
 cmd_host() {
-  local sub="${1:-}"; shift || true
+  local sub="${1:-}"
+  shift || true
   case "${sub,,}" in
-    add)
-      setup_domain
-      ;;
-    rm|remove|del|delete)
-      delete_domain "$@"
-      ;;
-    list)
-      shopt -s nullglob
-      for f in "$DIR/configuration/nginx/"*.conf; do
-        printf '%s
+  add)
+    setup_domain
+    ;;
+  rm | remove | del | delete)
+    delete_domain "$@"
+    ;;
+  list)
+    shopt -s nullglob
+    for f in "$DIR/configuration/nginx/"*.conf; do
+      printf '%s
 ' "$(basename -- "$f" .conf)"
-      done
-      shopt -u nullglob
-      ;;
-    *)
-      die "host <add|rm|list>"
-      ;;
+    done
+    shopt -u nullglob
+    ;;
+  *)
+    die "host <add|rm|list>"
+    ;;
   esac
 }
 
 cmd_ui() { docker exec -it SERVER_TOOLS lazydocker; }
 
 cmd_runtime() {
-  local which="${1:-}"; [[ -n "$which" ]] || die "runtime <php|node>"
+  local which="${1:-}"
+  [[ -n "$which" ]] || die "runtime <php|node>"
   local f=""
   for f in "$DIR/runtime-versions.json" "$DIR/docker/runtime-versions.json" "$DIR/configuration/runtime-versions.json"; do
     [[ -r "$f" ]] && break || f=""
@@ -2703,9 +2698,11 @@ cmd_runtime() {
 # 6f. EXEC / CHECK / EVENTS / CLEAN / ENV / VERIFY / DISK
 # ─────────────────────────────────────────────────────────────────────────────
 cmd_exec() {
-  local svc="${1:-}"; shift || true
+  local svc="${1:-}"
+  shift || true
   [[ -n "$svc" ]] || die "exec <service> [cmd...]"
-  local s; s="$(resolve_service "$svc" || true)"
+  local s
+  s="$(resolve_service "$svc" || true)"
   [[ -n "$s" ]] || die "Unknown service: $svc"
   if [[ $# -gt 0 ]]; then
     docker_compose exec "$s" "$@"
@@ -2715,37 +2712,42 @@ cmd_exec() {
 }
 
 cmd_check() {
-  local sub="${1:-}"; shift || true
+  local sub="${1:-}"
+  shift || true
   case "${sub,,}" in
-    upstream)
-      local dom="${1:-}"; [[ -n "$dom" ]] || die "check upstream <domain>"
-      local nconf="$DIR/configuration/nginx/$dom.conf"
-      [[ -r "$nconf" ]] || die "No nginx conf for domain: $dom"
-      printf "%bDomain:%b %s
+  upstream)
+    local dom="${1:-}"
+    [[ -n "$dom" ]] || die "check upstream <domain>"
+    local nconf="$DIR/configuration/nginx/$dom.conf"
+    [[ -r "$nconf" ]] || die "No nginx conf for domain: $dom"
+    printf "%bDomain:%b %s
 " "$CYAN" "$NC" "$dom"
-      if grep -q fastcgi_pass "$nconf"; then
-        local php; php="$(grep -Eo 'fastcgi_pass ([^:]+):9000' "$nconf" | awk '{print $2}' | sed 's/:9000$//' | head -n1 || true)"
-        printf "Upstream (php): %s
+    if grep -q fastcgi_pass "$nconf"; then
+      local php
+      php="$(grep -Eo 'fastcgi_pass ([^:]+):9000' "$nconf" | awk '{print $2}' | sed 's/:9000$//' | head -n1 || true)"
+      printf "Upstream (php): %s
 " "${php:-unknown}"
-        [[ -n "$php" ]] && _tools_exec "nc -vz -w2 "$php" 9000 || true"
-      elif grep -q proxy_pass "$nconf"; then
-        local up; up="$(grep -m1 -Eo 'proxy_pass[[:space:]]+http://[^;]+' "$nconf" | awk '{print $2}' | sed 's|^http://||' || true)"
-        printf "Upstream (http): %s
+      [[ -n "$php" ]] && _tools_exec "nc -vz -w2 "$php" 9000 || true"
+    elif grep -q proxy_pass "$nconf"; then
+      local up
+      up="$(grep -m1 -Eo 'proxy_pass[[:space:]]+http://[^;]+' "$nconf" | awk '{print $2}' | sed 's|^http://||' || true)"
+      printf "Upstream (http): %s
 " "${up:-unknown}"
-        local h="${up%%:*}" p="${up##*:}"
-        [[ -n "$h" && -n "$p" && "$h" != "$up" ]] && _tools_exec "nc -vz -w2 "$h" "$p" || true"
-      fi
-      _tools_exec "curl -vkI "https://$dom" || true"
-      ;;
-    *)
-      die "check upstream <domain>"
-      ;;
+      local h="${up%%:*}" p="${up##*:}"
+      [[ -n "$h" && -n "$p" && "$h" != "$up" ]] && _tools_exec "nc -vz -w2 "$h" "$p" || true"
+    fi
+    _tools_exec "curl -vkI "https://$dom" || true"
+    ;;
+  *)
+    die "check upstream <domain>"
+    ;;
   esac
 }
 
 cmd_events() {
   local since="${1:-1h}"
-  local project; project="$(lds_project)"
+  local project
+  project="$(lds_project)"
   docker events --since "$since" --filter "label=com.docker.compose.project=$project"
 }
 
@@ -2753,13 +2755,20 @@ cmd_clean() {
   local yes=0 vols=0
   while [[ "${1:-}" ]]; do
     case "$1" in
-      --yes|-y) yes=1; shift ;;
-      --volumes|-v) vols=1; shift ;;
-      *) shift ;;
+    --yes | -y)
+      yes=1
+      shift
+      ;;
+    --volumes | -v)
+      vols=1
+      shift
+      ;;
+    *) shift ;;
     esac
   done
   ((yes)) || die "clean requires --yes"
-  local project; project="$(lds_project)"
+  local project
+  project="$(lds_project)"
   # remove stopped containers for this project
   docker rm -f $(docker ps -a --filter "label=com.docker.compose.project=$project" --filter "status=exited" -q) 2>/dev/null || true
   if ((vols)); then
@@ -2779,7 +2788,11 @@ cmd_verify() {
   while IFS= read -r d; do
     [[ -n "$d" ]] || continue
     _tools_exec "curl -skI "https://$d" | head -n 1"
-  done < <(shopt -s nullglob; for f in "$DIR/configuration/nginx/"*.conf; do basename -- "$f" .conf; done; shopt -u nullglob)
+  done < <(
+    shopt -s nullglob
+    for f in "$DIR/configuration/nginx/"*.conf; do basename -- "$f" .conf; done
+    shopt -u nullglob
+  )
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2994,11 +3007,11 @@ cmd_tools() {
   local sub="${1:-sh}"
   shift || true
   case "${sub,,}" in
-  sh|shell|"")
+  sh | shell | "")
     docker_shell SERVER_TOOLS
     ;;
   exec)
-    [[ $# -gt 0 ]] || die "tools exec "<cmd>""
+    [[ $# -gt 0 ]] || die "tools exec " <cmd >""
     docker exec -it SERVER_TOOLS sh -lc "$*"
     ;;
   file)
@@ -3043,103 +3056,90 @@ cmd_cli() {
 
 cmd_core() {
   # Usage:
-  #   lds core <domain>  -> open correct container for that domain (PHP/Node)
-  #   lds core           -> list domains and let user pick
+  #   lds core <domain>     -> open correct container for that domain (PHP/Node)
+  #   lds core <container>  -> open a shell in that container
+  #   lds core              -> list domains and let user pick
 
-  local domain="${1:-}"
-  if [[ -z "$domain" ]]; then
-    # No domain supplied: show an indexed list so selection is explicit and reliable.
-    domain="$(core_pick_domain)" || {
-      local rc=$?
-      ((rc == 130)) && return 130
-      die "No domain selected"
-    }
-  fi
+  local target="${1:-}"
 
-  local nconf="$DIR/configuration/nginx/$domain.conf"
-  [[ -f "$nconf" ]] || die "No Nginx config for $domain"
+  # domain regex (same as domain-which/mkhost family)
+  local re='^([a-zA-Z0-9]([-a-zA-Z0-9]{0,61}[a-zA-Z0-9])?\.)+(localhost|local|test|loc|[a-zA-Z]{2,})$'
 
-  # Node vhost?
-  if grep -Eq 'proxy_pass[[:space:]]+http://node_[A-Za-z0-9._-]+:[0-9]+' "$nconf"; then
-    launch_node "$domain"
-    return 0
-  fi
+  # If no target -> prompt from domain-which list
+  if [[ -z "$target" ]]; then
+    local -a domains=()
+    mapfile -t domains < <(docker exec SERVER_TOOLS domain-which --list-domains 2>/dev/null | sed '/^[[:space:]]*$/d' || true)
 
-  # Otherwise keep legacy PHP behavior
-  launch_php "$domain"
-  return 0
-}
+    ((${#domains[@]} > 0)) || die "No domains found"
 
-core_pick_domain() {
-  local -a domains=()
-  local f d
+    # stable ordering
+    IFS=$'\n' domains=($(printf '%s\n' "${domains[@]}" | LC_ALL=C sort -u))
 
-  shopt -s nullglob
-  for f in "$DIR/configuration/nginx/"*.conf; do
-    d="$(basename -- "$f" .conf)"
-    [[ -n "$d" ]] && domains+=("$d")
-  done
-  shopt -u nullglob
-
-  ((${#domains[@]} > 0)) || die "No domains found in $DIR/configuration/nginx"
-
-  # stable ordering
-  IFS=$'\n' domains=($(printf '%s\n' "${domains[@]}" | LC_ALL=C sort -u))
-
-  # If there's only one domain, just use it.
-  if ((${#domains[@]} == 1)); then
-    printf '%s' "${domains[0]}"
-    return 0
-  fi
-
-  # Must be interactive to pick.
-  if [[ ! -t 0 ]]; then
-    printf "%b[core]%b No domain provided. Available domains:\n" "$YELLOW" "$NC" >&2
-    local i=1
-    for d in "${domains[@]}"; do
-      printf "  %2d) %s\n" "$i" "$d" >&2
-      ((i++))
-    done
-    die "No TTY to prompt. Use: lds core <domain>"
-  fi
-
-  printf "%bSelect domain:%b\n" "$CYAN" "$NC" >&2
-  local i=1
-  for d in "${domains[@]}"; do
-    printf "  %2d) %s\n" "$i" "$d" >&2
-    ((i++))
-  done
-  printf "  %2d) %s\n" 0 "Cancel" >&2
-
-  local ans idx
-  while true; do
-    printf "%bDomain #%b " "$GREEN" "$NC" >&2
-    tty_readline ans "" || return 130
-    ans="${ans//[[:space:]]/}"
-    [[ -n "$ans" ]] || continue
-
-    if [[ "$ans" == "0" ]]; then
-      return 130
-    fi
-
-    if [[ "$ans" =~ ^[0-9]+$ ]]; then
-      idx=$((ans - 1))
-      if ((idx >= 0 && idx < ${#domains[@]})); then
-        printf '%s' "${domains[$idx]}"
-        return 0
-      fi
+    if ((${#domains[@]} == 1)); then
+      target="${domains[0]}"
     else
-      # allow typing domain directly
+      if [[ ! -t 0 ]]; then
+        printf "%b[core]%b No domain provided. Available domains:\n" "$YELLOW" "$NC" >&2
+        local i=1
+        local d
+        for d in "${domains[@]}"; do
+          printf "  %2d) %s\n" "$i" "$d" >&2
+          ((i++))
+        done
+        die "No TTY to prompt. Use: lds core <domain>"
+      fi
+
+      printf "%bSelect domain:%b\n" "$CYAN" "$NC" >&2
+      local i=1 d
       for d in "${domains[@]}"; do
-        if [[ "$d" == "$ans" ]]; then
-          printf '%s' "$d"
-          return 0
-        fi
+        printf "  %b%2d)%b %s\n" "$CYAN" "$i" "$NC" "$d" >&2
+        ((i++))
+      done
+
+      local ans=""
+      while true; do
+        read -r -p "Enter number (1-${#domains[@]}): " ans
+        ans="$(echo "$ans" | xargs)"
+        [[ "$ans" =~ ^[0-9]+$ ]] || {
+          printf "%bInvalid input.%b\n" "$YELLOW" "$NC" >&2
+          continue
+        }
+        ((ans >= 1 && ans <= ${#domains[@]})) || {
+          printf "%bOut of range.%b\n" "$YELLOW" "$NC" >&2
+          continue
+        }
+        target="${domains[$((ans - 1))]}"
+        break
       done
     fi
+  fi
 
-    printf "%bInvalid selection.%b\n" "$YELLOW" "$NC" >&2
-  done
+  # If target looks like a domain -> resolve via domain-which then shell in
+  if [[ "$target" =~ $re ]]; then
+    local info type container profile docroot
+    info="$(docker exec SERVER_TOOLS domain-which "$target" 2>/dev/null)" || die "Unknown domain: $target"
+    IFS=$' \t' read -r type container profile docroot <<<"$info"
+    [[ -n "${container:-}" ]] || die "No container resolved for: $target"
+
+    local wd="/app"
+    case "$type" in
+    node) wd="/app" ;;
+    php)
+      if [[ -n "${docroot:-}" && "${docroot:-}" == /* ]]; then
+        wd="/app${docroot}"
+      else
+        wd="/app"
+      fi
+      ;;
+    *) wd="/app" ;;
+    esac
+
+    docker exec -it "$container" bash -lc "cd \"$wd\" 2>/dev/null || cd /app 2>/dev/null || cd /; exec bash"
+    return 0
+  fi
+
+  # Otherwise treat target as a container name
+  docker exec -it "$target" bash
 }
 
 cmd_setup() {
@@ -3864,9 +3864,9 @@ cmd_run() {
         "${publish[@]}" -- "${mounts[@]}"
     fi
 
-        _run_runtime_summary "$name"
+    _run_runtime_summary "$name"
 
-# "shell" enters the container; "*" / "build" does not.
+    # "shell" enters the container; "*" / "build" does not.
     if [[ "$action" == "shell" ]]; then
       run_exec_shell "$name"
     else
@@ -3878,7 +3878,6 @@ cmd_run() {
   esac
 }
 
-
 ###############################################################################
 # 6w. NEW FEATURES: stack diff | domain export/import | support trace
 ###############################################################################
@@ -3889,13 +3888,20 @@ cmd_stack_diff() {
   local show_config=0
   while [[ "${1:-}" ]]; do
     case "$1" in
-      --json) json=1; shift ;;
-      --config) show_config=1; shift ;;
-      *) break ;;
+    --json)
+      json=1
+      shift
+      ;;
+    --config)
+      show_config=1
+      shift
+      ;;
+    *) break ;;
     esac
   done
 
-  local project; project="$(lds_project)"
+  local project
+  project="$(lds_project)"
   local cfg_json=""
 
   if docker_compose config --format json >/dev/null 2>&1; then
@@ -3914,8 +3920,8 @@ cmd_stack_diff() {
     local img="${line#*|}"
     running["$svc"]="$img"
   done < <(docker ps \
-        --filter "label=com.docker.compose.project=$project" \
-        --format '{{index .Labels "com.docker.compose.service"}}|{{.Image}}' 2>/dev/null || true)
+    --filter "label=com.docker.compose.project=$project" \
+    --format '{{index .Labels "com.docker.compose.service"}}|{{.Image}}' 2>/dev/null || true)
 
   # desired: service -> image/build context (best-effort)
   declare -A desired_img=()
@@ -3953,7 +3959,8 @@ cmd_stack_diff() {
   if ((json)); then
     if has_tool jq; then
       # assemble in bash -> jq
-      local tmp; tmp="$(mktemp)"
+      local tmp
+      tmp="$(mktemp)"
       {
         printf '{'
         printf '"project":%s,' "$(printf '%s' "$project" | jq -Rsa .)"
@@ -4028,10 +4035,14 @@ cmd_stack_diff() {
     local r="${running[$svc]:-}"
     local d="${desired_img[$svc]:-}"
     local st
-    if [[ -z "$r" ]]; then st="(not running)"
-    elif [[ -z "$d" ]]; then st="(not in config)"
-    elif [[ "$r" == "$d" ]]; then st="OK"
-    else st="DIFF"
+    if [[ -z "$r" ]]; then
+      st="(not running)"
+    elif [[ -z "$d" ]]; then
+      st="(not in config)"
+    elif [[ "$r" == "$d" ]]; then
+      st="OK"
+    else
+      st="DIFF"
     fi
     printf "%-22s  %-40.40s  %-40.40s  %s\n" "$svc" "$r" "$d" "$st"
   done
@@ -4046,16 +4057,23 @@ cmd_domain_export() {
   local out="" pretty=1
   while [[ "${1:-}" ]]; do
     case "$1" in
-      --out) out="${2:-}"; shift 2 ;;
-      --compact) pretty=0; shift ;;
-      *) break ;;
+    --out)
+      out="${2:-}"
+      shift 2
+      ;;
+    --compact)
+      pretty=0
+      shift
+      ;;
+    *) break ;;
     esac
   done
 
   local dir_ng="$DIR/configuration/nginx"
   [[ -d "$dir_ng" ]] || die "nginx vhost dir not found: $dir_ng"
 
-  local tmp; tmp="$(mktemp)"
+  local tmp
+  tmp="$(mktemp)"
   printf '{ "version": 1, "exported_at": "%s", "root": "%s", "domains": [' "$(date -Iseconds)" "$DIR" >"$tmp"
 
   local first=1 f dom typ upstream cmb
@@ -4119,7 +4137,7 @@ cmd_domain_import() {
     b64="$(jq -r --arg d "$dom" '.domains[] | select(.domain==$d) | .files.nginx_conf' "$in")"
     [[ -n "$b64" && "$b64" != "null" ]] || continue
     printf '%s' "$b64" | base64 -d >"$dir_ng/$dom.conf"
-    count=$((count+1))
+    count=$((count + 1))
   done < <(jq -r '.domains[].domain' "$in")
 
   ok "[ok] domain import: restored $count nginx vhost(s) into $dir_ng\n"
@@ -4164,10 +4182,12 @@ cmd_support_trace() {
   printf "\n%b[Upstream]%b\n" "$DIM" "$NC"
   if [[ -r "$nconf" ]]; then
     if grep -q fastcgi_pass "$nconf"; then
-      local php; php="$(grep -Eo 'fastcgi_pass[[:space:]]+[^;]+' "$nconf" | awk '{print $2}' | head -n1 || true)"
+      local php
+      php="$(grep -Eo 'fastcgi_pass[[:space:]]+[^;]+' "$nconf" | awk '{print $2}' | head -n1 || true)"
       printf "type=php\nfastcgi_pass=%s\n" "${php:-unknown}"
     elif grep -q proxy_pass "$nconf"; then
-      local up; up="$(grep -m1 -Eo 'proxy_pass[[:space:]]+http[s]?://[^;]+' "$nconf" | awk '{print $2}' | head -n1 || true)"
+      local up
+      up="$(grep -m1 -Eo 'proxy_pass[[:space:]]+http[s]?://[^;]+' "$nconf" | awk '{print $2}' | head -n1 || true)"
       printf "type=proxy\nproxy_pass=%s\n" "${up:-unknown}"
     else
       printf "type=static\n"
@@ -4188,58 +4208,61 @@ cmd_support_trace() {
 ###############################################################################
 
 cmd_stack() {
-  local sub="${1:-}"; shift || true
+  local sub="${1:-}"
+  shift || true
   case "${sub,,}" in
-    ""|help|-h|--help) cmd_help stack ;;
-    up)          cmd_up "$@" ;;
-    start)          cmd_start "$@" ;;
-    down|stop)         cmd_down "$@" ;;
-    restart|reboot)    cmd_restart "$@" ;;
-    status)            cmd_status "$@" ;;
-    ps)                cmd_ps "$@" ;;
-    logs)              cmd_logs "$@" ;;
-    exec)              cmd_exec "$@" ;;
-    events)            cmd_events "$@" ;;
-    clean)             cmd_clean "$@" ;;
-    verify)            cmd_verify "$@" ;;
-    config)            cmd_config "$@" ;;    diff)              cmd_stack_diff "$@" ;;
+  "" | help | -h | --help) cmd_help stack ;;
+  up) cmd_up "$@" ;;
+  start) cmd_start "$@" ;;
+  down | stop) cmd_down "$@" ;;
+  restart | reboot) cmd_restart "$@" ;;
+  status) cmd_status "$@" ;;
+  ps) cmd_ps "$@" ;;
+  logs) cmd_logs "$@" ;;
+  exec) cmd_exec "$@" ;;
+  events) cmd_events "$@" ;;
+  clean) cmd_clean "$@" ;;
+  verify) cmd_verify "$@" ;;
+  config) cmd_config "$@" ;; diff) cmd_stack_diff "$@" ;;
 
-    http)              cmd_http "$@" ;;
-    *)
-      die "stack <up|down|restart|status|ps|logs|exec|events|clean|verify|config|http>"
-      ;;
+  http) cmd_http "$@" ;;
+  *)
+    die "stack <up|down|restart|status|ps|logs|exec|events|clean|verify|config|http>"
+    ;;
   esac
 }
 
 # Canonical: domain. Legacy: host.
 cmd_domain() {
-  local sub="${1:-}"; shift || true
+  local sub="${1:-}"
+  shift || true
   case "${sub,,}" in
-    ""|help|-h|--help) die "domain <add|rm|ls|export|import|check|nginx>" ;;
-    add)               cmd_host add "$@" ;;
-    rm|remove|del|delete) cmd_host rm "$@" ;;
-    ls|list)           cmd_host list "$@" ;;
-    export)            cmd_domain_export "$@" ;;
-    import)            cmd_domain_import "$@" ;;
-    check)             cmd_check upstream "$@" ;;
-    nginx)             cmd_nginx "$@" ;;
-    *)
-      die "domain <add|rm|ls|export|import|check|nginx>"
-      ;;
+  "" | help | -h | --help) die "domain <add|rm|ls|export|import|check|nginx>" ;;
+  add) cmd_host add "$@" ;;
+  rm | remove | del | delete) cmd_host rm "$@" ;;
+  ls | list) cmd_host list "$@" ;;
+  export) cmd_domain_export "$@" ;;
+  import) cmd_domain_import "$@" ;;
+  check) cmd_check upstream "$@" ;;
+  nginx) cmd_nginx "$@" ;;
+  *)
+    die "domain <add|rm|ls|export|import|check|nginx>"
+    ;;
   esac
 }
 
 cmd_support() {
-  local sub="${1:-}"; shift || true
+  local sub="${1:-}"
+  shift || true
   case "${sub,,}" in
-    ""|help|-h|--help) die "support <open|bundle|notify|ui|trace>" ;;
-    open)              cmd_open "$@" ;;
-    bundle)            cmd_bundle "$@" ;;
-    notify)            cmd_notify "$@" ;;
-    ui)                cmd_ui "$@" ;;
-    *)
-      die "support <open|bundle|notify|ui|trace>"
-      ;;
+  "" | help | -h | --help) die "support <open|bundle|notify|ui|trace>" ;;
+  open) cmd_open "$@" ;;
+  bundle) cmd_bundle "$@" ;;
+  notify) cmd_notify "$@" ;;
+  ui) cmd_ui "$@" ;;
+  *)
+    die "support <open|bundle|notify|ui|trace>"
+    ;;
   esac
 }
 
@@ -4252,17 +4275,29 @@ cmd_bundle() {
   local out="${1:-}"
   while [[ "${1:-}" ]]; do
     case "$1" in
-      --redact) mode="redact"; shift ;;
-      --full)   mode="full"; shift ;;
-      *.zip)    out="$1"; shift ;;
-      *) break ;;
+    --redact)
+      mode="redact"
+      shift
+      ;;
+    --full)
+      mode="full"
+      shift
+      ;;
+    *.zip)
+      out="$1"
+      shift
+      ;;
+    *) break ;;
     esac
   done
 
   need zip
-  local ts; ts="$(date +%Y%m%d_%H%M%S)"
-  local project; project="$(lds_project)"
-  local tmp; tmp="$(mktemp -d "${TMPDIR:-/tmp}/lds_bundle.XXXXXX")"
+  local ts
+  ts="$(date +%Y%m%d_%H%M%S)"
+  local project
+  project="$(lds_project)"
+  local tmp
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/lds_bundle.XXXXXX")"
   local base="lds_bundle_${project}_${ts}"
   [[ -n "$out" ]] || out="$PWD/${base}.zip"
 
@@ -4498,21 +4533,23 @@ ${CYAN}Help:${NC}
 EOF
 }
 
-
 ###############################################################################
 # 7. MAIN
 ###############################################################################
 main() {
-  [[ $# -gt 0 ]] || { cmd_help; exit 1; }
+  [[ $# -gt 0 ]] || {
+    cmd_help
+    exit 1
+  }
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
-    -v|--verbose)
+    -v | --verbose)
       VERBOSE=1
       QUIET=0
       shift
       ;;
-    -q|--quiet)
+    -q | --quiet)
       QUIET=1
       VERBOSE=0
       shift
@@ -4525,7 +4562,7 @@ main() {
       shift
       break
       ;;
-    -h|--help)
+    -h | --help)
       cmd_help
       exit 0
       ;;
@@ -4534,7 +4571,10 @@ main() {
     esac
   done
 
-  [[ $# -gt 0 ]] || { cmd_help; exit 1; }
+  [[ $# -gt 0 ]] || {
+    cmd_help
+    exit 1
+  }
 
   local cmd="${1,,}"
   shift || true
@@ -4548,12 +4588,12 @@ main() {
   need docker
 
   case "$cmd" in
-    php|composer|node|npm|npx) exec "$DIR/bin/$cmd" "$@" ;;
-    pg|pg_restore|pg-restore|pgrestore|pg_dump|pgdump|pg-dump|psql) exec "$DIR/bin/pg" "$@" ;;
-    maria|mariadb|mariadbdump|mariadb-dump|mariadb_dump) exec "$DIR/bin/maria" "$@" ;;
-    my|mysql|mysqldump|mysql-dump|mysql_dump) exec "$DIR/bin/my" "$@" ;;
-    redis|redis-cli) exec "$DIR/bin/redis-cli" "$@" ;;
-    *) "cmd_$cmd" "$@" ;;
+  php | composer | node | npm | npx) exec "$DIR/bin/$cmd" "$@" ;;
+  pg | pg_restore | pg-restore | pgrestore | pg_dump | pgdump | pg-dump | psql) exec "$DIR/bin/pg" "$@" ;;
+  maria | mariadb | mariadbdump | mariadb-dump | mariadb_dump) exec "$DIR/bin/maria" "$@" ;;
+  my | mysql | mysqldump | mysql-dump | mysql_dump) exec "$DIR/bin/my" "$@" ;;
+  redis | redis-cli) exec "$DIR/bin/redis-cli" "$@" ;;
+  *) "cmd_$cmd" "$@" ;;
   esac
 }
 
