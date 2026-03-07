@@ -4,10 +4,6 @@ x-php-service: &php-service
     - TZ=${TZ:-}
   env_file:
     - "../../.env"
-  networks:
-    frontend: {}
-    backend: {}
-    datastore: {}
   volumes:
     - "${PROJECT_DIR:-./../../../application}:/app"
     - lds_ssl_roots:/etc/share/rootCA:ro

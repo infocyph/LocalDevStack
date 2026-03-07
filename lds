@@ -3139,7 +3139,7 @@ cmd_core() {
   fi
 
   # Otherwise treat target as a container name
-  docker exec -it "$target" bash
+  docker exec -it "$(printf '%s' "$target" | tr '[:lower:]' '[:upper:]')" sh -lc 'exec bash -i || exec sh'
 }
 
 cmd_setup() {
