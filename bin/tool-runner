@@ -13,7 +13,7 @@ die() {
 }
 
 load_env_file() {
-  local env_file="$DIR/.env"
+  local env_file="$DIR/docker/.env"
   [[ -f "$env_file" ]] || return 0
 
   local line key value
