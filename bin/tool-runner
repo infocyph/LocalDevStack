@@ -1,0 +1,149 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+SERVER_TOOLS_CONTAINER="SERVER_TOOLS"
+
+has_bin() { type -P -- "${1:?}" >/dev/null 2>&1; }
+bin_path() { type -P -- "${1:?}"; }
+
+die() {
+  printf 'Error: %s\n' "$*" >&2
+  exit 1
+}
+
+load_env_file() {
+  local env_file="$DIR/.env"
+  [[ -f "$env_file" ]] || return 0
+
+  local line key value
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line#"${line%%[![:space:]]*}"}"
+    [[ -z "$line" || "${line:0:1}" == "#" ]] && continue
+    [[ "$line" == export\ * ]] && line="${line#export }"
+
+    [[ "$line" == *=* ]] || continue
+    key="${line%%=*}"
+    value="${line#*=}"
+
+    key="${key%"${key##*[![:space:]]}"}"
+    value="${value#"${value%%[![:space:]]*}"}"
+    value="${value%"${value##*[![:space:]]}"}"
+
+    if [[ "$value" =~ ^\".*\"$ ]]; then
+      value="${value:1:${#value}-2}"
+    elif [[ "$value" =~ ^\'.*\'$ ]]; then
+      value="${value:1:${#value}-2}"
+    fi
+
+    case "$key" in
+      WORKING_DIR|WORKDIR|WORKDIR_WIN)
+        export "$key=$value"
+        ;;
+    esac
+  done < "$env_file"
+}
+
+server_tools_running() {
+  has_bin docker || return 1
+  [[ "$("$(bin_path docker)" inspect -f '{{.State.Running}}' "$SERVER_TOOLS_CONTAINER" 2>/dev/null || true)" == "true" ]]
+}
+
+server_tools_has() {
+  local cmd="${1:-}"
+  [[ -n "$cmd" ]] || return 1
+  server_tools_running || return 1
+  "$(bin_path docker)" exec "$SERVER_TOOLS_CONTAINER" sh -lc 'command -v -- "$1" >/dev/null 2>&1' sh "$cmd"
+}
+
+server_tools_image() {
+  "$(bin_path docker)" inspect -f '{{.Config.Image}}' "$SERVER_TOOLS_CONTAINER" 2>/dev/null
+}
+
+server_tools_env_value() {
+  local key="${1:?}"
+  "$(bin_path docker)" inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$SERVER_TOOLS_CONTAINER" 2>/dev/null \
+    | awk -F= -v k="$key" '$1==k { sub(/^[^=]*=/, ""); print; exit }'
+}
+
+resolve_workspace() {
+  local workdir git_root
+
+  workdir="${WORKDIR_WIN:-${WORKING_DIR:-${WORKDIR:-$PWD}}}"
+  [[ -n "$workdir" ]] || workdir="$DIR"
+
+  if [[ -n "${MSYSTEM:-}${CYGWIN:-}" ]]; then
+    if [[ "$workdir" == *"/Program Files/Git/workspace"* ]] || [[ "$workdir" == "/workspace"* ]]; then
+      if has_bin git; then
+        git_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+        [[ -n "$git_root" ]] && workdir="$git_root"
+      fi
+    fi
+
+    if has_bin cygpath; then
+      cygpath -w "$workdir"
+      return 0
+    fi
+  fi
+
+  printf '%s\n' "$workdir"
+}
+
+main() {
+  load_env_file
+
+  local cmd="${1:-}"
+  shift || true
+
+  [[ -n "$cmd" ]] || die "missing command"
+  has_bin docker || die "docker is required on host"
+  server_tools_running || die "$SERVER_TOOLS_CONTAINER is not running"
+  server_tools_has "$cmd" || die "command '$cmd' not found in $SERVER_TOOLS_CONTAINER"
+
+  local image workspace tz username home_dir
+  image="$(server_tools_image)" || die "unable to inspect $SERVER_TOOLS_CONTAINER image"
+  [[ -n "$image" ]] || die "unable to resolve $SERVER_TOOLS_CONTAINER image"
+
+  workspace="$(resolve_workspace)"
+  [[ -n "$workspace" ]] || die "unable to resolve workspace"
+
+  tz="$(server_tools_env_value TZ || true)"
+  username="$(server_tools_env_value USERNAME || true)"
+  home_dir="/home/root"
+
+  local -a flags envs
+  flags=(--rm)
+  envs=(
+    -e HOME="$home_dir"
+    -e USER=root
+    -e LOGNAME=root
+    -e TERM="${TERM:-xterm-256color}"
+  )
+
+  [[ -n "$tz" ]] && envs+=(-e TZ="$tz")
+  [[ -n "$username" ]] && envs+=(-e USERNAME="$username")
+  [[ -n "${COLORTERM:-}" ]] && envs+=(-e COLORTERM="$COLORTERM")
+  [[ -n "${NO_COLOR:-}" ]] && envs+=(-e NO_COLOR="$NO_COLOR")
+  [[ -n "${CLICOLOR_FORCE:-}" ]] && envs+=(-e CLICOLOR_FORCE="$CLICOLOR_FORCE")
+  [[ -n "${FORCE_COLOR:-}" ]] && envs+=(-e FORCE_COLOR="$FORCE_COLOR")
+
+  [[ -t 0 ]] && flags+=(-i)
+  [[ -t 1 ]] && flags+=(-t)
+
+  if [[ -n "${MSYSTEM:-}${CYGWIN:-}" ]]; then
+    export MSYS_NO_PATHCONV=1
+    export MSYS2_ARG_CONV_EXCL='*'
+  fi
+
+  flags+=(
+    --entrypoint "$cmd"
+    --network "container:$SERVER_TOOLS_CONTAINER"
+    --volumes-from "$SERVER_TOOLS_CONTAINER"
+    -v "$workspace:/workspace"
+    -w /workspace
+  )
+
+  exec "$(bin_path docker)" run "${flags[@]}" "${envs[@]}" "$image" "$@"
+}
+
+main "$@"

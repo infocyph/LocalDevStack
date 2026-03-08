@@ -4595,7 +4595,13 @@ main() {
   redis | redis-cli) exec "$DIR/bin/redis-cli" "$@" ;;
   es | elastic | elasticsearch) exec "$DIR/bin/es" "$@" ;;
   mongo | mongodb | mongosh | mongoimport | mongoexport) exec "$DIR/bin/mongo" "$@" ;;
-  *) "cmd_$cmd" "$@" ;;
+  *)
+    if declare -F "cmd_$cmd" >/dev/null 2>&1; then
+      "cmd_$cmd" "$@"
+    else
+      exec "$DIR/bin/tool-runner" "$cmd" "$@"
+    fi
+    ;;
   esac
 }
 
