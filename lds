@@ -26,7 +26,7 @@ die() {
 " "${RED:-}" "${NC:-}" "$*" >&2
   exit 1
 }
-LDS_STATUS_PROBE=1
+
 ###############################################################################
 # Command presence + tool proxy rules
 # - Host-only commands MUST exist on host (e.g. docker)
@@ -110,7 +110,7 @@ lds_tools_cmd() {
   fi
 
   # 3) proxy-safe tools from SERVER_TOOLS (opt-in)
-  if ((${LDS_PROXY_TOOLS:-0})); then
+  if ((${LDS_PROXY_TOOLS:-1})); then
     if ! has_bin docker; then
       echo "Error: '$cmd' not available on host; tool proxy requires host 'docker'" >&2
       return 127
@@ -149,7 +149,7 @@ has_tool() {
   local c="${1:-}"
   has_bin "$c" && return 0
   _is_host_only_cmd "$c" && return 1
-  ((${LDS_PROXY_TOOLS:-0})) || return 1
+  ((${LDS_PROXY_TOOLS:-1})) || return 1
   _server_tools_has "$c"
 }
 
@@ -1823,7 +1823,7 @@ _status_show_networks() {
 
 # 5) Optional endpoint probes (gated)
 _status_show_probes() {
-  ((${LDS_STATUS_PROBE:-0})) || {
+  ((${LDS_STATUS_PROBE:-1})) || {
     printf "(disabled; set LDS_STATUS_PROBE=1)\n"
     return 0
   }
