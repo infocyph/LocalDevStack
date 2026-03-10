@@ -18,6 +18,11 @@ services:
     volumes:
       - lds_ri:/data
       - ../../logs/redis-insight:/var/log/redis-insight
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8978/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     networks:
       datastore:
         ipv4_address: 172.30.0.150
