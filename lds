@@ -30,7 +30,7 @@ die() {
 ###############################################################################
 # Command presence + tool proxy rules
 # - Host-only commands MUST exist on host (e.g. docker)
-# - Proxy-safe tools may run from SERVER_TOOLS when LDS_PROXY_TOOLS=1 and container is up
+# - Proxy-safe tools may run from the project tools container when LDS_PROXY_TOOLS=1 and container is up
 # - Anything inside `docker exec ... sh -lc '...'` must continue to use `command -v`
 ###############################################################################
 
@@ -59,7 +59,7 @@ need_bin() {
   die "Missing required command: $c${hint:+ ($hint)}"
 }
 
-# Commands that must NEVER be proxied to SERVER_TOOLS (host control plane / privileged / filesystem)
+# Commands that must NEVER be proxied to project tools container (host control plane / privileged / filesystem)
 _is_host_only_cmd() {
   case "${1:-}" in
   docker | sudo | su | systemctl | service | ip | iptables | nft | sysctl | mount | umount | modprobe | insmod | rmmod | rm | mv | cp | chmod | chown)
@@ -69,23 +69,59 @@ _is_host_only_cmd() {
   return 1
 }
 
-_server_tools_running() {
+# Resolve the project-specific tools container name.
+_project_tools_container() {
   has_bin docker || return 1
-  "$(bin_path docker)" inspect -f '{{.State.Running}}' SERVER_TOOLS 2>/dev/null | grep -qx true
+
+  local project ctr
+  project="$(lds_project)"
+
+  ctr="$(
+    docker ps -a \
+      --filter "label=com.docker.compose.project=$project" \
+      --filter 'label=com.docker.compose.service=server-tools' \
+      --format '{{.Names}}' 2>/dev/null | sed -n '1p'
+  )"
+  [[ -n "$ctr" ]] && {
+    printf '%s' "$ctr"
+    return 0
+  }
+
+  ctr="$(docker_compose ps -a server-tools --format '{{.Name}}' 2>/dev/null | sed -n '1p' || true)"
+  [[ -n "$ctr" ]] && {
+    printf '%s' "$ctr"
+    return 0
+  }
+
+  return 1
+}
+
+_project_tools_container_running() {
+  local ctr
+  ctr="$(_project_tools_container || true)"
+  [[ -n "$ctr" ]] || return 1
+  docker inspect -f '{{.State.Running}}' "$ctr" 2>/dev/null | grep -qx true || return 1
+  printf '%s' "$ctr"
+}
+
+_server_tools_running() {
+  [[ -n "$(_project_tools_container_running || true)" ]]
 }
 
 _server_tools_has() {
   local c="${1:-}"
   [[ -n "$c" ]] || return 1
-  _server_tools_running || return 1
-  "$(bin_path docker)" exec SERVER_TOOLS sh -lc "command -v \"$c\" >/dev/null 2>&1" >/dev/null 2>&1
+  local ctr
+  ctr="$(_project_tools_container_running || true)"
+  [[ -n "$ctr" ]] || return 1
+  "$(bin_path docker)" exec "$ctr" sh -lc "command -v \"$c\" >/dev/null 2>&1" >/dev/null 2>&1
 }
 
 # Unified command runner for proxy-safe tools
 # Resolution order (your rule-set):
 # 1) if cmd exists on host -> run host binary
 # 2) if host-only and missing -> error
-# 3) if proxy-safe and LDS_PROXY_TOOLS=1 and SERVER_TOOLS up and cmd exists there -> run via docker exec
+# 3) if proxy-safe and LDS_PROXY_TOOLS=1 and project tools up and cmd exists there -> run via docker exec
 # 4) otherwise -> error
 lds_tools_cmd() {
   local cmd="${1:-}"
@@ -109,30 +145,32 @@ lds_tools_cmd() {
     return 127
   fi
 
-  # 3) proxy-safe tools from SERVER_TOOLS (opt-in)
+  # 3) proxy-safe tools from project tools container (opt-in)
   if ((${LDS_PROXY_TOOLS:-1})); then
     if ! has_bin docker; then
       echo "Error: '$cmd' not available on host; tool proxy requires host 'docker'" >&2
       return 127
     fi
-    if ! _server_tools_running; then
-      echo "Error: '$cmd' not available on host and SERVER_TOOLS is not running (set LDS_PROXY_TOOLS=1 and start the stack)" >&2
+    local ctr
+    ctr="$(_project_tools_container_running || true)"
+    if [[ -z "$ctr" ]]; then
+      echo "Error: '$cmd' not available on host and project tools container is not running (set LDS_PROXY_TOOLS=1 and start the stack)" >&2
       return 127
     fi
     if ! _server_tools_has "$cmd"; then
-      echo "Error: '$cmd' not found on host nor inside SERVER_TOOLS" >&2
+      echo "Error: '$cmd' not found on host nor inside project tools container" >&2
       return 127
     fi
 
     local -a flags=()
     [[ -t 0 ]] && flags+=(-i)
     [[ -t 1 ]] && flags+=(-t)
-    "$(bin_path docker)" exec "${flags[@]}" SERVER_TOOLS "$cmd" "$@"
+    "$(bin_path docker)" exec "${flags[@]}" "$ctr" "$cmd" "$@"
     return $?
   fi
 
   # 4) not found and proxy not enabled
-  echo "Error: '$cmd' not available on host (set LDS_PROXY_TOOLS=1 to proxy via SERVER_TOOLS)" >&2
+  echo "Error: '$cmd' not available on host (set LDS_PROXY_TOOLS=1 to proxy via project tools container)" >&2
   return 127
 }
 
@@ -600,8 +638,18 @@ fix_perms() {
 ###############################################################################
 # 3. DOMAIN / PROFILE INTEGRATION
 ###############################################################################
-mkhost() { docker exec SERVER_TOOLS mkhost "$@"; }
-rmhost() { docker exec SERVER_TOOLS rmhost "$@"; }
+mkhost() {
+  local ctr
+  ctr="$(_project_tools_container_running || true)"
+  [[ -n "$ctr" ]] || die "server-tools container is not running for project: $(lds_project)"
+  docker exec "$ctr" mkhost "$@"
+}
+rmhost() {
+  local ctr
+  ctr="$(_project_tools_container_running || true)"
+  [[ -n "$ctr" ]] || die "server-tools container is not running for project: $(lds_project)"
+  docker exec "$ctr" rmhost "$@"
+}
 php_reload_or_restart_project() {
   local project
   project="$(lds_project)"
@@ -648,8 +696,12 @@ php_reload_or_restart_project() {
 }
 
 setup_domain() {
+  local ctr
+  ctr="$(_project_tools_container_running || true)"
+  [[ -n "$ctr" ]] || die "server-tools container is not running for project: $(lds_project)"
+
   mkhost --RESET
-  docker exec -it SERVER_TOOLS mkhost
+  docker exec -it "$ctr" mkhost
   local php_prof svr_prof node_prof
   php_prof=$(mkhost --ACTIVE_PHP_PROFILE || true)
   svr_prof=$(mkhost --APACHE_ACTIVE || true)
@@ -664,10 +716,14 @@ setup_domain() {
 }
 
 delete_domain() {
+  local ctr
+  ctr="$(_project_tools_container_running || true)"
+  [[ -n "$ctr" ]] || die "server-tools container is not running for project: $(lds_project)"
+
   rmhost --RESET
 
   # interactive delete
-  docker exec -it SERVER_TOOLS rmhost "$@"
+  docker exec -it "$ctr" rmhost "$@"
 
   local php_cont apache_cont node_cont
   php_cont=$(rmhost --DELETE_PHP_PROFILE || true)
@@ -1520,41 +1576,11 @@ cmd_ps() {
   fi
 }
 
-# Resolve the tools container for the active compose project.
-_project_tools_container() {
-  local project ctr
-  project="$(lds_project)"
-
-  # Prefer compose labels so we don't hit another project's tools container.
-  ctr="$(
-    docker ps \
-      --filter "label=com.docker.compose.project=$project" \
-      --filter 'label=com.docker.compose.service=server-tools' \
-      --format '{{.Names}}' 2>/dev/null | sed -n '1p'
-  )"
-  [[ -n "$ctr" ]] && {
-    printf '%s' "$ctr"
-    return 0
-  }
-
-  # Fallback for setups where labels/ps differ.
-  ctr="$(docker_compose ps server-tools --format '{{.Name}}' 2>/dev/null | sed -n '1p' || true)"
-  [[ -n "$ctr" ]] && {
-    printf '%s' "$ctr"
-    return 0
-  }
-
-  return 1
-}
-
 cmd_status() {
   local ctr project
   project="$(lds_project)"
-  ctr="$(_project_tools_container || true)"
-  [[ -n "$ctr" ]] || die "server-tools container not found for project: $project"
-
-  docker inspect -f '{{.State.Running}}' "$ctr" 2>/dev/null | grep -qx true || \
-    die "server-tools container is not running: $ctr"
+  ctr="$(_project_tools_container_running || true)"
+  [[ -n "$ctr" ]] || die "server-tools container not found or not running for project: $project"
 
   local -a flags=()
   [[ -t 1 ]] && flags+=(-t)
@@ -1691,10 +1717,11 @@ cmd_profiles() {
 # 6d. DIAG / SNIFF
 # ─────────────────────────────────────────────────────────────────────────────
 _tools_exec() {
-  docker inspect SERVER_TOOLS >/dev/null 2>&1 || die "SERVER_TOOLS container not found"
-  docker inspect -f '{{.State.Running}}' SERVER_TOOLS 2>/dev/null | grep -qx true || die "SERVER_TOOLS is not running"
+  local ctr
+  ctr="$(_project_tools_container_running || true)"
+  [[ -n "$ctr" ]] || die "server-tools container is not running for project: $(lds_project)"
   # NOTE: pass a SINGLE command string; do not pass arrays here.
-  docker exec -i SERVER_TOOLS sh -lc "$*"
+  docker exec -i "$ctr" sh -lc "$*"
 }
 
 _shq() { printf '%q' "$1"; }
@@ -1755,9 +1782,19 @@ cmd_sniff() {
 # ─────────────────────────────────────────────────────────────────────────────
 # 6e. SECRETS / CERT / HOST / UI / RUNTIME
 # ─────────────────────────────────────────────────────────────────────────────
-cmd_secrets() { docker exec -it SERVER_TOOLS senv "$@"; }
+cmd_secrets() {
+  local ctr
+  ctr="$(_project_tools_container_running || true)"
+  [[ -n "$ctr" ]] || die "server-tools container is not running for project: $(lds_project)"
+  docker exec -it "$ctr" senv "$@"
+}
 
-cmd_cert() { docker exec -it SERVER_TOOLS certify "$@"; }
+cmd_cert() {
+  local ctr
+  ctr="$(_project_tools_container_running || true)"
+  [[ -n "$ctr" ]] || die "server-tools container is not running for project: $(lds_project)"
+  docker exec -it "$ctr" certify "$@"
+}
 
 cmd_host() {
   local sub="${1:-}"
@@ -1783,7 +1820,12 @@ cmd_host() {
   esac
 }
 
-cmd_ui() { docker exec -it SERVER_TOOLS lazydocker; }
+cmd_ui() {
+  local ctr
+  ctr="$(_project_tools_container_running || true)"
+  [[ -n "$ctr" ]] || die "server-tools container is not running for project: $(lds_project)"
+  docker exec -it "$ctr" lazydocker
+}
 
 cmd_runtime() {
   local which="${1:-}"
@@ -1884,7 +1926,12 @@ cmd_clean() {
 " "$GREEN" "$NC"
 }
 
-cmd_env() { docker exec -it SERVER_TOOLS senv env "$@"; }
+cmd_env() {
+  local ctr
+  ctr="$(_project_tools_container_running || true)"
+  [[ -n "$ctr" ]] || die "server-tools container is not running for project: $(lds_project)"
+  docker exec -it "$ctr" senv env "$@"
+}
 
 cmd_verify() {
   # smoke checks: compose config, LB up, curl each domain
@@ -2112,18 +2159,21 @@ docker_shell() {
 cmd_tools() {
   local sub="${1:-sh}"
   shift || true
+  local ctr
+  ctr="$(_project_tools_container_running || true)"
+  [[ -n "$ctr" ]] || die "server-tools container is not running for project: $(lds_project)"
   case "${sub,,}" in
   sh | shell | "")
-    docker_shell SERVER_TOOLS
+    docker_shell "$ctr"
     ;;
   exec)
-    [[ $# -gt 0 ]] || die "tools exec " <cmd >""
-    docker exec -it SERVER_TOOLS sh -lc "$*"
+    [[ $# -gt 0 ]] || die "tools exec <cmd>"
+    docker exec -it "$ctr" sh -lc "$*"
     ;;
   file)
     local p="${1:-}"
     [[ -n "$p" ]] || die "tools file <path>"
-    docker exec -it SERVER_TOOLS sh -lc "ls -la -- \"$p\" 2>/dev/null || true; echo; sed -n '1,200p' -- \"$p\" 2>/dev/null || true"
+    docker exec -it "$ctr" sh -lc "ls -la -- \"$p\" 2>/dev/null || true; echo; sed -n '1,200p' -- \"$p\" 2>/dev/null || true"
     ;;
   *)
     die "tools <sh|exec|file>"
@@ -2173,8 +2223,12 @@ cmd_core() {
 
   # If no target -> prompt from domain-which list
   if [[ -z "$target" ]]; then
+    local tools_ctr
+    tools_ctr="$(_project_tools_container_running || true)"
+    [[ -n "$tools_ctr" ]] || die "server-tools container is not running for project: $(lds_project)"
+
     local -a domains=()
-    mapfile -t domains < <(docker exec SERVER_TOOLS domain-which --list-domains 2>/dev/null | sed '/^[[:space:]]*$/d' || true)
+    mapfile -t domains < <(docker exec "$tools_ctr" domain-which --list-domains 2>/dev/null | sed '/^[[:space:]]*$/d' || true)
 
     ((${#domains[@]} > 0)) || die "No domains found"
 
@@ -2222,8 +2276,12 @@ cmd_core() {
 
   # If target looks like a domain -> resolve via domain-which then shell in
   if [[ "$target" =~ $re ]]; then
+    local tools_ctr
+    tools_ctr="$(_project_tools_container_running || true)"
+    [[ -n "$tools_ctr" ]] || die "server-tools container is not running for project: $(lds_project)"
+
     local info type container profile docroot
-    info="$(docker exec SERVER_TOOLS domain-which "$target" 2>/dev/null)" || die "Unknown domain: $target"
+    info="$(docker exec "$tools_ctr" domain-which "$target" 2>/dev/null)" || die "Unknown domain: $target"
     IFS=$' \t' read -r type container profile docroot <<<"$info"
     [[ -n "${container:-}" ]] || die "No container resolved for: $target"
 
@@ -2279,9 +2337,12 @@ cmd_doctor() {
   # Focused modes stay on doctor (status uses the full run only).
   if [[ "${1:-}" == "--lint" ]]; then
     shift || true
-    docker exec -i SERVER_TOOLS sh -lc '
+    local ctr
+    ctr="$(_project_tools_container_running || true)"
+    [[ -n "$ctr" ]] || die "server-tools container is not running for project: $(lds_project)"
+    docker exec -i "$ctr" sh -lc '
       set -e
-      command -v shellcheck >/dev/null 2>&1 || { echo "shellcheck not found in SERVER_TOOLS"; exit 1; }
+      command -v shellcheck >/dev/null 2>&1 || { echo "shellcheck not found in server-tools container"; exit 1; }
       files=""
       for f in "'"$DIR"'"/lds "'"$DIR"'"/bin/* "'"$DIR"'"/lib/*.sh; do
         [ -f "$f" ] && files="$files $f"
@@ -2369,7 +2430,11 @@ _doctor_run() {
 # NOTIFY
 ###############################################################################
 notify_watch() {
-  local container="${1:-SERVER_TOOLS}"
+  local container="${1:-}"
+  if [[ -z "$container" ]]; then
+    container="$(_project_tools_container_running || true)"
+    [[ -n "$container" ]] || die "server-tools container is not running for project: $(lds_project)"
+  fi
   local prefix="__HOST_NOTIFY__"
 
   need docker
@@ -2499,13 +2564,16 @@ notify_watch() {
 
 notify_test() {
   local title="${1:-Notifier OK}"
-  local body="${2:-Hello from host via SERVER_TOOLS}"
-  docker exec SERVER_TOOLS notify -t 2500 -u normal "$title" "$body"
+  local body="${2:-Hello from host via project server-tools container}"
+  local ctr
+  ctr="$(_project_tools_container_running || true)"
+  [[ -n "$ctr" ]] || die "server-tools container is not running for project: $(lds_project)"
+  docker exec "$ctr" notify -t 2500 -u normal "$title" "$body"
 }
 
 cmd_notify() {
   case ${1:-watch} in
-  watch) notify_watch "${2:-SERVER_TOOLS}" ;;
+  watch) notify_watch "${2:-}" ;;
   test) notify_test "${2:-Notifier OK}" "${3:-Hello from host}" ;;
   *) die "notify <watch [container]|test \"Title\" \"Body\">" ;;
   esac
@@ -3052,7 +3120,7 @@ cmd_stack_diff() {
         desired_df["$svc"]="$df"
       done < <(printf '%s' "$cfg_json" | jq -r '.services | to_entries[] | "\(.key)|\(.value.build.dockerfile // "")"')
     else
-      # try via SERVER_TOOLS jq
+      # try via project tools container jq
       while IFS= read -r line; do
         local svc="${line%%|*}"
         local img="${line#*|}"
@@ -3111,7 +3179,7 @@ cmd_stack_diff() {
       cat "$tmp" | jq .
       rm -f "$tmp"
     else
-      die "jq required for --json (or run inside SERVER_TOOLS)"
+      die "jq required for --json (or run inside project server-tools container)"
     fi
     return 0
   fi
@@ -3259,7 +3327,7 @@ cmd_support_trace() {
   printf "%bTrace%b: %s\n" "$CYAN" "$NC" "$dom"
 
   # 1) DNS
-  if docker inspect -f '{{.State.Running}}' SERVER_TOOLS 2>/dev/null | grep -qx true; then
+  if _server_tools_running; then
     printf "\n%b[DNS]%b\n" "$DIM" "$NC"
     _tools_exec "dig +short $(_shq "$dom") || true; getent hosts $(_shq "$dom") 2>/dev/null || true"
   else
@@ -3270,7 +3338,7 @@ cmd_support_trace() {
 
   # 2) TLS certificate
   printf "\n%b[TLS]%b\n" "$DIM" "$NC"
-  if docker inspect -f '{{.State.Running}}' SERVER_TOOLS 2>/dev/null | grep -qx true; then
+  if _server_tools_running; then
     _tools_exec "echo | openssl s_client -connect $(_shq "$dom"):443 -servername $(_shq "$dom") -showcerts 2>/dev/null | openssl x509 -noout -subject -issuer -dates 2>/dev/null || true"
   else
     echo | openssl s_client -connect "${dom}:443" -servername "$dom" -showcerts 2>/dev/null | openssl x509 -noout -subject -issuer -dates 2>/dev/null || true
@@ -3278,7 +3346,7 @@ cmd_support_trace() {
 
   # 3) HTTP probe (timings)
   printf "\n%b[HTTP]%b\n" "$DIM" "$NC"
-  if docker inspect -f '{{.State.Running}}' SERVER_TOOLS 2>/dev/null | grep -qx true; then
+  if _server_tools_running; then
     _tools_exec "curl -sk -o /dev/null -D - -w 'time_namelookup=%{time_namelookup}\ntime_connect=%{time_connect}\ntime_appconnect=%{time_appconnect}\ntime_starttransfer=%{time_starttransfer}\ntime_total=%{time_total}\nhttp_code=%{http_code}\n' https://$(_shq "$dom") | sed -n '1,30p'"
   else
     curl -sk -o /dev/null -D - -w $'time_namelookup=%{time_namelookup}\ntime_connect=%{time_connect}\ntime_appconnect=%{time_appconnect}\ntime_starttransfer=%{time_starttransfer}\ntime_total=%{time_total}\nhttp_code=%{http_code}\n' "https://$dom" | sed -n '1,30p'
@@ -3543,7 +3611,7 @@ Shortcuts: `open`, `bundle`, `notify`, `ui` map to `support …`.
 - `lds secrets …`
 - `lds env …`
 
-## Tools (SERVER_TOOLS)
+## Tools (project server-tools container)
 - `lds tools sh`
 - `lds tools exec "<cmd>"`
 - `lds tools file <path>`
@@ -3601,7 +3669,7 @@ ${CYAN}Config:${NC}
 
 ${CYAN}Doctor:${NC}
   doctor [run]                     Full environment checks
-  doctor lint                       shellcheck (inside SERVER_TOOLS)
+  doctor lint                       shellcheck (inside project server-tools container)
   doctor scan-logs [pattern]        log scan (recent logs)
   doctor fix                        Safe auto-fixes (when available)
 
@@ -3617,7 +3685,7 @@ ${CYAN}Secrets / Env:${NC}
   secrets <senv-args...>
   env <senv-args...>
 
-${CYAN}Tools (SERVER_TOOLS):${NC}
+${CYAN}Tools (project server-tools container):${NC}
   tools sh|exec|file
 
 ${CYAN}Setup:${NC}
