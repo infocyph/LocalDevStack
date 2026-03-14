@@ -1877,6 +1877,9 @@ cmd_rebuild() {
   _pick_targets_interactive() {
     compose_services_load
     all_svcs=("${__COMPOSE_SVCS[@]}")
+    if ((${#all_svcs[@]})); then
+      mapfile -t all_svcs < <(printf '%s\n' "${all_svcs[@]}" | LC_ALL=C sort -f -u)
+    fi
     [[ ${#all_svcs[@]} -gt 0 ]] || die "No services found (docker compose config --services failed?)"
 
     echo
