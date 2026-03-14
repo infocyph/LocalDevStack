@@ -14,7 +14,7 @@ services:
       - lds_nginx_host:/etc/share/vhosts/nginx
       - lds_ssl_keys:/etc/mkcert
       - lds_fpm_pools:/etc/share/vhosts/fpm
-      - ../../configuration/node:/etc/share/vhosts/node
+      - ../../configuration/compose:/etc/share/vhosts/docker-compose
       - ../../configuration/sops/config:/etc/share/sops/config
       - ../../configuration/sops/global:/etc/share/sops/global
       - ../../configuration/sops/keys:/etc/share/sops/keys

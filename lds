@@ -304,7 +304,7 @@ CFG="$DIR/docker"
 ENV_MAIN="$DIR/.env"
 ENV_DOCKER="$CFG/.env"
 COMPOSE_FILE="$CFG/compose/main.yaml"
-EXTRAS_DIR="$DIR/configuration/node"
+EXTRAS_DIR="$DIR/configuration/compose"
 
 if [[ "${1:-}" == "--__win_workdir" ]]; then
   export WORKDIR_WIN="${2:-}"
