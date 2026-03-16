@@ -71,8 +71,8 @@ services:
       - TZ=${TZ:-}
       - MP_MAX_MESSAGES=5000
       - MP_DATABASE=/data/mailpit.db
-      - MP_SMTP_TLS_CERT=/certs/local.pem
-      - MP_SMTP_TLS_KEY=/certs/local-key.pem
+      - MP_SMTP_TLS_CERT=/certs/lds-server.pem
+      - MP_SMTP_TLS_KEY=/certs/lds-server-key.pem
       - MP_SMTP_REQUIRE_STARTTLS=true
       - MP_SMTP_AUTH_ACCEPT_ANY=1
     volumes:
