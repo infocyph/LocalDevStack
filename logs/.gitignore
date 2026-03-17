@@ -14,4 +14,5 @@
 !redis
 !php-fpm
 !olds
+!node
 !.gitignore

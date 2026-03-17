@@ -17,7 +17,7 @@ ARG NODE_GLOBAL_VERSIONED
 ENV PATH="/usr/local/bin:/usr/bin:/bin:/usr/games:$PATH" \
     LANG=en_US.UTF-8 \
     LC_ALL=en_US.UTF-8 \
-    NPM_CONFIG_CACHE=/tmp/.npm-cache \
+    NPM_CONFIG_CACHE=/home/${USERNAME}/.npm \
     GIT_CREDENTIAL_STORE=/home/${USERNAME}/.git-credentials
 
 ADD https://raw.githubusercontent.com/infocyph/Scriptomatic/master/bash/node-cli-setup.sh /usr/local/bin/cli-setup.sh

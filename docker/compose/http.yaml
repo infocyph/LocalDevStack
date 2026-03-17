@@ -11,7 +11,7 @@ services:
       - "${HTTPS_PORT:-443}:443"
     volumes:
       - "${PROJECT_DIR:-./../../../application}:/app"
-      - lds_nginx_host:/etc/nginx/conf.d:ro
+      - lds_nginx_host:/etc/nginx/conf.d
       - lds_ssl_keys:/etc/mkcert:ro
       - lds_ssl_roots:/etc/share/rootCA:ro
       - lds_fpm_sock:/run/php-fpm:ro
