@@ -29,8 +29,6 @@ services:
     hostname: apache
     image: infocyph/apache:latest
     restart: always
-    profiles:
-      - apache
     environment:
       - TZ=${TZ:-}
     volumes:
