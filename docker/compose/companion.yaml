@@ -15,6 +15,8 @@ services:
       - lds_ssl_keys:/etc/mkcert
       - lds_fpm_pools:/etc/share/vhosts/fpm
       - ../../configuration/compose:/etc/share/vhosts/docker-compose
+      - ../../configuration/scheduler/cron-jobs:/etc/share/scheduler/cron-jobs
+      - ../../configuration/scheduler/supervisor:/etc/share/scheduler/supervisor
       - ../../configuration/sops/config:/etc/share/sops/config
       - ../../configuration/sops/global:/etc/share/sops/global
       - ../../configuration/sops/keys:/etc/share/sops/keys

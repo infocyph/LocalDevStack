@@ -28,5 +28,6 @@ RUN apk add --no-cache bash && \
 USER ${USERNAME}
 RUN sudo /usr/local/bin/git-default
 WORKDIR /app
+EXPOSE 3000
 ENTRYPOINT ["/usr/local/bin/node-entry"]
 CMD []

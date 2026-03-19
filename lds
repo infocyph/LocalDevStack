@@ -2130,13 +2130,17 @@ cmd_core() {
     tools_ctr="$(_project_tools_container_running || true)"
     [[ -n "$tools_ctr" ]] || die "server-tools container is not running for project: $(lds_project)"
 
-    local info container
-    info="$(docker exec "$tools_ctr" domain-which "$target" 2>/dev/null)" || die "Unknown domain: $target"
-    IFS=$' \t' read -r _ container _ _ <<<"$info"
+    local app container wd
+    app="$(docker exec "$tools_ctr" domain-which --app --quiet "$target" 2>/dev/null)" || die "Unknown domain: $target"
+    container="$(docker exec "$tools_ctr" domain-which --container --quiet "$target" 2>/dev/null)" || die "No container resolved for: $target"
+    wd="$(docker exec "$tools_ctr" domain-which --docroot --quiet "$target" 2>/dev/null)" || true
     [[ -n "${container:-}" ]] || die "No container resolved for: $target"
 
-    # Always open project root. Do not follow inferred/public docroot.
-    local wd="/app"
+    # Node apps should always land at /app. Others follow resolved docroot.
+    if [[ "${app:-}" == "node" ]]; then
+      wd="/app"
+    fi
+    [[ -n "${wd:-}" ]] || wd="/app"
 
     docker exec -it "$container" bash -lc "cd \"$wd\" 2>/dev/null || cd /app 2>/dev/null || cd /; exec bash"
     return 0
@@ -2516,7 +2520,8 @@ run_start() {
   done
 
   if [[ "$keepalive" == 1 ]]; then
-    args+=(--entrypoint sh "$tag" -c "trap : TERM INT; sleep infinity & wait")
+    # Keepalive mode replaces the image command; disable image healthcheck to avoid false "unhealthy".
+    args+=(--no-healthcheck --entrypoint sh "$tag" -c "trap : TERM INT; sleep infinity & wait")
   else
     args+=("$tag")
   fi
