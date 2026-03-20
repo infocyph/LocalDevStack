@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+
 die() {
   echo "Error: $*" >&2
   exit 1
@@ -29,8 +30,13 @@ fi
 
 SERVICE="${REDIS_CONTAINER:-REDIS}"
 
-require_container() { docker inspect "$SERVICE" >/dev/null 2>&1 || die "container '$SERVICE' is not running."; }
-is_tty() { [[ -t 0 ]] && echo "-it" || echo "-i"; }
+require_container() {
+  local running
+  running="$(docker inspect -f '{{.State.Running}}' "$SERVICE" 2>/dev/null || true)"
+  [[ "$running" == "true" ]] || die "container '$SERVICE' is not running."
+}
+
+is_tty() { [[ -t 0 && -t 1 ]] && echo "-it" || echo "-i"; }
 
 # Read env var from container (best source of truth)
 cenv() {
@@ -40,28 +46,35 @@ cenv() {
 
 redis_password() {
   local pw="${REDIS_PASSWORD:-}"
-  [[ -n "$pw" ]] && {
+  if [[ -n "$pw" ]]; then
     printf '%s' "$pw"
     return 0
-  }
+  fi
+
   pw="$(cenv REDIS_PASSWORD || true)"
+  if [[ -z "$pw" ]]; then
+    pw="$(cenv REDISCLI_AUTH || true)"
+  fi
+
   printf '%s' "$pw"
 }
 
 redis_db() {
   local db="${REDIS_DB:-}"
   [[ -n "$db" ]] || db="0"
+  [[ "$db" =~ ^[0-9]+$ ]] || die "REDIS_DB must be numeric."
   printf '%s' "$db"
 }
 
 usage() {
   cat >&2 <<'TXT'
 Usage:
-  redis-cli                     # interactive
+  redis-cli                      # interactive
   redis-cli <args...>            # passthrough
 
 Shortcuts:
   redis-cli db <index> [cmd...]  # run on a specific DB index
+  redis-cli ping
   redis-cli status
 TXT
 }
@@ -72,6 +85,7 @@ redis_exec() {
   local pw db
   pw="$(redis_password)"
   db="$(redis_db)"
+
   if [[ -n "$pw" ]]; then
     exec docker exec $flags -e "REDISCLI_AUTH=$pw" "$SERVICE" redis-cli -n "$db" "$@"
   else
@@ -95,6 +109,9 @@ main() {
   status)
     docker ps --filter "name=^/${SERVICE}$" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
     exit 0
+    ;;
+  ping)
+    redis_exec PING
     ;;
   db)
     shift

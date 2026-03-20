@@ -16,7 +16,7 @@ services:
     environment:
       - RI_REDIS_HOST=redis
     volumes:
-      - ../../data/redis-insight:/data
+      - lds_ri:/data
       - ../../logs/redis-insight:/var/log/redis-insight
     networks:
       datastore:
@@ -33,8 +33,13 @@ services:
     environment:
       - TZ=${TZ:-}
     volumes:
-      - ../../data/cloudbeaver:/opt/cloudbeaver/workspace
+      - lds_cb:/opt/cloudbeaver/workspace
       - ../../logs/cloudbeaver:/opt/cloudbeaver/logs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8978/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     networks:
       datastore:
         ipv4_address: 172.30.0.151
@@ -75,7 +80,7 @@ services:
       - TZ=${TZ:-}
       - "ELASTICSEARCH_HOSTS=http://elasticsearch:9200"
     volumes:
-      - ../../data/kibana:/usr/share/kibana/data
+      - lds_kb:/usr/share/kibana/data
       - ../../logs/kibana:/usr/share/kibana/logs
     networks:
       datastore:
@@ -88,13 +93,13 @@ services:
     container_name: FILEBEAT
     restart: unless-stopped
     user: root
-    profiles: [elasticsearch]
+    profiles: [filebeat]
     depends_on:
       - elasticsearch
     volumes:
+      - lds_fbeat:/usr/share/filebeat/data
       - ../conf/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
       - ../../logs:/global/log:ro
-      - ../../data/filebeat:/usr/share/filebeat/data
     command: ["--strict.perms=false"]
     networks:
       datastore:

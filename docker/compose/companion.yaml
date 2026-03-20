@@ -6,21 +6,29 @@ services:
     restart: unless-stopped
     environment:
       - TZ=${TZ:-}
+      - USERNAME=${USER}
     volumes:
-      - ../../configuration/apache:/etc/share/vhosts/apache
-      - ../../configuration/nginx:/etc/share/vhosts/nginx
-      - ../../configuration/node:/etc/share/vhosts/node
+      - "${PROJECT_DIR:-./../../../application}:/app"
+      - lds_ssl_roots:/etc/share/rootCA
+      - lds_apache_host:/etc/share/vhosts/apache
+      - lds_nginx_host:/etc/share/vhosts/nginx
+      - lds_ssl_keys:/etc/mkcert
+      - lds_fpm_pools:/etc/share/vhosts/fpm
+      - ../../configuration/compose:/etc/share/vhosts/docker-compose
+      - ../../configuration/scheduler/cron-jobs:/etc/share/scheduler/cron-jobs
+      - ../../configuration/scheduler/supervisor:/etc/share/scheduler/supervisor
       - ../../configuration/sops/config:/etc/share/sops/config
       - ../../configuration/sops/global:/etc/share/sops/global
       - ../../configuration/sops/keys:/etc/share/sops/keys
-      - ../../configuration/ssl:/etc/mkcert
       - "../../configuration/ssh:/home/root/.ssh:ro"
-      - "${PROJECT_DIR:-./../../../application}:/app"
-      - ../../configuration/rootCA:/etc/share/rootCA
-      - /var/run/docker.sock:/var/run/docker.sock
       - "${SOP_REPO:-./../../../sops-repo}:/etc/share/vhosts/sops"
       - "${HOME}/.gitconfig:/home/root/.gitconfig:ro"
+      - ../../configuration/ssl:/etc/share/certs
+      - ../../logs:/global/log:ro
+      - /var/run/docker.sock:/var/run/docker.sock
     networks:
+      frontend:
+        ipv4_address: 172.28.0.13
       backend:
         ipv4_address: 172.29.0.10
       datastore:
@@ -65,13 +73,13 @@ services:
       - TZ=${TZ:-}
       - MP_MAX_MESSAGES=5000
       - MP_DATABASE=/data/mailpit.db
-      - MP_SMTP_TLS_CERT=/certs/local.pem
-      - MP_SMTP_TLS_KEY=/certs/local-key.pem
+      - MP_SMTP_TLS_CERT=/certs/lds-server.pem
+      - MP_SMTP_TLS_KEY=/certs/lds-server-key.pem
       - MP_SMTP_REQUIRE_STARTTLS=true
       - MP_SMTP_AUTH_ACCEPT_ANY=1
     volumes:
-      - ../../data/mailpit:/data
-      - ../../configuration/ssl:/certs:ro
+      - lds_ssl_keys:/certs:ro
+      - lds_mail:/data
     depends_on:
       - server-tools
     networks:

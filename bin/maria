@@ -56,7 +56,9 @@ SERVICE="${MARIADB_CONTAINER:-${MYSQL_CONTAINER:-MARIADB}}"
 MARIADB_PORT_IN="${MARIADB_PORT_IN:-${MYSQL_PORT_IN:-}}"
 
 require_container() {
-  docker inspect "$SERVICE" >/dev/null 2>&1 || die "container '$SERVICE' is not running."
+  local running
+  running="$(docker inspect -f '{{.State.Running}}' "$SERVICE" 2>/dev/null || true)"
+  [[ "$running" == "true" ]] || die "container '$SERVICE' is not running."
 }
 
 is_tty() { [[ -t 0 ]] && echo "-it" || echo "-i"; }
@@ -93,12 +95,25 @@ infer_port() {
 
 # Host mount (keep it simple & reliable like your working mysql script):
 # always mount *current directory* for file ops.
+resolve_host_pwd() {
+  local wd="${WORKDIR_WIN:-${WORKING_DIR:-$PWD}}"
+
+  if is_msys && [[ "$wd" == *"Program Files/Git/workspace"* ]]; then
+    wd="$PWD"
+  fi
+
+  printf "%s" "$wd"
+}
+
 mount_host_pwd() {
+  local wd
+  wd="$(resolve_host_pwd)"
+
   msys_no_pathconv
   if is_msys && command -v cygpath >/dev/null 2>&1; then
-    cygpath -w "$PWD"
+    cygpath -w "$wd"
   else
-    printf "%s" "$PWD"
+    printf "%s" "$wd"
   fi
 }
 
@@ -108,7 +123,7 @@ to_workspace_path() {
   [[ -f "$host_path" ]] || die "file not found: $host_path"
 
   local abs cwd rel
-  cwd="$(cd "$PWD" && pwd)"
+  cwd="$(cd "$(resolve_host_pwd)" && pwd)"
   abs="$(cd "$(dirname "$host_path")" && pwd)/$(basename "$host_path")"
 
   if command -v python3 >/dev/null 2>&1; then
@@ -364,6 +379,7 @@ EOF
     shift
     local db="${1:-$DEF_DB}"
     [[ -n "$db" ]] || die "tables requires a db name (or set MARIADB_DATABASE/MYSQL_DATABASE)."
+    [[ "$db" =~ ^[A-Za-z0-9_]+$ ]] || die "invalid db name '$db' (allowed: A-Z a-z 0-9 _)"
     # across schemas (but scoped to selected DB unless you want global — keep predictable):
     if [[ "$as_user" == true ]]; then
       db_exec_user "$client" "$db" -e \

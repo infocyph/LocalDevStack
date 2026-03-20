@@ -1,33 +1,143 @@
 name: LocalDevStack
-
 networks:
   frontend:
     name: Frontend
     driver: bridge
+    labels:
+      com.docker.compose.project: "LocalDevStack"
+      com.docker.compose.network: "frontend"
+      com.infocyph.stack: "LocalDevStack"
     ipam:
       config:
         - subnet: 172.28.0.0/24
           gateway: 172.28.0.1
-
   backend:
     name: Backend
     driver: bridge
+    labels:
+      com.docker.compose.project: "LocalDevStack"
+      com.docker.compose.network: "backend"
+      com.infocyph.stack: "LocalDevStack"
     ipam:
       config:
         - subnet: 172.29.0.0/24
           gateway: 172.29.0.1
-
   datastore:
     name: DataStore
     driver: bridge
+    labels:
+      com.docker.compose.project: "LocalDevStack"
+      com.docker.compose.network: "datastore"
+      com.infocyph.stack: "LocalDevStack"
     ipam:
       config:
         - subnet: 172.30.0.0/24
           gateway: 172.30.0.1
-
+volumes:
+  lds_fpm_sock:
+    name: FPMSocks
+    labels:
+      com.infocyph.lds: "1"
+      com.infocyph.stack: "LocalDevStack"
+      com.infocyph.purpose: "PHP-FPM Sockets"
+  lds_fpm_pools:
+    name: FPMPools
+    labels:
+      com.infocyph.lds: "1"
+      com.infocyph.stack: "LocalDevStack"
+      com.infocyph.purpose: "PHP-FPM Pools"
+  lds_ssl_keys:
+    name: SSLKeys
+    labels:
+      com.infocyph.lds: "1"
+      com.infocyph.stack: "LocalDevStack"
+      com.infocyph.purpose: "SSL Keys"
+  lds_ssl_roots:
+    name: SSLRootCA
+    labels:
+      com.infocyph.lds: "1"
+      com.infocyph.stack: "LocalDevStack"
+      com.infocyph.purpose: "SSL Root CA"
+  lds_nginx_host:
+    name: NginxHosts
+    labels:
+      com.infocyph.lds: "1"
+      com.infocyph.stack: "LocalDevStack"
+      com.infocyph.purpose: "Nginx Host Configs"
+  lds_apache_host:
+    name: ApacheHosts
+    labels:
+      com.infocyph.lds: "1"
+      com.infocyph.stack: "LocalDevStack"
+      com.infocyph.purpose: "Apache Host Configs"
+  lds_mail:
+    name: EmailStore
+    labels:
+      com.infocyph.lds: "1"
+      com.infocyph.stack: "LocalDevStack"
+      com.infocyph.purpose: "Email Store"
+  lds_redis:
+    name: RedisStore
+    labels:
+      com.infocyph.lds: "1"
+      com.infocyph.stack: "LocalDevStack"
+      com.infocyph.purpose: "Redis Data"
+  lds_ri:
+    name: RedisInsightStore
+    labels:
+      com.infocyph.lds: "1"
+      com.infocyph.stack: "LocalDevStack"
+      com.infocyph.purpose: "Redis Insight Data"
+  lds_pg:
+    name: PostgresStore
+    labels:
+      com.infocyph.lds: "1"
+      com.infocyph.stack: "LocalDevStack"
+      com.infocyph.purpose: "PostgreSQL Data"
+  lds_my:
+    name: MySQLStore
+    labels:
+      com.infocyph.lds: "1"
+      com.infocyph.stack: "LocalDevStack"
+      com.infocyph.purpose: "MySQL Data"
+  lds_maria:
+    name: MariaDBStore
+    labels:
+      com.infocyph.lds: "1"
+      com.infocyph.stack: "LocalDevStack"
+      com.infocyph.purpose: "MariaDB Data"
+  lds_mongo:
+    name: MongoDBStore
+    labels:
+      com.infocyph.lds: "1"
+      com.infocyph.stack: "LocalDevStack"
+      com.infocyph.purpose: "MongoDB Data"
+  lds_es:
+    name: ElasticSearchStore
+    labels:
+      com.infocyph.lds: "1"
+      com.infocyph.stack: "LocalDevStack"
+      com.infocyph.purpose: "ElasticSearch Data"
+  lds_kb:
+    name: KibanaStore
+    labels:
+      com.infocyph.lds: "1"
+      com.infocyph.stack: "LocalDevStack"
+      com.infocyph.purpose: "Kibana Data"
+  lds_cb:
+    name: CloudBeaverStore
+    labels:
+      com.infocyph.lds: "1"
+      com.infocyph.stack: "LocalDevStack"
+      com.infocyph.purpose: "CloudBeaver Data"
+  lds_fbeat:
+    name: FilebeatStore
+    labels:
+      com.infocyph.lds: "1"
+      com.infocyph.stack: "LocalDevStack"
+      com.infocyph.purpose: "Filebeat Data"
 include:
   - docker/compose/companion.yaml
   - docker/compose/db.yaml
   - docker/compose/db-client.yaml
-  - docker/compose/php.yaml
   - docker/compose/http.yaml

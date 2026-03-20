@@ -1,7 +1,7 @@
 ARG PHP_VERSION=8.4
 FROM php:${PHP_VERSION}-fpm-alpine
 
-LABEL org.opencontainers.image.source="https://github.com/infocyph/LocalDock"
+LABEL org.opencontainers.image.source="https://github.com/infocyph/LocalDevStack"
 LABEL org.opencontainers.image.description="PHP FPM Alpine"
 LABEL org.opencontainers.image.licenses="MIT"
 LABEL org.opencontainers.image.authors="infocyph,abmmhasan"
@@ -23,10 +23,7 @@ ENV GIT_USER_NAME="" \
     LC_ALL=en_US.UTF-8
 
 ADD https://raw.githubusercontent.com/infocyph/Scriptomatic/master/bash/php-cli-setup.sh /usr/local/bin/cli-setup.sh
-RUN apk add --no-cache bash && \
-  bash /usr/local/bin/cli-setup.sh "${USERNAME}" "${PHP_VERSION}" && \
-  rm -f /usr/local/bin/cli-setup.sh && \
-  rm -rf /var/cache/apk/* /tmp/* /var/tmp/*
+RUN apk add --no-cache bash && bash /usr/local/bin/cli-setup.sh "${USERNAME}" "${PHP_VERSION}"
 
 USER ${USERNAME}
 RUN sudo /usr/local/bin/git-default
