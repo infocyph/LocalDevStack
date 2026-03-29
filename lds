@@ -1992,7 +1992,8 @@ cmd_rebuild() {
 
     dc_up -d --no-deps --force-recreate "$svc"
   done
-  dc_up -d
+  logq reboot "Rebooting stacks"
+  cmd_reboot
 }
 
 cmd_config() { docker_compose config; }
