@@ -25,7 +25,7 @@ services:
       - ../../configuration/sops/keys:/etc/share/sops/keys
       - "../../configuration/ssh:/home/root/.ssh:ro"
       - "${SOP_REPO:-./../../../sops-repo}:/etc/share/vhosts/sops"
-      - lds_git_config:/home/root/.gitconfig
+      - lds_git_config:/git-config
       - ../../configuration/ssl:/etc/share/certs
       - ../../logs:/global/log:ro
       - /var/run/docker.sock:/var/run/docker.sock
