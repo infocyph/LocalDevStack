@@ -10,6 +10,11 @@ services:
       - GIT_USER_NAME=${GIT_USER_NAME:-}
       - GIT_USER_EMAIL=${GIT_USER_EMAIL:-}
       - GIT_CREDENTIAL_MODE=${GIT_CREDENTIAL_MODE:-auto}
+      - SOPS_BASE_DIR=/etc/share/sops
+      - SOPS_KEYS_DIR=/etc/share/sops/keys
+      - SOPS_CFG_DIR=/etc/share/sops/config
+      - SOPS_GLOBAL_DIR=/etc/share/sops/global
+      - SOPS_REPO_DIR=/etc/share/vhosts/sops
     volumes:
       - "${PROJECT_DIR:-./../../../application}:/app"
       - lds_ssl_roots:/etc/share/rootCA
@@ -17,6 +22,7 @@ services:
       - lds_nginx_host:/etc/share/vhosts/nginx
       - lds_ssl_keys:/etc/mkcert
       - lds_fpm_pools:/etc/share/vhosts/fpm
+      - lds_git_config:/git-config
       - ../../configuration/compose:/etc/share/vhosts/docker-compose
       - ../../configuration/scheduler/cron-jobs:/etc/share/scheduler/cron-jobs
       - ../../configuration/scheduler/supervisor:/etc/share/scheduler/supervisor
@@ -25,7 +31,6 @@ services:
       - ../../configuration/sops/keys:/etc/share/sops/keys
       - "../../configuration/ssh:/home/root/.ssh:ro"
       - "${SOP_REPO:-./../../../sops-repo}:/etc/share/vhosts/sops"
-      - lds_git_config:/git-config
       - ../../configuration/ssl:/etc/share/certs
       - ../../logs:/global/log:ro
       - /var/run/docker.sock:/var/run/docker.sock
