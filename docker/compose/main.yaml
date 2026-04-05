@@ -58,6 +58,12 @@ volumes:
       com.infocyph.lds: "1"
       com.infocyph.stack: "LocalDevStack"
       com.infocyph.purpose: "SSL Root CA"
+  lds_git_config:
+    name: GitConfig
+    labels:
+      com.infocyph.lds: "1"
+      com.infocyph.stack: "LocalDevStack"
+      com.infocyph.purpose: "Git Config"
   lds_nginx_host:
     name: NginxHosts
     labels:
