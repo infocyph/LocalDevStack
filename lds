@@ -431,7 +431,9 @@ docker_compose() {
     esac
   done
 
-  "${__LDS_DC_BIN[@]}" \
+  local host_os="${HOST_OS:-$(detect_host_os)}"
+
+  HOST_OS="$host_os" "${__LDS_DC_BIN[@]}" \
     --project-directory "$DIR" \
     -f "$COMPOSE_FILE" \
     "${extra_f[@]}" \
@@ -2394,6 +2396,29 @@ run_plan() {
     "$dir"
 }
 
+detect_host_os() {
+  if is_windows_shell || grep -qi microsoft /proc/version 2>/dev/null; then
+    printf 'windows'
+    return 0
+  fi
+
+  if has_cmd uname; then
+    case "$(uname -s 2>/dev/null || true)" in
+    Darwin)
+      printf 'macos'
+      ;;
+    Linux)
+      printf 'linux'
+      ;;
+    *)
+      printf 'unknown'
+      ;;
+    esac
+  else
+    printf 'unknown'
+  fi
+}
+
 run_find_container() {
   local dir="$1"
   docker ps -a --filter "label=com.infocyph.lds.run=1" \
@@ -2417,8 +2442,8 @@ run_build() {
 }
 
 run_start() {
-  local name="$1" tag="$2" dir="$3" keepalive="$4" sock="$5"
-  shift 5 || true
+  local name="$1" tag="$2" dir="$3" keepalive="$4" sock="$5" host_os="$6"
+  shift 6 || true
 
   # Remaining args are split by a "--" sentinel:
   #   - before "--" : publish specs (HOST:CONT), repeatable
@@ -2454,6 +2479,10 @@ run_start() {
     -w "$WDIR"
     -v "$WDIR_MOUNT"
   )
+
+  if [[ -n "$host_os" ]]; then
+    args+=(-e "HOST_OS=$host_os")
+  fi
 
   # Mount extra directories/files (HOST[:CONT]).
   # - If container path missing, mounts under /mnt/<basename>.
@@ -2547,7 +2576,7 @@ run_exec_shell() {
 }
 
 cmd_run() {
-  local action="*" dir="$PWD" name="" tag="" nobuild=0 keepalive=1 sock=0
+  local action="*" dir="$PWD" name="" tag="" nobuild=0 keepalive=1 sock=0 host_os=""
   local -a publish=() mounts=()
   local open_port="" open_path="/" open_proto="http"
 
@@ -2581,6 +2610,10 @@ cmd_run() {
       sock=1
       shift
       ;;
+    --host-os)
+      host_os="${2:-}"
+      shift 2
+      ;;
     -p | --publish)
       publish+=("${2:-}")
       shift 2
@@ -2612,6 +2645,10 @@ cmd_run() {
   # Host path (POSIX) for planning/labels
   local dir_posix
   dir_posix="$(cd "$dir" && pwd -P)"
+
+  if [[ -z "$host_os" ]]; then
+    host_os="${HOST_OS:-$(detect_host_os)}"
+  fi
 
   # Docker path (may need Windows form for docker.exe)
   local dir_docker="$dir_posix"
@@ -2667,6 +2704,7 @@ cmd_run() {
     printf "  %bName:%b      %s\n" "$BOLD" "$NC" "$cname"
     printf "  %bKeepalive:%b %s\n" "$BOLD" "$NC" "$keepalive"
     printf "  %bSock:%b      %s\n" "$BOLD" "$NC" "$sock"
+    printf "  %bHost OS:%b   %s\n" "$BOLD" "$NC" "$host_os"
 
     if ((${#publish[@]})); then
       printf "  %bPublish:%b   %s\n" "$BOLD" "$NC" "${publish[*]}"
@@ -2787,7 +2825,7 @@ cmd_run() {
 
       # Keep mounts as user gave them (POSIX/relative); run_start should validate POSIX
       # and convert host-side to Windows only at docker run time.
-      run_start "$name" "$tag" "$dir_docker" "$keepalive" "$sock" \
+      run_start "$name" "$tag" "$dir_docker" "$keepalive" "$sock" "$host_os" \
         "${publish[@]}" -- "${mounts[@]}"
     fi
 
@@ -3280,7 +3318,7 @@ Shortcuts: `open`, `bundle`, `notify`, `ui` map to `support …`.
 - `lds setup init|permissions|domain|profiles`
 
 ## Runner (ad‑hoc Dockerfile runner)
-- `lds run` *(default: build+start only)* / `lds run shell` *(build+start+enter)* / `lds run *` *(same as default)* (+ `ps|logs|stop|rm|open` and flags: `--publish|-p`, `--no-keepalive`, `--mount`, `--sock`, `--tag`, `--name`)
+- `lds run` *(default: build+start only)* / `lds run shell` *(build+start+enter)* / `lds run *` *(same as default)* (+ `ps|logs|stop|rm|open` and flags: `--publish|-p`, `--no-keepalive`, `--mount`, `--sock`, `--host-os`, `--tag`, `--name`)
 
 ## Other
 - `lds rebuild [all|<svc…>]`
@@ -3341,7 +3379,7 @@ ${CYAN}Setup:${NC}
   setup init|permissions|domain|profiles
 
 ${CYAN}Runner (ad-hoc Dockerfile runner):${NC}
-  run [ps|logs|stop|rm|open] [--publish|-p A:B] [--no-keepalive] [--mount HOST[:CONT]] [--sock]
+  run [ps|logs|stop|rm|open] [--publish|-p A:B] [--no-keepalive] [--mount HOST[:CONT]] [--sock] [--host-os VALUE]
 
 ${CYAN}Other:${NC}
   rebuild [all|<svc…>]

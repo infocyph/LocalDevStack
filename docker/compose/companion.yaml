@@ -6,6 +6,7 @@ services:
     restart: unless-stopped
     environment:
       - TZ=${TZ:-}
+      - HOST_OS=${HOST_OS:-}
       - USERNAME=${USER}
       - GIT_USER_NAME=${GIT_USER_NAME:-}
       - GIT_USER_EMAIL=${GIT_USER_EMAIL:-}
@@ -22,6 +23,7 @@ services:
       - lds_nginx_host:/etc/share/vhosts/nginx
       - lds_ssl_keys:/etc/mkcert
       - lds_fpm_pools:/etc/share/vhosts/fpm
+      - lds_composer_global:/etc/share/vhosts/composer
       - lds_git_config:/git-config
       - ../../configuration/compose:/etc/share/vhosts/docker-compose
       - ../../configuration/scheduler/cron-jobs:/etc/share/scheduler/cron-jobs

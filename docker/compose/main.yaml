@@ -46,6 +46,12 @@ volumes:
       com.infocyph.lds: "1"
       com.infocyph.stack: "LocalDevStack"
       com.infocyph.purpose: "PHP-FPM Pools"
+  lds_composer_global:
+    name: ComposerGlobal
+    labels:
+      com.infocyph.lds: "1"
+      com.infocyph.stack: "LocalDevStack"
+      com.infocyph.purpose: "Composer Global Home"
   lds_ssl_keys:
     name: SSLKeys
     labels:
