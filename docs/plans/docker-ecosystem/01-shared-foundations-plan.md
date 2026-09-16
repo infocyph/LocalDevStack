@@ -2,253 +2,145 @@
 
 ## Purpose
 
-Stabilize the shared Scriptomatic/Toolset dependency contract consumed by LocalDevStack Docker images before changing the image layer itself.
+Define the Scriptomatic/Toolset dependency contract LocalDevStack should consume without redesigning the behavior of either upstream repository.
 
-This remains a dependency-contract plan. Scriptomatic owns reusable bootstrap/runtime behavior; Toolset owns released CLI utilities; LocalDevStack owns image composition/orchestration.
+## Accepted upstream contracts
 
-## Repositories and accepted upstream contracts
+### Scriptomatic
 
-- `infocyph/Scriptomatic`
-  - canonical source: `main`
-  - reproducible consumers: `SCRIPTOMATIC_REF=<commit-sha>`
-  - no Scriptomatic tag/release lifecycle required
-  - all sibling Scriptomatic helpers use the same selected ref
-- `infocyph/Toolset`
-  - stable Docker-ecosystem dependency: `TOOLSET_REF=2.0`
-  - released executables/checksum contract; do not consume Toolset `main`/`master`
+- canonical source: `main`
+- optional reproducible pin: `SCRIPTOMATIC_REF=<commit-sha>`
+- no Scriptomatic tag/release lifecycle
+- PHP/Node bootstrap keeps the existing public inputs and developer-container behavior from Scriptomatic `main`
 
-## Current LocalDevStack mismatch to remove
+### Toolset
 
-The current PHP and Node Dockerfiles still contain:
+- stable dependency: `TOOLSET_REF=2.0`
+- use release assets/checksums rather than Toolset `main`/`master`
+
+## Current LocalDevStack migration
+
+The current PHP and Node Dockerfiles still bootstrap from:
 
 ```text
 https://raw.githubusercontent.com/infocyph/Scriptomatic/master/...
 ```
 
-This must be removed during the LocalDevStack implementation phase.
-
-Do not replace it with another hard-coded mutable URL. Add explicit build arguments and propagate the same selected ref into the bootstrap script.
-
-Required downstream inputs:
-
-```text
-SCRIPTOMATIC_REF=main
-SCRIPTOMATIC_BASE_URL=https://raw.githubusercontent.com/infocyph/Scriptomatic
-TOOLSET_REF=2.0
-SCRIPTOMATIC_UID=<configured uid>
-SCRIPTOMATIC_GID=<configured gid>
-```
-
-For immutable/reproducible image builds, `SCRIPTOMATIC_REF` must be the accepted Scriptomatic commit SHA rather than `main`.
-
-## Initial Scriptomatic bootstrap acquisition
-
-The Dockerfile must acquire the initial `php-cli-setup.sh` / `node-cli-setup.sh` through the selected ref with bounded download behavior. Do not use remote `ADD` against `master`.
-
-Recommended shape:
+During the LocalDevStack implementation phase, replace that hard-coded `master` source with an explicit Scriptomatic ref:
 
 ```dockerfile
 ARG SCRIPTOMATIC_REF=main
-ARG SCRIPTOMATIC_BASE_URL=https://raw.githubusercontent.com/infocyph/Scriptomatic
 ARG TOOLSET_REF=2.0
-
-RUN apk add --no-cache bash curl ca-certificates && \
-    curl --fail --location --silent --show-error \
-      --connect-timeout 5 --max-time 90 --retry 3 \
-      "${SCRIPTOMATIC_BASE_URL}/${SCRIPTOMATIC_REF}/bash/php-cli-setup.sh" \
-      -o /usr/local/bin/cli-setup.sh && \
-    SCRIPTOMATIC_REF="${SCRIPTOMATIC_REF}" \
-    SCRIPTOMATIC_BASE_URL="${SCRIPTOMATIC_BASE_URL}" \
-    TOOLSET_REF="${TOOLSET_REF}" \
-    SCRIPTOMATIC_UID="${UID}" \
-    SCRIPTOMATIC_GID="${GID}" \
-    bash /usr/local/bin/cli-setup.sh "${USERNAME}" "${PHP_VERSION}"
 ```
 
-Use the analogous path for Node.
+Fetch `php-cli-setup.sh` / `node-cli-setup.sh` from the selected Scriptomatic ref and pass `SCRIPTOMATIC_REF` plus `TOOLSET_REF` into the setup process so sibling helpers use the same Scriptomatic ref and Toolset helpers use stable `2.0`.
 
-## Scriptomatic accepted behavior
+For a reproducible build, LocalDevStack may set `SCRIPTOMATIC_REF` to the accepted Scriptomatic commit SHA.
 
-### PHP build/runtime
+## Preserve the existing Docker build inputs
 
-`php-cli-setup.sh` now provides:
-
-- validated package/extension inputs;
-- Alpine official-PHP-image capability checks;
-- pinned/verified PHP extension installer;
-- Composer available by default through pinned `COMPOSER_VERSION=2.10.3`, without the old floating self-update;
-- Toolset `2.0` helper installation from released/checksummed assets;
-- same-ref Scriptomatic helper installation;
-- root-owned `/usr/local/bin` helpers;
-- generated PHP/FPM validation;
-- repeat/idempotent bootstrap coverage;
-- preserved trusted-development shell defaults (passwordless sudo and Oh My Bash) with explicit opt-out controls;
-- preserved setup progress/banner presentation;
-- no broad shared-temp cleanup/self-delete.
-
-`php-entry.sh` provides content-aware mounted-root-CA refresh and transparent `exec docker-php-entrypoint "$@"` semantics.
-
-### Node build/runtime
-
-`node-cli-setup.sh` now provides:
-
-- validated package/global-package inputs;
-- verified upstream UID reuse/rename behavior;
-- optional exact npm version rather than `npm@latest`/`npm@next`;
-- reproducible global-package mode;
-- Toolset `2.0` and same-ref Scriptomatic helpers;
-- root-owned shared executables;
-- preserved trusted-development shell defaults (passwordless sudo and Oh My Bash) with explicit opt-out controls;
-- preserved setup progress/banner presentation.
-
-`node-entry.sh` keeps the established LocalDevStack developer-container defaults:
+Do not rename the existing PHP/Node identity inputs. The setup scripts continue to consume the Docker build environment:
 
 ```text
-NODE_LOG_ENABLED=1
-NODE_KEEPALIVE_ON_FAIL=1
-NODE_AUTO_INSTALL=1
-NODE_ALLOW_LOCKFILE_FALLBACK=1
+UID
+GID
 ```
 
-Each can be set to `0` for stricter/production-like behavior. The entrypoint selects one final command and `exec`s it. Direct argv is preferred; `NODE_CMD` remains a trusted compatibility escape hatch.
+along with the existing package/runtime inputs.
 
-## Trusted development sudo / root CA
-
-Scriptomatic keeps the historical trusted-development default:
+PHP:
 
 ```text
-SCRIPTOMATIC_PASSWORDLESS_SUDO=1
+LINUX_PKG
+LINUX_PKG_VERSIONED
+PHP_EXT
+PHP_EXT_VERSIONED
+MSMTP_FROM
 ```
 
-LocalDevStack PHP/Node images run as non-root at runtime, and their developer shells historically include passwordless sudo. This also provides the privilege path needed when a mounted root CA must be copied/refreshed during entrypoint startup.
-
-For stricter images that do not need runtime sudo/CA mutation, explicitly set:
+Node:
 
 ```text
-SCRIPTOMATIC_PASSWORDLESS_SUDO=0
+LINUX_PKG
+LINUX_PKG_VERSIONED
+NODE_GLOBAL
+NODE_GLOBAL_VERSIONED
+NODE_LOG_DIR
 ```
 
-Use `ROOTCA_REQUIRED=1` only where inability to install the mounted CA should make startup fail.
+Do not introduce `SCRIPTOMATIC_UID`, `SCRIPTOMATIC_GID`, Composer-version, PHP-extension-installer-version, npm-version, reproducibility-mode, sudo-mode or Oh-My-Bash-mode inputs merely for the shared-foundations migration.
 
-## Shared utility contract
+## PHP behavior LocalDevStack should expect
 
-### `alias-maker.sh`
+Scriptomatic preserves the existing PHP development-image behavior:
 
-- managed/idempotent `.bashrc` block;
-- does not interfere with non-interactive application execution;
-- optional aliases degrade cleanly.
+- Alpine official PHP/FPM conventions;
+- Composer installed through `install-php-extensions @composer`;
+- requested PHP extensions;
+- passwordless sudo for the developer user;
+- Oh My Bash with the existing `lambda` theme/plugin set;
+- PHP/FPM, msmtp, Composer home, banner and aliases;
+- non-root runtime through `php-entry`.
 
-### `banner.sh`
+Hardening is underneath that behavior: safer argv handling, bounded/private downloads, same-ref Scriptomatic helpers, Toolset `2.0` checksum verification, root-owned shared executables, idempotent config and content-aware root-CA refresh.
 
-- keeps the established INFOCYPH centered presentation, rotating credit pool, ChromaCat box-style pool, and three-row description box;
-- presentation-only;
-- safe fallback without `figlet`/`chromacat`;
-- non-TTY / `NO_COLOR` safe;
-- banner failure cannot prevent shell/container startup.
+## Node behavior LocalDevStack should expect
 
-### `docknotify.sh`
+Scriptomatic preserves the existing Node development-image behavior:
 
-LocalDevStack-compatible defaults remain:
+- upstream UID-1000 user reuse/rename when applicable;
+- passwordless sudo;
+- Oh My Bash and aliases;
+- user npm cache/global prefix;
+- build-time `npm install -g npm@latest || npm install -g npm@next || true`;
+- optional global package inputs;
+- non-root runtime through `node-entry`.
+
+The Node entrypoint keeps its existing logging, automatic dependency installation/fallback, `NODE_CMD`, host/port and keepalive behavior. Hardening only fixes stale CA-state handling and the generic-dev double-execution bug.
+
+## Root CA
+
+The existing entrypoint input remains:
 
 ```text
-NOTIFY_HOST=SERVER_TOOLS
-NOTIFY_TCP_PORT=9901
-DOCKNOTIFY_STRICT=0
+ROOTCA_PATH
 ```
 
-Notification is best-effort unless strict mode is explicitly requested. Optional tuning values retain permissive compatibility behavior. The protocol is one tab-separated newline-terminated record and token data is not emitted in diagnostics.
+System CA installation remains best-effort at the existing fixed destination. No new strictness/destination policy inputs are required from LocalDevStack.
 
-### `owners.sh`
+## Shared utilities
 
-Standalone repository utility; not part of the critical LocalDevStack runtime contract unless adopted explicitly. Its established human-readable output shape is preserved while Git path enumeration is hardened.
+- `alias-maker.sh`: keep the aliases/functions from Scriptomatic `main`.
+- `banner.sh`: keep the centered INFOCYPH presentation, three-row description box, rotating credits and ChromaCat styles; fallback only when presentation capabilities are unavailable.
+- `docknotify.sh`: keep `SERVER_TOOLS:9901`/best-effort behavior; protocol framing is corrected underneath.
+- `owners.sh`: keep its original human output shape while using safe Git filename enumeration.
 
-## Service-helper contract
+## Certbot
 
-### Certbot
+`certbot-hook.sh` keeps fixed `NGINX` / `APACHE` targets and reload-if-running behavior. Exact inspection and non-TTY exec are implementation fixes.
 
-`certbot-hook.sh` is Docker-control-plane behavior:
+`certbot-renew.sh` remains the existing infinite 12-hour renewal loop. LocalDevStack should not pass interval/jitter/failure-threshold configuration that Scriptomatic does not expose.
 
-- exact container inspection;
-- no TTY;
-- configurable Nginx/Apache container names;
-- bounded reload;
-- missing or stopped optional targets skip, preserving the original reload-if-running behavior;
-- an attempted reload failure propagates non-zero.
+## Mongo
 
-Do not mount the Docker socket into ordinary PHP/Node application containers just to support this helper.
-
-`certbot-renew.sh` is a signal-aware foreground service loop with interval/jitter/backoff controls. Unlimited retry remains the compatibility default (`CERTBOT_RENEW_MAX_FAILURES=0`); a positive threshold can be configured when repeated failures should terminate the container.
-
-### Mongo replica bootstrap
-
-`mongo-replica.sh`:
-
-- uses bounded readiness rather than fixed sleeps;
-- prefers `mongosh` with legacy `mongo` fallback;
-- separates connection URI from advertised replica members;
-- defaults advertised members to Docker DNS names;
-- is idempotent for a matching topology;
-- initializes only when uninitialized;
-- refuses conflicting existing topology.
-
-Default advertised topology:
+`mongo-replica.sh` retains its fixed topology:
 
 ```text
+rs0
 mongo-primary:27017
 mongo-secondary1:27017
 mongo-secondary2:27017
 ```
 
-Do not replace service names with static `172.x` addresses.
-
-## Shell compatibility boundary
-
-LocalDevStack developer workflows may use `bash`, `sh`, and `sh -l`.
-
-- standalone helpers under `/usr/local/bin` have their own shebangs;
-- Bash-specific profile/alias behavior belongs to Bash/login presentation paths;
-- non-login `sh` is not required to source Bash-only configuration;
-- PHP/Node application entrypoints do not depend on interactive shell startup.
-
-## Toolset accepted dependency contract
-
-The Docker ecosystem consumes Toolset stable `2.0` rather than mutable repository branches.
-
-Critical current utilities remain:
-
-- `gitx`
-- `chromacat`
-- `sqlitex` where docker-tools requires it
-- `netx` where docker-tools requires it
-
-Do not add `dockex`, `phpx`, or `cleanx` to LocalDevStack merely for symmetry; adoption requires a concrete downstream need.
-
-## Permanent upstream validation
-
-Scriptomatic CI now covers:
-
-- syntax + ShellCheck;
-- repository-wide security audit;
-- PHP Alpine bootstrap + repeated execution;
-- Node Alpine bootstrap including UID reuse/fresh-user paths;
-- entrypoint exit/signal behavior;
-- shared utility fixtures;
-- Certbot/Mongo deterministic service-helper fixtures;
-- aggregate gate.
-
-Toolset keeps its own permanent release/utility gates.
-
-Do not duplicate these upstream suites inside LocalDevStack. LocalDevStack should add consumer/integration tests that prove its Dockerfiles pass the correct refs/options and that generated images start correctly.
+The hardening is readiness/idempotency/conflict handling only. No new Mongo topology environment contract is required from LocalDevStack.
 
 ## LocalDevStack implementation acceptance criteria
 
-1. No Dockerfile consumes `Scriptomatic/master` or `Toolset/main`/`master`.
-2. PHP/Node image builds expose `SCRIPTOMATIC_REF` and `TOOLSET_REF` build inputs.
-3. Reproducible builds can pin Scriptomatic by commit SHA and Toolset by accepted stable release.
-4. Explicit `SCRIPTOMATIC_UID`/`SCRIPTOMATIC_GID` are passed into setup.
-5. Trusted developer images preserve the established Scriptomatic sudo/Oh My Bash defaults; stricter images may explicitly disable them.
-6. PHP/Node images remain non-root at runtime and preserve entrypoint `exec` semantics.
-7. `bash`, `sh`, and `sh -l` remain usable for their intended roles.
-8. `docknotify` can reach `SERVER_TOOLS:9901` when enabled and remains non-critical when unavailable.
-9. service-to-service references use Docker DNS/service names, not static IP assumptions.
-10. consumer CI builds representative PHP and Node images using the pinned shared-foundation refs.
+1. No PHP/Node Dockerfile downloads Scriptomatic from `master`.
+2. No LocalDevStack consumer downloads Toolset helpers from a mutable branch.
+3. PHP/Node Dockerfiles expose `SCRIPTOMATIC_REF` and `TOOLSET_REF` while preserving existing `UID`, `GID` and package/runtime inputs.
+4. PHP and Node developer-image behavior remains unchanged from the existing LocalDevStack experience.
+5. PHP/Node runtime remains non-root and their entrypoints preserve the existing command semantics.
+6. `docknotify` still interoperates with the LocalDevStack notification service.
+7. Service-to-service names continue to use Docker DNS rather than static IP addresses.
+8. Consumer CI builds representative PHP and Node images against the accepted Scriptomatic ref and Toolset `2.0`.
