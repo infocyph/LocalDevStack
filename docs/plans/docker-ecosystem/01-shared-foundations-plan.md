@@ -76,12 +76,14 @@ Use the analogous path for Node.
 - validated package/extension inputs;
 - Alpine official-PHP-image capability checks;
 - pinned/verified PHP extension installer;
-- no implicit Composer self-update;
+- Composer available by default through pinned `COMPOSER_VERSION=2.10.3`, without the old floating self-update;
 - Toolset `2.0` helper installation from released/checksummed assets;
 - same-ref Scriptomatic helper installation;
 - root-owned `/usr/local/bin` helpers;
 - generated PHP/FPM validation;
 - repeat/idempotent bootstrap coverage;
+- preserved trusted-development shell defaults (passwordless sudo and Oh My Bash) with explicit opt-out controls;
+- preserved setup progress/banner presentation;
 - no broad shared-temp cleanup/self-delete.
 
 `php-entry.sh` provides content-aware mounted-root-CA refresh and transparent `exec docker-php-entrypoint "$@"` semantics.
@@ -95,34 +97,36 @@ Use the analogous path for Node.
 - optional exact npm version rather than `npm@latest`/`npm@next`;
 - reproducible global-package mode;
 - Toolset `2.0` and same-ref Scriptomatic helpers;
-- root-owned shared executables.
+- root-owned shared executables;
+- preserved trusted-development shell defaults (passwordless sudo and Oh My Bash) with explicit opt-out controls;
+- preserved setup progress/banner presentation.
 
-`node-entry.sh` defaults to:
+`node-entry.sh` keeps the established LocalDevStack developer-container defaults:
 
 ```text
-NODE_LOG_ENABLED=0
-NODE_KEEPALIVE_ON_FAIL=0
-NODE_AUTO_INSTALL=0
-NODE_ALLOW_LOCKFILE_FALLBACK=0
+NODE_LOG_ENABLED=1
+NODE_KEEPALIVE_ON_FAIL=1
+NODE_AUTO_INSTALL=1
+NODE_ALLOW_LOCKFILE_FALLBACK=1
 ```
 
-It selects one final command and `exec`s it. Direct argv is preferred; `NODE_CMD` is only a trusted compatibility escape hatch.
+Each can be set to `0` for stricter/production-like behavior. The entrypoint selects one final command and `exec`s it. Direct argv is preferred; `NODE_CMD` remains a trusted compatibility escape hatch.
 
 ## Trusted development sudo / root CA
 
-Scriptomatic now defaults passwordless sudo off:
-
-```text
-SCRIPTOMATIC_PASSWORDLESS_SUDO=0
-```
-
-LocalDevStack PHP/Node images run as non-root at runtime. If the mounted root CA must be copied/refreshed during entrypoint startup, the trusted development image must explicitly build with:
+Scriptomatic keeps the historical trusted-development default:
 
 ```text
 SCRIPTOMATIC_PASSWORDLESS_SUDO=1
 ```
 
-Do not make this implicit in Scriptomatic. LocalDevStack owns this trust choice.
+LocalDevStack PHP/Node images run as non-root at runtime, and their developer shells historically include passwordless sudo. This also provides the privilege path needed when a mounted root CA must be copied/refreshed during entrypoint startup.
+
+For stricter images that do not need runtime sudo/CA mutation, explicitly set:
+
+```text
+SCRIPTOMATIC_PASSWORDLESS_SUDO=0
+```
 
 Use `ROOTCA_REQUIRED=1` only where inability to install the mounted CA should make startup fail.
 
@@ -136,6 +140,7 @@ Use `ROOTCA_REQUIRED=1` only where inability to install the mounted CA should ma
 
 ### `banner.sh`
 
+- keeps the established INFOCYPH centered presentation, rotating credit pool, ChromaCat box-style pool, and three-row description box;
 - presentation-only;
 - safe fallback without `figlet`/`chromacat`;
 - non-TTY / `NO_COLOR` safe;
@@ -151,11 +156,11 @@ NOTIFY_TCP_PORT=9901
 DOCKNOTIFY_STRICT=0
 ```
 
-Notification is best-effort unless strict mode is explicitly requested. The protocol is one tab-separated newline-terminated record and token data is not emitted in diagnostics.
+Notification is best-effort unless strict mode is explicitly requested. Optional tuning values retain permissive compatibility behavior. The protocol is one tab-separated newline-terminated record and token data is not emitted in diagnostics.
 
 ### `owners.sh`
 
-Standalone repository utility; not part of the critical LocalDevStack runtime contract unless adopted explicitly.
+Standalone repository utility; not part of the critical LocalDevStack runtime contract unless adopted explicitly. Its established human-readable output shape is preserved while Git path enumeration is hardened.
 
 ## Service-helper contract
 
@@ -167,12 +172,12 @@ Standalone repository utility; not part of the critical LocalDevStack runtime co
 - no TTY;
 - configurable Nginx/Apache container names;
 - bounded reload;
-- missing optional target skips;
-- stopped/reload-failed configured target fails.
+- missing or stopped optional targets skip, preserving the original reload-if-running behavior;
+- an attempted reload failure propagates non-zero.
 
 Do not mount the Docker socket into ordinary PHP/Node application containers just to support this helper.
 
-`certbot-renew.sh` is a signal-aware foreground service loop with interval/jitter/failure-threshold controls.
+`certbot-renew.sh` is a signal-aware foreground service loop with interval/jitter/backoff controls. Unlimited retry remains the compatibility default (`CERTBOT_RENEW_MAX_FAILURES=0`); a positive threshold can be configured when repeated failures should terminate the container.
 
 ### Mongo replica bootstrap
 
@@ -241,7 +246,7 @@ Do not duplicate these upstream suites inside LocalDevStack. LocalDevStack shoul
 2. PHP/Node image builds expose `SCRIPTOMATIC_REF` and `TOOLSET_REF` build inputs.
 3. Reproducible builds can pin Scriptomatic by commit SHA and Toolset by accepted stable release.
 4. Explicit `SCRIPTOMATIC_UID`/`SCRIPTOMATIC_GID` are passed into setup.
-5. Trusted development sudo is enabled only where the runtime CA workflow needs it.
+5. Trusted developer images preserve the established Scriptomatic sudo/Oh My Bash defaults; stricter images may explicitly disable them.
 6. PHP/Node images remain non-root at runtime and preserve entrypoint `exec` semantics.
 7. `bash`, `sh`, and `sh -l` remain usable for their intended roles.
 8. `docknotify` can reach `SERVER_TOOLS:9901` when enabled and remains non-critical when unavailable.
