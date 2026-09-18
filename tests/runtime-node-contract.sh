@@ -9,6 +9,8 @@ file="$ROOT/docker/dockerfiles/node.Dockerfile"
 assert_file "$file"
 assert_file_contains "$file" 'ARG NODE_VERSION=current'
 assert_file_contains "$file" 'FROM node:${NODE_VERSION}-alpine'
+[[ "$(grep -c '^ARG NODE_VERSION' "$file")" -eq 2 ]] ||
+  fail "NODE_VERSION must be redeclared inside the build stage"
 assert_file_contains "$file" 'ARG LINUX_PKG'
 assert_file_contains "$file" 'ARG LINUX_PKG_VERSIONED'
 assert_file_contains "$file" 'ARG NODE_GLOBAL'
