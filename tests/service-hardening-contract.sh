@@ -57,10 +57,12 @@ assert_file_contains "$main" 'name: ToolsState'
 assert_file_contains "$companion" 'lds_tools_state:/etc/share/state'
 pass "Tools durable state persistence"
 
-assert_file_contains "$http" 'profiles: [apache]'
 assert_file_contains "$ROOT/lib/hosts.sh" 'modify_profiles add "$svr_prof"'
 assert_file_contains "$ROOT/lib/hosts.sh" 'modify_profiles remove "$apache_cont"'
-pass "Apache domain profile lifecycle is wired end to end"
+if grep -Fq 'profiles: [apache]' "$http"; then
+  fail "Apache cannot become profile-only until Admin Panel host lifecycle can manage the profile"
+fi
+pass "Apache remains always available so CLI and Admin Panel host creation retain parity"
 
 cert_helper_uses="$(grep -c 'src_ca="$(host_root_ca_path || true)"' "$certs")"
 [[ "$cert_helper_uses" -ge 3 ]] ||
