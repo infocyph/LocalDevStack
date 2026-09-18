@@ -16,6 +16,10 @@ assert_file_contains "$ROOT/lds" 'local -a env_files=(--env-file "$ENV_RELEASE")
 assert_file_contains "$ROOT/lds" 'env_files+=(--env-file "$ENV_DOCKER")'
 assert_file_contains "$ROOT/lds" '"${env_files[@]}"'
 assert_file_contains "$ROOT/lds" 'var=COMPOSE_PROFILES'
+assert_file_contains "$ROOT/lds" 'compose_control_value()'
+assert_file_contains "$ROOT/lds" 'dotenv_value()'
+assert_file_contains "$ROOT/lds" 'LDS_AI_RUNTIME cpu'
+assert_file_contains "$ROOT/lds" 'LDS_LLM_HOST_PORT 0'
 pass "environment file and precedence wiring"
 
 git -C "$ROOT" check-ignore -q docker/.env || fail "docker/.env must remain ignored user state"
@@ -42,3 +46,10 @@ for key in POSTGRESQL MYSQL MARIADB ELASTICSEARCH MONGODB REDIS; do
   grep -Fq "[$key]=" "$ROOT/lds" || fail "missing profile catalog entry: $key"
 done
 pass "current profile catalog entries"
+
+assert_file_contains "$ROOT/lds" 'cmd_ai()'
+assert_file_contains "$ROOT/lds" 'cmd_llm()'
+assert_file_contains "$ROOT/lds" '_tools_exec_argv()'
+assert_file_contains "$ROOT/lds" 'ai) cmd_ai "$@"'
+assert_file_contains "$ROOT/lds" 'llm) cmd_llm "$@"'
+pass "AI/LLM CLI routing contract"
