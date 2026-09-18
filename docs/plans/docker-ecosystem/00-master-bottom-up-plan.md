@@ -4,7 +4,18 @@
 
 Planning branch: `plan/docker-ecosystem-bottom-up`
 
-This branch is planning-only. No runtime behavior should be changed until the relevant repository plan is accepted and implementation work moves into that repository.
+Lower-layer work is now complete and published. The active phase is LocalDevStack product integration.
+
+Completed/published baseline as of 2026-09-18:
+
+- Shared foundations: Scriptomatic hardened on `main`, Toolset `2.0`
+- `infocyph/runner:0.5`
+- `infocyph/nginx:0.4.1`
+- `infocyph/apache:0.4.2`
+- `infocyph/tools:0.23.2`
+- `infocyph/llm-sm:0.03` / `amd-0.03`
+
+The authoritative active implementation plan is now `07-localdevstack-integration-plan.md`. Earlier 01–06 files remain historical planning records for the completed lower layers.
 
 ## Product Definition
 
@@ -104,7 +115,7 @@ Preserve Linux, macOS, WSL/Git Bash, and Windows Docker Desktop support where cu
 
 ## Execution Order
 
-### Phase 0 — Shared foundations
+### Phase 0 — Shared foundations — COMPLETE
 
 Plan: `01-shared-foundations-plan.md`
 
@@ -116,9 +127,15 @@ Exit gate:
 - required helper scripts have syntax/smoke validation;
 - no downstream migration depends on floating helper content.
 
-### Phase 1 — Leaf infrastructure images
+### Phase 1 — Leaf infrastructure images — COMPLETE
 
-Execute independently where possible:
+Completed releases:
+
+- Runner `0.5`
+- Nginx `0.4.1`
+- Apache `0.4.2`
+
+Historical plans:
 
 - `02-docker-runner-plan.md`
 - `03-docker-nginx-plan.md`
@@ -140,11 +157,11 @@ Exit gate for each image:
 - release workflow follows immutable-version contract;
 - LocalDevStack can consume the resulting release without behavior regression.
 
-### Phase 2 — Control plane
+### Phase 2 — Control plane — COMPLETE
 
 Plan: `05-docker-tools-plan.md`
 
-This is the largest supporting image and must be handled after foundational/leaf contracts are stable.
+This control-plane phase is complete and published as `infocyph/tools:0.23.2`.
 
 Primary goals:
 
@@ -155,11 +172,11 @@ Primary goals:
 - preserve domain/TLS/secrets/monitoring/admin workflows;
 - avoid turning `docker-tools` into the owner of LocalDevStack orchestration policy.
 
-### Phase 3 — Local AI capability
+### Phase 3 — Local AI capability — COMPLETE
 
 Plan: `06-docker-llm-sm-plan.md`
 
-`docker-llm-sm` is already published and is primarily a compatibility/integration reference, not a rewrite target.
+`docker-llm-sm` is published as `0.03` and its provider/runtime contract is complete for this program.
 
 Primary goals:
 
@@ -169,7 +186,7 @@ Primary goals:
 - optionally mount project workspace for repo-aware AI commands;
 - allow Graphify or other clients to use its Ollama endpoint without coupling them into the image.
 
-### Phase 4 — Product/orchestrator
+### Phase 4 — Product/orchestrator — ACTIVE
 
 Plan: `07-localdevstack-integration-plan.md`
 
