@@ -37,12 +37,9 @@ services:
       - ../../logs:/global/log:ro
       - /var/run/docker.sock:/var/run/docker.sock
     networks:
-      frontend:
-        ipv4_address: 172.28.0.13
-      backend:
-        ipv4_address: 172.29.0.10
-      datastore:
-        ipv4_address: 172.30.0.10
+      - frontend
+      - backend
+      - datastore
 
   runner:
     container_name: RUNNER
@@ -71,8 +68,7 @@ services:
     depends_on:
       - server-tools
     networks:
-      backend:
-        ipv4_address: 172.29.0.11
+      - backend
 
   mailpit:
     container_name: MAILPIT
@@ -93,10 +89,8 @@ services:
     depends_on:
       - server-tools
     networks:
-      frontend:
-        ipv4_address: 172.28.0.12
-      backend:
-        ipv4_address: 172.29.0.12
+      - frontend
+      - backend
     healthcheck:
       test: [ "CMD", "wget", "-qO-", "http://127.0.0.1:8025/" ]
       interval: 10s
