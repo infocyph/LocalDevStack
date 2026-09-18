@@ -193,9 +193,10 @@ install_ca() {
     return 0
   fi
 
-  local src_ca="$DIR/configuration/rootCA/rootCA.pem"
+  local src_ca
+  src_ca="$(host_root_ca_path || true)"
   [[ ${EUID:-$(id -u)} -eq 0 ]] || die "certificate install requires sudo"
-  [[ -r "$src_ca" ]] || die "certificate not found: $src_ca"
+  [[ -n "$src_ca" ]] || die "certificate not found: expected configuration/ssl/rootCA.pem (legacy: configuration/rootCA/rootCA.pem)"
 
   local family dest updater os_id os_like
   IFS='|' read -r os_id os_like < <(detect_os_family)
