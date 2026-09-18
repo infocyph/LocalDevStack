@@ -7,8 +7,8 @@ tools_image="infocyph/tools:latest"
 docker pull "$tools_image" >/dev/null
 versions="$(docker run --rm --entrypoint cat "$tools_image" /etc/share/runtime-versions.json)"
 
-php_version="$(jq -r '.php.active[0] // empty' <<<"$versions")"
-node_version="$(jq -r '.node.active[0] // empty' <<<"$versions")"
+php_version="$(jq -r '.php.active[0].version // empty' <<<"$versions")"
+node_version="$(jq -r '.node.active[0].version // empty' <<<"$versions")"
 [[ "$php_version" =~ ^[0-9]+\.[0-9]+$ ]] || {
   printf 'Invalid active PHP version from Tools: %s\n' "$php_version" >&2
   exit 1
