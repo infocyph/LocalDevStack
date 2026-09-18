@@ -38,21 +38,44 @@ fix_perms() {
 
   ((EUID == 0)) || die "Please run with sudo."
 
+  local owner group
+  owner="${SUDO_USER:-${USER:-}}"
+  [[ -n "$owner" ]] || owner="$(id -un)"
+  id "$owner" >/dev/null 2>&1 || die "Cannot resolve permission owner: $owner"
+
+  if getent group docker >/dev/null 2>&1; then
+    group=docker
+  else
+    group="$(id -gn "$owner")"
+  fi
+
   chmod 755 "$DIR"
-  chmod 2775 "$DIR/configuration"
-  find "$DIR/configuration" -type f ! -perm 664 -exec chmod 664 {} +
 
-  chmod 755 "$DIR/docker"
-  find "$DIR/docker" -type f ! -perm 644 -exec chmod 644 {} +
+  chown -R "$owner:$group" "$DIR/configuration" "$DIR/logs"
+  find "$DIR/configuration" -type d -exec chmod 2775 {} +
+  find "$DIR/configuration" -type f -exec chmod 0664 {} +
+  find "$DIR/logs" -type d -exec chmod 2775 {} +
+  find "$DIR/logs" -type f -exec chmod 0664 {} +
 
-  chmod -R 777 "$DIR/logs"
-  chown -R "$USER:docker" "$DIR/logs"
+  # Secret-bearing host directories stay private to the workstation owner.
+  for private_dir in "$DIR/configuration/ssh" "$DIR/configuration/sops/keys"; do
+    [[ -d "$private_dir" ]] || continue
+    chown -R "$owner:$group" "$private_dir"
+    find "$private_dir" -type d -exec chmod 0700 {} +
+    find "$private_dir" -type f -exec chmod 0600 {} +
+  done
 
-  chmod 755 "$DIR/bin"
-  find "$DIR/bin" -type f -exec chmod +x {} +
-  chmod +x "$DIR/lds"
+  find "$DIR/docker" -type d -exec chmod 0755 {} +
+  find "$DIR/docker" -type f -exec chmod 0644 {} +
+
+  chmod 0755 "$DIR/bin"
+  find "$DIR/bin" -type f -exec chmod 0755 {} +
+  if [[ -d "$DIR/lib" ]]; then
+    find "$DIR/lib" -type d -exec chmod 0755 {} +
+    find "$DIR/lib" -type f -exec chmod 0644 {} +
+  fi
+  chmod 0755 "$DIR/lds"
 
   ln -fs "$DIR/lds" /usr/local/bin/lds
-  printf "%bPermissions assigned.%b\n" "$GREEN" "$NC"
+  printf "%bPermissions assigned to %s:%s.%b\n" "$GREEN" "$owner" "$group" "$NC"
 }
-
