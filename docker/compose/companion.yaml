@@ -54,6 +54,16 @@ services:
       - backend
       - datastore
 
+  llm-sm:
+    image: infocyph/llm-sm:${LDS_LLM_ARCH}
+    restart: unless-stopped
+    profiles: [ai]
+    volumes:
+      - lds_llm:/root/.ollama
+    networks:
+      - frontend
+      - backend
+
   runner:
     container_name: RUNNER
     hostname: runner

@@ -211,15 +211,18 @@ Important AI settings include::
    LDS_AI_PROVIDER=ollama
    LDS_AI_URL=http://llm-sm:11434
    LDS_AI_MODEL=qwen2.5:3b
-   LDS_AI_RUNTIME=cpu
+   LDS_AI_RUNTIME=<auto-detected cpu|nvidia|amd>
+   LDS_LLM_ARCH=latest
    LDS_LLM_HOST_PORT=0
+
+During setup LocalDevStack detects the preferred runtime. NVIDIA is selected only when ``nvidia-smi`` is usable; AMD is selected only when the ROCm Linux device nodes ``/dev/kfd`` and ``/dev/dri`` are present; otherwise CPU is selected. The corresponding image tag is persisted as ``LDS_LLM_ARCH`` (``latest`` for CPU/NVIDIA, ``amd-latest`` for AMD).
 
 Use::
 
    lds llm runtime <cpu|nvidia|amd>
    lds llm host-port <status|on|off>
 
-instead of editing the corresponding runtime flags manually in normal workflows.
+to override the detected runtime or host-port behavior.
 
 Tools also accepts optional timeout/context limits through ``LDS_AI_CONNECT_TIMEOUT``,
 ``LDS_AI_PREFLIGHT_TIMEOUT``, ``LDS_AI_TIMEOUT``, ``LDS_AI_AVAILABILITY_TTL``,

@@ -45,13 +45,18 @@ docker_compose() {
   local ai_runtime ai_host_port
   local -a static_f=()
 
-  ai_runtime="$(compose_control_value LDS_AI_RUNTIME cpu)"
+  ai_runtime="$(compose_control_value LDS_AI_RUNTIME "")"
+  [[ -n "$ai_runtime" ]] || ai_runtime="$(detect_ai_runtime)"
   case "${ai_runtime,,}" in
-  "" | cpu) ;;
+  cpu) ;;
   nvidia) static_f+=(-f "$CFG/compose/ai-nvidia.yaml") ;;
   amd) static_f+=(-f "$CFG/compose/ai-amd.yaml") ;;
   *) die "Invalid LDS_AI_RUNTIME: $ai_runtime (expected cpu|nvidia|amd)" ;;
   esac
+
+  local llm_arch
+  llm_arch="$(llm_arch_for_runtime "$ai_runtime")" ||
+    die "Cannot resolve LLM image tag for runtime: $ai_runtime"
 
   ai_host_port="$(compose_control_value LDS_LLM_HOST_PORT 0)"
   case "${ai_host_port,,}" in
@@ -71,7 +76,7 @@ docker_compose() {
 
   local host_os="${HOST_OS:-$(detect_host_os)}"
 
-  HOST_OS="$host_os" "${__LDS_DC_BIN[@]}" \
+  HOST_OS="$host_os" LDS_LLM_ARCH="$llm_arch" "${__LDS_DC_BIN[@]}" \
     --project-directory "$DIR" \
     -f "$COMPOSE_FILE" \
     "${static_f[@]}" \

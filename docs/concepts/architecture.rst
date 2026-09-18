@@ -149,7 +149,7 @@ When the ``ai`` profile is enabled:
 4. ``lds ai`` delegates higher-level/operational AI to Tools;
 5. ``lds llm`` delegates model/runtime operations to the bundled ``llm-sm`` CLI.
 
-The standard CPU/NVIDIA provider and AMD/ROCm provider remain separate image variants.
+The provider is one ``llm-sm`` service declared with the core companion services and enabled only by the ``ai`` profile. Its image is ``infocyph/llm-sm:${LDS_LLM_ARCH}``: CPU/NVIDIA resolve to ``latest`` and AMD/ROCm resolves to ``amd-latest``. Hardware-specific Compose overlays add only NVIDIA GPU access or AMD ``/dev/kfd`` + ``/dev/dri`` device mappings.
 
 Project Identity
 ----------------

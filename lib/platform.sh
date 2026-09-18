@@ -1,4 +1,36 @@
 # shellcheck shell=bash
+
+# Detect the preferred local-AI runtime from host GPU capability.
+# NVIDIA is preferred on hybrid hosts because the standard image supports
+# CPU/NVIDIA, while the AMD image is specifically the ROCm variant.
+detect_ai_runtime() {
+  if has_cmd nvidia-smi && nvidia-smi -L >/dev/null 2>&1; then
+    printf '%s' nvidia
+    return 0
+  fi
+  if has_cmd nvidia-smi.exe && nvidia-smi.exe -L >/dev/null 2>&1; then
+    printf '%s' nvidia
+    return 0
+  fi
+
+  # The AMD Compose override requires the Linux ROCm device nodes, so merely
+  # having an AMD CPU/GPU name is not sufficient.
+  if [[ -e /dev/kfd && -d /dev/dri ]]; then
+    printf '%s' amd
+    return 0
+  fi
+
+  printf '%s' cpu
+}
+
+llm_arch_for_runtime() {
+  case "${1,,}" in
+  amd) printf '%s' amd-latest ;;
+  "" | cpu | nvidia) printf '%s' latest ;;
+  *) return 1 ;;
+  esac
+}
+
 ###############################################################################
 # 2. INSTALL / PERMISSIONS (HOST)
 ###############################################################################

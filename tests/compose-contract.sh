@@ -149,9 +149,9 @@ assert tools["LDS_AI_PROVIDER"] == "ollama"
 assert tools["LDS_AI_URL"] == "http://llm-sm:11434"
 assert tools["LDS_AI_MODEL"] == "qwen2.5:3b"
 ' <<<"$ai_json"
-pass "base AI profile is internal-only and deterministic"
+pass "companion-owned AI profile is internal-only and deterministic"
 
-amd_json="$(docker compose --project-directory "$ROOT" -f "$ROOT/docker/compose/main.yaml" -f "$ROOT/docker/compose/ai-amd.yaml" --env-file "$release_env" --env-file "$user_env" --profile ai config --format json)"
+amd_json="$(LDS_LLM_ARCH=amd-latest docker compose --project-directory "$ROOT" -f "$ROOT/docker/compose/main.yaml" -f "$ROOT/docker/compose/ai-amd.yaml" --env-file "$release_env" --env-file "$user_env" --profile ai config --format json)"
 python3 -c '
 import json,sys
 s=json.load(sys.stdin)["services"]["llm-sm"]
@@ -175,3 +175,8 @@ assert p["host_ip"] == "127.0.0.1"
 assert int(p["target"]) == 11434 and int(p["published"]) == 11434
 ' <<<"$host_json"
 pass "direct Ollama port is explicit loopback-only"
+
+
+[[ ! -e "$ROOT/docker/compose/ai.yaml" ]] || fail "base AI service must live in companion.yaml, not ai.yaml"
+assert_file_contains "$ROOT/docker/compose/companion.yaml" 'image: infocyph/llm-sm:${LDS_LLM_ARCH}'
+pass "LLM service uses one tag selector in companion.yaml"

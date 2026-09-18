@@ -27,21 +27,31 @@ persistent Ollama store.
 Runtime Modes
 -------------
 
-Select the provider runtime explicitly::
+LocalDevStack detects the preferred runtime during environment setup. Detection is intentionally capability-based rather than CPU-vendor based:
+
+- NVIDIA when ``nvidia-smi`` is usable;
+- AMD only when both ``/dev/kfd`` and ``/dev/dri`` are present for ROCm;
+- CPU otherwise.
+
+An AMD CPU alone does **not** select the AMD image.
+
+The single provider service uses::
+
+   image: infocyph/llm-sm:${LDS_LLM_ARCH}
+
+The persisted mapping is:
+
+- ``cpu`` -> ``LDS_LLM_ARCH=latest``;
+- ``nvidia`` -> ``LDS_LLM_ARCH=latest`` plus the NVIDIA GPU overlay;
+- ``amd`` -> ``LDS_LLM_ARCH=amd-latest`` plus the AMD device overlay.
+
+Override detection explicitly when required::
 
    lds llm runtime cpu
    lds llm runtime nvidia
    lds llm runtime amd
 
-CPU and NVIDIA use ``infocyph/llm-sm:latest``. AMD/ROCm uses
-``infocyph/llm-sm:amd-latest``.
-
-NVIDIA mode adds Docker GPU access. AMD mode exposes ``/dev/kfd`` and ``/dev/dri``.
-
-LocalDevStack does not attempt unreliable automatic GPU detection.
-
-Changing runtime mode updates ``docker/.env``. Recreate/start the service afterward so
-the Compose override changes take effect.
+Changing runtime mode updates both ``LDS_AI_RUNTIME`` and ``LDS_LLM_ARCH`` in ``docker/.env``. Recreate/start the service afterward so the Compose override changes take effect.
 
 Access
 ------
@@ -134,6 +144,8 @@ The provider CLI does not silently download a missing model for an unrelated com
 
 Privacy and Trust Boundaries
 ----------------------------
+
+The base ``llm-sm`` service lives in ``docker/compose/companion.yaml`` and is gated by the ``ai`` profile. Hardware-only overlays add GPU/device access without duplicating the service definition.
 
 By default, ``llm-sm`` receives:
 

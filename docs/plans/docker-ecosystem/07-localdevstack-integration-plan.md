@@ -544,14 +544,14 @@ Validate all of these without fixed IPs:
 
 AI should become a first-class optional LocalDevStack capability while remaining absent from the default stack.
 
-## 8.1 New `docker/compose/ai.yaml`
+## 8.1 Single `llm-sm` service in `docker/compose/companion.yaml`
 
 Base service:
 
 ```yaml
 services:
   llm-sm:
-    image: ${LDS_LLM_IMAGE:-infocyph/llm-sm:0.03}
+    image: infocyph/llm-sm:${LDS_LLM_ARCH}
     restart: unless-stopped
     profiles: [ai]
     volumes:
@@ -568,7 +568,7 @@ Important rules:
 - do not require `container_name`;
 - do not mount Docker socket;
 - do not expose `11434` to all interfaces;
-- do not add a host port in the base AI file;
+- do not add a host port in the base companion service;
 - do not add an automatic repository/workspace mount;
 - do not add cloud fallback.
 
@@ -602,7 +602,7 @@ Existing populated volumes must never be silently replaced/reset during upgrades
 
 ## 8.3 CPU / NVIDIA / AMD runtime selection
 
-Do not implement unreliable GPU auto-detection as an orchestration requirement.
+Use conservative capability detection to choose the initial runtime, while keeping explicit user override authoritative.
 
 Provide explicit runtime modes:
 
@@ -621,18 +621,16 @@ docker/compose/ai-amd.yaml
 
 NVIDIA:
 
-- keep `LDS_LLM_IMAGE`;
+- set `LDS_LLM_ARCH=latest`;
 - add GPU access using the Compose mechanism supported by current Docker Desktop/Engine.
 
 AMD:
 
-- use `LDS_LLM_AMD_IMAGE`;
+- set `LDS_LLM_ARCH=amd-latest`;
 - expose `/dev/kfd`;
 - expose `/dev/dri`.
 
-Store the selected mode in LocalDevStack env/state.
-
-Do not change image variants automatically because a GPU happens to be detected.
+Store both the selected runtime (`LDS_AI_RUNTIME`) and derived tag (`LDS_LLM_ARCH`) in LocalDevStack env/state. Detection rules are: usable `nvidia-smi` -> NVIDIA; both `/dev/kfd` and `/dev/dri` -> AMD/ROCm; otherwise CPU. An AMD CPU alone never selects the AMD/ROCm image. `lds llm runtime ...` remains the explicit override.
 
 ## 8.4 Optional direct host API
 
@@ -865,7 +863,7 @@ Extend `lds setup profile` to include optional AI.
 Prompt only relevant AI settings:
 
 - enable AI yes/no;
-- runtime `cpu|nvidia|amd`;
+- detected runtime is shown, not prompted by default;
 - preferred model default `qwen2.5:3b`;
 - optional direct localhost port yes/no.
 
@@ -1841,7 +1839,7 @@ These do not block the LocalDevStack integration release unless implementation r
 - Docker socket proxy;
 - Graphify installation;
 - browser AI UI beyond Tools admin panel;
-- automatic GPU detection;
+- conservative GPU/runtime detection with explicit override;
 - automatic model downloads beyond the baked model;
 - production-hardening changes unrelated to local development;
 - rewriting the CLI in another language.
@@ -1908,8 +1906,7 @@ LDS_TOOLS_IMAGE=infocyph/tools:latest
 LDS_RUNNER_IMAGE=infocyph/runner:latest
 LDS_NGINX_IMAGE=infocyph/nginx:latest
 LDS_APACHE_IMAGE=infocyph/apache:latest
-LDS_LLM_IMAGE=infocyph/llm-sm:latest
-LDS_LLM_AMD_IMAGE=infocyph/llm-sm:amd-latest
+LDS_LLM_ARCH=latest
 ```
 
 Other runtime defaults follow the same rule. PostgreSQL uses `postgres:alpine`; MySQL, MariaDB, MongoDB, Redis Stack/Redis Insight, CloudBeaver, Mongo Express and Mailpit use their normal moving latest tags because the selected image family does not provide a suitable moving Alpine alias for this stack.
@@ -2037,7 +2034,7 @@ All planned LocalDevStack integration batches are implemented on branch `plan/do
 - Prefer a moving Alpine variant when an image family provides a suitable one; otherwise use its normal moving latest alias.
 - PostgreSQL defaults to `postgres:alpine`.
 - Tools, Runner, Nginx and Apache consume their published `:latest` aliases.
-- Standard LLM uses `infocyph/llm-sm:latest`; AMD/ROCm uses `infocyph/llm-sm:amd-latest`.
+- One LLM service uses `infocyph/llm-sm:${LDS_LLM_ARCH}`; CPU/NVIDIA map to `latest`, AMD/ROCm maps to `amd-latest`.
 - Elasticsearch, Kibana and Filebeat remain version-aligned on the tested stable version because their required image contract does not provide a suitable moving `latest` alias.
 - PHP/Node runtime selection remains user-driven and version-specific.
 - Existing named volumes and container names remain intentionally stable for this release.

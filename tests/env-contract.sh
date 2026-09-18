@@ -18,7 +18,8 @@ assert_file_contains "$ROOT/lib/compose.sh" '"${env_files[@]}"'
 assert_file_contains "$ROOT/lib/hosts.sh" 'var=COMPOSE_PROFILES'
 assert_file_contains "$ROOT/lds" 'compose_control_value()'
 assert_file_contains "$ROOT/lds" 'dotenv_value()'
-assert_file_contains "$ROOT/lib/compose.sh" 'LDS_AI_RUNTIME cpu'
+assert_file_contains "$ROOT/lib/compose.sh" 'compose_control_value LDS_AI_RUNTIME ""'
+assert_file_contains "$ROOT/lib/compose.sh" 'LDS_LLM_ARCH="$llm_arch"'
 assert_file_contains "$ROOT/lib/compose.sh" 'LDS_LLM_HOST_PORT 0'
 pass "environment file and precedence wiring"
 
@@ -34,8 +35,7 @@ expected=(
   'LDS_RUNNER_IMAGE=infocyph/runner:latest'
   'LDS_NGINX_IMAGE=infocyph/nginx:latest'
   'LDS_APACHE_IMAGE=infocyph/apache:latest'
-  'LDS_LLM_IMAGE=infocyph/llm-sm:latest'
-  'LDS_LLM_AMD_IMAGE=infocyph/llm-sm:amd-latest'
+  'LDS_LLM_ARCH=latest'
   'SCRIPTOMATIC_REF=main'
 )
 for entry in "${expected[@]}"; do
@@ -94,3 +94,49 @@ pass "profile setup replaces managed selections and preserves generated profiles
 
 assert_file_contains "$ROOT/lib/compose.sh" 'compose_control_value COMPOSE_PROJECT_NAME LocalDevStack'
 pass "CLI project identity follows the Compose project contract"
+
+
+(
+  set -euo pipefail
+  has_cmd() { return 1; }
+  source "$ROOT/lib/platform.sh"
+  [[ "$(llm_arch_for_runtime cpu)" == "latest" ]] || fail "CPU LLM tag drift"
+  [[ "$(llm_arch_for_runtime nvidia)" == "latest" ]] || fail "NVIDIA LLM tag drift"
+  [[ "$(llm_arch_for_runtime amd)" == "amd-latest" ]] || fail "AMD LLM tag drift"
+)
+pass "LLM runtime maps to the single LDS_LLM_ARCH tag selector"
+
+ai_env_tmp="$(mktemp -d)"
+(
+  set -euo pipefail
+  DIR="$ROOT"
+  CFG="$ROOT/docker"
+  ENV_RELEASE="$ROOT/docker/release.env"
+  ENV_DOCKER="$ai_env_tmp/docker.env"
+  YELLOW="" NC=""
+  die() { printf "die: %s\n" "$*" >&2; exit 1; }
+  compose_control_value() {
+    local key="$1" fallback="${2:-}" value=""
+    if [[ -n "${!key+x}" ]]; then printf "%s" "${!key}"; return 0; fi
+    value="$(dotenv_value "$ENV_DOCKER" "$key" 2>/dev/null || true)"
+    [[ -n "$value" ]] && { printf "%s" "$value"; return 0; }
+    value="$(dotenv_value "$ENV_RELEASE" "$key" 2>/dev/null || true)"
+    [[ -n "$value" ]] && { printf "%s" "$value"; return 0; }
+    printf "%s" "$fallback"
+  }
+  source "$ROOT/lib/env.sh"
+  source "$ROOT/lib/platform.sh"
+  source "$ROOT/lib/certificates.sh"
+  detect_ai_runtime() { printf "%s" amd; }
+  add_required_env
+  grep -Fxq "LDS_AI_RUNTIME=amd" "$ENV_DOCKER" || fail "detected AI runtime was not persisted"
+  grep -Fxq "LDS_LLM_ARCH=amd-latest" "$ENV_DOCKER" || fail "detected AMD tag was not persisted"
+
+  update_env "$ENV_DOCKER" LDS_AI_RUNTIME nvidia
+  detect_ai_runtime() { printf "%s" amd; }
+  add_required_env
+  grep -Fxq "LDS_AI_RUNTIME=nvidia" "$ENV_DOCKER" || fail "explicit runtime must win over detection"
+  grep -Fxq "LDS_LLM_ARCH=latest" "$ENV_DOCKER" || fail "NVIDIA runtime must use standard latest tag"
+)
+rm -rf "$ai_env_tmp"
+pass "setup bootstrap persists detection without overriding an explicit runtime"

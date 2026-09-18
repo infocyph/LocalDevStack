@@ -432,6 +432,15 @@ uninstall_ca() {
 
 add_required_env() {
   update_env "$ENV_DOCKER" WORKING_DIR "$DIR"
+
+  local ai_runtime
+  ai_runtime="$(dotenv_value "$ENV_DOCKER" LDS_AI_RUNTIME 2>/dev/null || true)"
+  if [[ -z "$ai_runtime" ]]; then
+    ai_runtime="$(detect_ai_runtime)"
+    update_env "$ENV_DOCKER" LDS_AI_RUNTIME "$ai_runtime"
+  fi
+  update_env "$ENV_DOCKER" LDS_LLM_ARCH "$(llm_arch_for_runtime "$ai_runtime")"
+
   ((EUID == 0)) && return 0
   update_env "$ENV_DOCKER" USER "$(id -un)"
   update_env "$ENV_DOCKER" UID "$(id -u)"

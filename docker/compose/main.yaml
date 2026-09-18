@@ -156,4 +156,3 @@ include:
   - docker/compose/db.yaml
   - docker/compose/db-client.yaml
   - docker/compose/http.yaml
-  - docker/compose/ai.yaml

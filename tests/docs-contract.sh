@@ -68,7 +68,8 @@ assert_file_contains "$ai" 'no project/repository bind mount'
 assert_file_contains "$ai" 'automatically execute model-generated shell commands'
 assert_file_contains "$ai" 'linux/amd64 only'
 assert_file_contains "$ai" 'does not mount the project/repository into llm-sm by default'
-assert_file_contains "$ai" 'infocyph/llm-sm:amd-latest'
+assert_file_contains "$ai" 'infocyph/llm-sm:${LDS_LLM_ARCH}'
+assert_file_contains "$ai" 'LDS_LLM_ARCH=amd-latest'
 assert_file_contains "$ai" 'LDS_AI_MODEL=qwen2.5:3b'
 pass "local AI trust boundary, platform and workspace limits are documented"
 

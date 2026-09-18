@@ -35,11 +35,13 @@ for image in "${release[LDS_TOOLS_IMAGE]}" "${release[LDS_RUNNER_IMAGE]}"; do
 done
 pass "Tools and Runner publish healthchecks"
 
-[[ "${release[LDS_LLM_IMAGE]:-}" == "infocyph/llm-sm:latest" ]] ||
-  fail "unexpected standard LLM moving image"
-[[ "${release[LDS_LLM_AMD_IMAGE]:-}" == "infocyph/llm-sm:amd-latest" ]] ||
-  fail "unexpected AMD LLM moving image"
-pass "LLM image references follow latest-tag policy"
+[[ "${release[LDS_LLM_ARCH]:-}" == "latest" ]] ||
+  fail "unexpected default LLM tag selector"
+grep -Fq 'image: infocyph/llm-sm:${LDS_LLM_ARCH}' "$ROOT/docker/compose/companion.yaml" ||
+  fail "LLM service must use the single LDS_LLM_ARCH selector"
+grep -Fq "amd) printf '%s' amd-latest" "$ROOT/lib/platform.sh" ||
+  fail "AMD runtime must map to amd-latest"
+pass "LLM image selection follows the single latest/amd-latest tag contract"
 
 tools_profile_chooser="$(
   docker run --rm --entrypoint cat "${release[LDS_TOOLS_IMAGE]}" /usr/local/bin/profile-chooser

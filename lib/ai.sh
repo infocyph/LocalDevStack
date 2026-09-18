@@ -49,7 +49,7 @@ cmd_llm() {
   runtime)
     local mode="${1:-}"
     if [[ -z "$mode" ]]; then
-      printf '%s\n' "$(compose_control_value LDS_AI_RUNTIME cpu)"
+      printf '%s\n' "$(compose_control_value LDS_AI_RUNTIME "$(detect_ai_runtime)")"
       return 0
     fi
     case "${mode,,}" in

@@ -50,12 +50,14 @@ assert_contains "$provider_status" "available=1"
 assert_contains "$provider_status" "model=qwen2.5:3b"
 pass "latest Tools reaches the separate provider contract"
 
-for file in ai.yaml ai-nvidia.yaml ai-amd.yaml ai-host-port.yaml; do
+for file in ai-nvidia.yaml ai-amd.yaml ai-host-port.yaml; do
   assert_file "$ROOT/docker/compose/$file"
 done
-assert_file_contains "$ROOT/docker/compose/ai.yaml" 'profiles: [ai]'
-assert_file_contains "$ROOT/docker/compose/ai.yaml" 'lds_llm:/root/.ollama'
-if grep -Eq '/var/run/docker.sock|PROJECT_DIR|/app' "$ROOT/docker/compose/ai.yaml"; then
-  fail "base llm-sm service must not receive Docker socket or project mounts"
-fi
-pass "base AI service trust boundary"
+[[ ! -e "$ROOT/docker/compose/ai.yaml" ]] || fail "base AI service must be consolidated into companion.yaml"
+assert_file_contains "$ROOT/docker/compose/companion.yaml" 'image: infocyph/llm-sm:${LDS_LLM_ARCH}'
+assert_file_contains "$ROOT/docker/compose/companion.yaml" 'profiles: [ai]'
+assert_file_contains "$ROOT/docker/compose/companion.yaml" 'lds_llm:/root/.ollama'
+assert_file_contains "$ROOT/docker/compose/ai-nvidia.yaml" 'gpus: all'
+assert_file_contains "$ROOT/docker/compose/ai-amd.yaml" '/dev/kfd:/dev/kfd'
+assert_file_contains "$ROOT/docker/compose/ai-amd.yaml" '/dev/dri:/dev/dri'
+pass "single companion AI service plus hardware-only overlays"

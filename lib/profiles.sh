@@ -198,6 +198,13 @@ setup_service() {
   printf "\n%b→ %s%b\n" "$YELLOW" "$display" "$NC"
   queue_profile "$profile"
 
+  if [[ "$service" == "AI" ]]; then
+    local detected_runtime detected_arch
+    detected_runtime="$(compose_control_value LDS_AI_RUNTIME "$(detect_ai_runtime)")"
+    detected_arch="$(llm_arch_for_runtime "$detected_runtime")"
+    printf "%bDetected local-AI runtime:%b %s (%s)\n" "$CYAN" "$NC" "$detected_runtime" "infocyph/llm-sm:$detected_arch"
+  fi
+
   local defaults="${PROFILE_ENV[$profile]:-}"
   [[ -n "$defaults" ]] || return 0
 

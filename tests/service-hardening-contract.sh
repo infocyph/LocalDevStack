@@ -15,7 +15,7 @@ pg_ref="$ROOT/docker/conf/postgresql.conf"
 socket_count="$(grep -RhsF '/var/run/docker.sock:/var/run/docker.sock' "$ROOT/docker/compose" | wc -l | tr -d ' ')"
 [[ "$socket_count" -eq 2 ]] || fail "Docker socket must be mounted only by Tools and Runner; found $socket_count compose mounts"
 assert_file_contains "$companion" '/var/run/docker.sock:/var/run/docker.sock'
-if grep -RqsF '/var/run/docker.sock' "$ROOT/docker/compose/ai.yaml" "$ROOT/docker/compose/db.yaml" "$ROOT/docker/compose/db-client.yaml" "$ROOT/docker/compose/http.yaml"; then
+if grep -RqsF '/var/run/docker.sock' "$ROOT/docker/compose/db.yaml" "$ROOT/docker/compose/db-client.yaml" "$ROOT/docker/compose/http.yaml"; then
   fail "Docker socket escaped the trusted Tools/Runner boundary"
 fi
 pass "Docker socket trust boundary"
@@ -74,3 +74,8 @@ pass "all CA install paths use current export with legacy fallback"
 
 assert_file_contains "$companion" 'COMPOSE_PROFILES=${COMPOSE_PROFILES:-}'
 pass "Tools profile visibility follows LocalDevStack profile selection"
+
+if awk '/^  llm-sm:/ { in_llm=1; next } in_llm && /^  [a-zA-Z0-9_-]+:/ { in_llm=0 } in_llm { print }' "$companion" | grep -Eq '/var/run/docker.sock|PROJECT_DIR|/app'; then
+  fail "llm-sm must not receive Docker socket or project mounts"
+fi
+pass "companion-owned llm-sm keeps the AI trust boundary"

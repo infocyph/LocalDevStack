@@ -234,15 +234,23 @@ Default model  -> qwen2.5:3b
 Model store    -> LLMModels
 ```
 
-Choose the runtime explicitly:
+LocalDevStack auto-detects the preferred AI runtime during setup: NVIDIA when `nvidia-smi` is usable, AMD only when the Linux ROCm device nodes `/dev/kfd` and `/dev/dri` are present, otherwise CPU. An AMD CPU by itself does not select the AMD image.
+
+The provider uses one image/tag contract:
+
+```text
+infocyph/llm-sm:${LDS_LLM_ARCH}
+```
+
+CPU/NVIDIA map to `LDS_LLM_ARCH=latest`; AMD/ROCm maps to `LDS_LLM_ARCH=amd-latest`.
+
+Override detection explicitly when needed:
 
 ```bash
 lds llm runtime cpu
 lds llm runtime nvidia
 lds llm runtime amd
 ```
-
-CPU/NVIDIA use `infocyph/llm-sm:latest`; AMD uses `infocyph/llm-sm:amd-latest`.
 
 Common commands:
 
