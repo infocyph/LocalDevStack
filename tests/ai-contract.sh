@@ -7,14 +7,17 @@ source "$ROOT/tests/lib/assertions.sh"
 
 image="lds-fake-ollama:ci"
 container="lds-fake-ollama-ci"
+network="lds-ai-ci"
 
 cleanup() {
   docker rm -f "$container" >/dev/null 2>&1 || true
+  docker network rm "$network" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
+docker network create "$network" >/dev/null
 docker build -q -t "$image" "$ROOT/tests/fixtures/fake-ollama" >/dev/null
-docker run -d --name "$container" "$image" >/dev/null
+docker run -d --name "$container" --network "$network" --network-alias llm-sm "$image" >/dev/null
 
 for _ in {1..20}; do
   if docker exec "$container" python -c 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:11434/api/tags", timeout=1).read()' >/dev/null 2>&1; then
@@ -37,5 +40,22 @@ models="$(
   docker exec "$container" python -c     'import urllib.request; print(urllib.request.urlopen("http://127.0.0.1:11434/v1/models", timeout=2).read().decode())'
 )"
 assert_contains "$models" "qwen2.5:3b"
-
 pass "fake Ollama tags/generate/OpenAI-compatible contracts"
+
+docker pull infocyph/tools:0.23.2 >/dev/null
+provider_status="$(
+  docker run --rm --network "$network"     --entrypoint askai     -e LDS_AI_ENABLED=1     -e LDS_AI_PROVIDER=ollama     -e LDS_AI_URL=http://llm-sm:11434     -e LDS_AI_MODEL=qwen2.5:3b     infocyph/tools:0.23.2 --status
+)"
+assert_contains "$provider_status" "available=1"
+assert_contains "$provider_status" "model=qwen2.5:3b"
+pass "Tools 0.23.2 reaches the separate provider contract"
+
+for file in ai.yaml ai-nvidia.yaml ai-amd.yaml ai-host-port.yaml; do
+  assert_file "$ROOT/docker/compose/$file"
+done
+assert_file_contains "$ROOT/docker/compose/ai.yaml" 'profiles: [ai]'
+assert_file_contains "$ROOT/docker/compose/ai.yaml" 'lds_llm:/root/.ollama'
+if grep -Eq '/var/run/docker.sock|PROJECT_DIR|/app' "$ROOT/docker/compose/ai.yaml"; then
+  fail "base llm-sm service must not receive Docker socket or project mounts"
+fi
+pass "base AI service trust boundary"
