@@ -1,0 +1,99 @@
+name: Check
+
+on:
+  push:
+    branches:
+      - main
+      - "plan/**"
+      - "feature/**"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static-and-contracts:
+    name: Static and contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install ShellCheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends shellcheck
+
+      - name: Static validation
+        run: tests/static.sh
+
+      - name: CLI contract
+        run: tests/cli-contract.sh
+
+      - name: Environment contract
+        run: tests/env-contract.sh
+
+      - name: PHP runtime contract
+        run: tests/runtime-php-contract.sh
+
+      - name: Node runtime contract
+        run: tests/runtime-node-contract.sh
+
+      - name: Networking characterization
+        run: tests/networking-contract.sh
+
+  compose:
+    name: Compose contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Docker versions
+        run: |
+          docker version
+          docker compose version
+
+      - name: Render supported Compose matrices
+        run: tests/compose-contract.sh
+
+  fake-ollama:
+    name: Fake Ollama contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Validate lightweight Ollama-compatible fixture
+        run: tests/ai-contract.sh
+
+  published-images:
+    name: Published image baseline
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Validate published compatibility images
+        run: tests/published-images.sh
+
+  windows-bridge:
+    name: Windows bridge
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Validate lds.bat contract
+        shell: pwsh
+        run: tests/windows-bridge.ps1

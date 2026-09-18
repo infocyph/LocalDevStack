@@ -7,6 +7,10 @@
 !docker/dockerfiles
 !docs
 !logs
+!.github/
+!.github/**
+!tests/
+!tests/**
 !.gitignore
 !.gitattributes
 !.readthedocs.yaml
