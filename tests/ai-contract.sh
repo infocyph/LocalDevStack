@@ -42,13 +42,13 @@ models="$(
 assert_contains "$models" "qwen2.5:3b"
 pass "fake Ollama tags/generate/OpenAI-compatible contracts"
 
-docker pull infocyph/tools:0.23.2 >/dev/null
+docker pull infocyph/tools:latest >/dev/null
 provider_status="$(
-  docker run --rm --network "$network"     --entrypoint askai     -e LDS_AI_ENABLED=1     -e LDS_AI_PROVIDER=ollama     -e LDS_AI_URL=http://llm-sm:11434     -e LDS_AI_MODEL=qwen2.5:3b     infocyph/tools:0.23.2 --status
+  docker run --rm --network "$network"     --entrypoint askai     -e LDS_AI_ENABLED=1     -e LDS_AI_PROVIDER=ollama     -e LDS_AI_URL=http://llm-sm:11434     -e LDS_AI_MODEL=qwen2.5:3b     infocyph/tools:latest --status
 )"
 assert_contains "$provider_status" "available=1"
 assert_contains "$provider_status" "model=qwen2.5:3b"
-pass "Tools 0.23.2 reaches the separate provider contract"
+pass "latest Tools reaches the separate provider contract"
 
 for file in ai.yaml ai-nvidia.yaml ai-amd.yaml ai-host-port.yaml; do
   assert_file "$ROOT/docker/compose/$file"
