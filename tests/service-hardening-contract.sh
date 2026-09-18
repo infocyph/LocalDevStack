@@ -44,3 +44,10 @@ fi
 [[ ! -e "$ROOT/docker/conf/www.conf" ]] || fail "unused legacy docker/conf/www.conf must remain removed"
 assert_file "$ROOT/docker/conf/www-php.conf"
 pass "Docker config ownership is explicit"
+
+certs="$ROOT/lib/certificates.sh"
+assert_file_contains "$companion" '../../configuration/ssl:/etc/share/certs'
+assert_file_contains "$certs" 'local current="$DIR/configuration/ssl/rootCA.pem"'
+assert_file_contains "$certs" 'local legacy="$DIR/configuration/rootCA/rootCA.pem"'
+assert_file_contains "$certs" 'src_ca="$(host_root_ca_path || true)"'
+pass "certificate export bridge uses the current public host path with legacy fallback"
