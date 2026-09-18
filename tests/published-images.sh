@@ -115,3 +115,12 @@ assert_contains "$tools_certify" 'EXPORT_DIR="${EXPORT_DIR:-/etc/share/certs}"'
 assert_contains "$tools_certify" 'EXPORT_ROOTCA_NAME="${EXPORT_ROOTCA_NAME:-rootCA.pem}"'
 assert_contains "$tools_certify" 'atomic_install 0644 "$root_ca" "$EXPORT_DIR/$EXPORT_ROOTCA_NAME"'
 pass "latest Tools public TLS export contract"
+
+docker run --rm --entrypoint sh "${release[LDS_TOOLS_IMAGE]}" -ec '
+  test -d /etc/share/state
+  test -x /usr/local/bin/env-store
+  grep -Fq "/etc/share/state/env-store.json" /usr/local/bin/env-store
+  grep -Fq "/etc/share/state" /usr/local/bin/monitor-alerts
+  grep -Fq "/etc/share/state" /usr/local/bin/monitor-slo
+'
+pass "latest Tools durable state ABI"
