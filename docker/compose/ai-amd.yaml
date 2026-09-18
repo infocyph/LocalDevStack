@@ -1,0 +1,6 @@
+services:
+  llm-sm:
+    image: ${LDS_LLM_AMD_IMAGE:-infocyph/llm-sm:amd-0.03}
+    devices:
+      - /dev/kfd:/dev/kfd
+      - /dev/dri:/dev/dri
