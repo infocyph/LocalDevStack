@@ -17,3 +17,9 @@ assert_file_contains "$file" 'find "$private_dir" -type d -exec chmod 0700 {} +'
 assert_file_contains "$file" 'find "$private_dir" -type f -exec chmod 0600 {} +'
 assert_file_contains "$file" '"$DIR/configuration/ssh" "$DIR/configuration/sops/keys"'
 pass "host permissions are scoped and secret directories remain private"
+
+assert_file_contains "$file" 'find "$DIR/configuration/ssl" -type f -exec chmod 0644 {} +'
+assert_file_contains "$file" "-name '*.p12'"
+assert_file_contains "$file" "-name '*-key.pem'"
+assert_file_contains "$file" ') -exec chmod 0600 {} +'
+pass "TLS public exports remain readable while private/P12 artifacts stay 0600"
