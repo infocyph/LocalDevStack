@@ -1,5 +1,5 @@
 LocalDevStack Documentation
-==========================
+===========================
 
 LocalDevStack is a Docker-based XAMPP alternative for PHP and Node.js local development.
 It provides profile-driven services, local domains and TLS, selectable runtimes,
