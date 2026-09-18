@@ -16,6 +16,7 @@ services:
       - SOPS_CFG_DIR=/etc/share/sops/config
       - SOPS_GLOBAL_DIR=/etc/share/sops/global
       - SOPS_REPO_DIR=/etc/share/vhosts/sops
+      - COMPOSE_PROFILES=${COMPOSE_PROFILES:-}
       - LDS_AI_ENABLED=${LDS_AI_ENABLED:-auto}
       - LDS_AI_PROVIDER=${LDS_AI_PROVIDER:-ollama}
       - LDS_AI_URL=${LDS_AI_URL:-http://llm-sm:11434}
