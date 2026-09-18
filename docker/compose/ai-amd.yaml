@@ -1,5 +1,0 @@
-services:
-  llm-sm:
-    devices:
-      - /dev/kfd:/dev/kfd
-      - /dev/dri:/dev/dri

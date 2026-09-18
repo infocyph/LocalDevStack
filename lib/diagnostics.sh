@@ -422,10 +422,10 @@ cmd_images() {
   local elastic
   elastic="$(compose_control_value ELASTICSEARCH_VERSION 9.5.3)"
 
-  printf '%-16s %s\n' "Tools" "$(compose_control_value LDS_TOOLS_IMAGE infocyph/tools:latest)"
-  printf '%-16s %s\n' "Runner" "$(compose_control_value LDS_RUNNER_IMAGE infocyph/runner:latest)"
-  printf '%-16s %s\n' "Nginx" "$(compose_control_value LDS_NGINX_IMAGE infocyph/nginx:latest)"
-  printf '%-16s %s\n' "Apache" "$(compose_control_value LDS_APACHE_IMAGE infocyph/apache:latest)"
+  printf '%-16s %s\n' "Tools" "infocyph/tools:latest"
+  printf '%-16s %s\n' "Runner" "infocyph/runner:latest"
+  printf '%-16s %s\n' "Nginx" "infocyph/nginx:latest"
+  printf '%-16s %s\n' "Apache" "infocyph/apache:latest"
   local ai_runtime llm_arch
   ai_runtime="$(compose_control_value LDS_AI_RUNTIME "")"
   [[ -n "$ai_runtime" ]] || ai_runtime="$(detect_ai_runtime)"

@@ -31,17 +31,12 @@ fi
 pass "release and user env ownership boundaries"
 
 expected=(
-  'LDS_TOOLS_IMAGE=infocyph/tools:latest'
-  'LDS_RUNNER_IMAGE=infocyph/runner:latest'
-  'LDS_NGINX_IMAGE=infocyph/nginx:latest'
-  'LDS_APACHE_IMAGE=infocyph/apache:latest'
-  'LDS_LLM_ARCH=latest'
   'SCRIPTOMATIC_REF=main'
 )
 for entry in "${expected[@]}"; do
   assert_file_contains "$release_env" "$entry"
 done
-pass "moving latest image manifest"
+pass "release env contains only genuinely variable release defaults"
 
 assert_file_contains "$ROOT/lib/profiles.sh" 'CATALOG_FILE="$CFG/catalog/services.psv"'
 assert_file_contains "$ROOT/lib/profiles.sh" 'load_service_catalog()'
@@ -147,3 +142,16 @@ ai_env_tmp="$(mktemp -d)"
 )
 rm -rf "$ai_env_tmp"
 pass "setup bootstrap persists detection without overriding an explicit runtime"
+
+for stale in LDS_TOOLS_IMAGE LDS_RUNNER_IMAGE LDS_NGINX_IMAGE LDS_APACHE_IMAGE; do
+  if grep -RqsF "$stale" "$ROOT/docker/compose" "$ROOT/docker/release.env" "$ROOT/lib"; then
+    fail "fixed infrastructure image still has unnecessary variable: $stale"
+  fi
+done
+pass "fixed Tools/Runner/Nginx/Apache images have no env indirection"
+
+for stale in ai-nvidia.yaml ai-amd.yaml ai-host-port.yaml; do
+  [[ ! -e "$ROOT/docker/compose/$stale" ]] || fail "stale AI Compose overlay remains: $stale"
+done
+assert_file_contains "$ROOT/lib/compose.sh" 'mktemp "$CFG/.runtime/ai.XXXXXX"'
+pass "AI runtime overrides are ephemeral rather than tracked Compose files"

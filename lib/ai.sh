@@ -54,8 +54,12 @@ cmd_llm() {
     fi
     case "${mode,,}" in
     cpu | nvidia | amd)
-      update_env "$ENV_DOCKER" LDS_AI_RUNTIME "${mode,,}"
-      ok "LLM runtime set to ${mode,,}. Recreate llm-sm to apply the change."
+      local normalized arch
+      normalized="${mode,,}"
+      arch="$(llm_arch_for_runtime "$normalized")"
+      update_env "$ENV_DOCKER" LDS_AI_RUNTIME "$normalized"
+      update_env "$ENV_DOCKER" LDS_LLM_ARCH "$arch"
+      ok "LLM runtime set to $normalized (infocyph/llm-sm:$arch). Recreate llm-sm to apply the change."
       ;;
     *) die "llm runtime <cpu|nvidia|amd>" ;;
     esac

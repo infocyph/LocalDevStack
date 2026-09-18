@@ -108,3 +108,12 @@ for required in   'lds profiles add <profile...>'   'lds support trace <domain>'
   assert_contains "$help_md" "$required"
 done
 pass "embedded CLI help covers documented command groups"
+
+
+for stale in LDS_TOOLS_IMAGE LDS_RUNNER_IMAGE LDS_NGINX_IMAGE LDS_APACHE_IMAGE; do
+  if grep -RqsF "$stale" "$ROOT/README.md" "$ROOT/docs" --exclude-dir=plans; then
+    fail "user-facing docs expose obsolete fixed-image variable: $stale"
+  fi
+done
+assert_file_contains "$ai" 'There are no tracked ``ai-*.yaml`` files'
+pass "docs reflect fixed infrastructure images and ephemeral AI overrides"

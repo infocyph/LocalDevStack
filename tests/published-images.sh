@@ -7,18 +7,18 @@ source "$ROOT/tests/lib/assertions.sh"
 
 release_env="$ROOT/docker/release.env"
 assert_file "$release_env"
+assert_file_contains "$release_env" 'SCRIPTOMATIC_REF=main'
 
-declare -A release=()
-while IFS='=' read -r key value; do
-  [[ -n "$key" && "$key" != \#* ]] || continue
-  release["$key"]="$value"
-done <"$release_env"
+tools_image="infocyph/tools:latest"
+runner_image="infocyph/runner:latest"
+nginx_image="infocyph/nginx:latest"
+apache_image="infocyph/apache:latest"
 
 images=(
-  "${release[LDS_TOOLS_IMAGE]:-}"
-  "${release[LDS_RUNNER_IMAGE]:-}"
-  "${release[LDS_NGINX_IMAGE]:-}"
-  "${release[LDS_APACHE_IMAGE]:-}"
+  "$tools_image"
+  "$runner_image"
+  "$nginx_image"
+  "$apache_image"
 )
 
 for image in "${images[@]}"; do
@@ -29,14 +29,12 @@ for image in "${images[@]}"; do
 done
 pass "published infrastructure compatibility images exist"
 
-for image in "${release[LDS_TOOLS_IMAGE]}" "${release[LDS_RUNNER_IMAGE]}"; do
+for image in "$tools_image" "$runner_image"; do
   health="$(docker image inspect "$image" --format '{{json .Config.Healthcheck}}')"
   [[ -n "$health" && "$health" != "null" ]] || fail "$image must publish a healthcheck"
 done
 pass "Tools and Runner publish healthchecks"
 
-[[ "${release[LDS_LLM_ARCH]:-}" == "latest" ]] ||
-  fail "unexpected default LLM tag selector"
 grep -Fq 'image: infocyph/llm-sm:${LDS_LLM_ARCH}' "$ROOT/docker/compose/companion.yaml" ||
   fail "LLM service must use the single LDS_LLM_ARCH selector"
 grep -Fq "amd) printf '%s' amd-latest" "$ROOT/lib/platform.sh" ||
@@ -44,7 +42,7 @@ grep -Fq "amd) printf '%s' amd-latest" "$ROOT/lib/platform.sh" ||
 pass "LLM image selection follows the single latest/amd-latest tag contract"
 
 tools_profile_chooser="$(
-  docker run --rm --entrypoint cat "${release[LDS_TOOLS_IMAGE]}" /usr/local/bin/profile-chooser
+  docker run --rm --entrypoint cat "$tools_image" /usr/local/bin/profile-chooser
 )"
 catalog="$ROOT/docker/catalog/services.psv"
 
@@ -78,7 +76,7 @@ done <"$catalog"
 pass "LocalDevStack catalog matches latest Tools non-version profile contract"
 
 
-docker run --rm --entrypoint sh "${release[LDS_TOOLS_IMAGE]}" -lc '
+docker run --rm --entrypoint sh "$tools_image" -lc '
   test -x /usr/local/bin/mkhost
   test -s /etc/share/runtime-versions.json
   jq -e ".php.active | type == \"array\" and length > 0" /etc/share/runtime-versions.json >/dev/null
@@ -88,10 +86,10 @@ docker run --rm --entrypoint sh "${release[LDS_TOOLS_IMAGE]}" -lc '
 pass "latest Tools preserves interactive PHP/Node runtime version catalog"
 
 php_template="$(
-  docker run --rm --entrypoint cat "${release[LDS_TOOLS_IMAGE]}" /etc/docker-templates/php.compose.yaml
+  docker run --rm --entrypoint cat "$tools_image" /etc/docker-templates/php.compose.yaml
 )"
 node_template="$(
-  docker run --rm --entrypoint cat "${release[LDS_TOOLS_IMAGE]}" /etc/docker-templates/node.compose.yaml
+  docker run --rm --entrypoint cat "$tools_image" /etc/docker-templates/node.compose.yaml
 )"
 assert_contains "$php_template" 'PHP_VERSION: {{PHP_VERSION}}'
 assert_contains "$php_template" 'image: localdevstack-php:{{PHP_VERSION}}'
@@ -99,7 +97,7 @@ assert_contains "$node_template" 'NODE_VERSION: {{NODE_VERSION}}'
 assert_contains "$node_template" 'image: localdevstack-node:{{NODE_VERSION}}'
 pass "selected runtime versions remain build/image identity inputs"
 
-docker run --rm --entrypoint sh "${release[LDS_RUNNER_IMAGE]}" -ec '
+docker run --rm --entrypoint sh "$runner_image" -ec '
   test -x /usr/local/bin/logrotate-worker.sh
   test -x /usr/local/bin/runner-healthcheck
   test -f /etc/logrotate.d/daily
@@ -111,14 +109,14 @@ assert_contains "$php_template" './docker/conf/www-php.conf:/usr/local/etc/php-f
 pass "generated PHP runtime uses the maintained FPM pool config"
 
 tools_certify="$(
-  docker run --rm --entrypoint cat "${release[LDS_TOOLS_IMAGE]}" /usr/local/bin/certify
+  docker run --rm --entrypoint cat "$tools_image" /usr/local/bin/certify
 )"
 assert_contains "$tools_certify" 'EXPORT_DIR="${EXPORT_DIR:-/etc/share/certs}"'
 assert_contains "$tools_certify" 'EXPORT_ROOTCA_NAME="${EXPORT_ROOTCA_NAME:-rootCA.pem}"'
 assert_contains "$tools_certify" 'atomic_install 0644 "$root_ca" "$EXPORT_DIR/$EXPORT_ROOTCA_NAME"'
 pass "latest Tools public TLS export contract"
 
-docker run --rm --entrypoint sh "${release[LDS_TOOLS_IMAGE]}" -ec '
+docker run --rm --entrypoint sh "$tools_image" -ec '
   test -d /etc/share/state
   test -x /usr/local/bin/env-store
   grep -Fq "/etc/share/state/env-store.json" /usr/local/bin/env-store

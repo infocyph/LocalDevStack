@@ -107,15 +107,15 @@ Frequently used user overrides include::
    COMPOSE_PROFILES=...
    COMPOSE_PROJECT_NAME=LocalDevStack
 
-Infrastructure image overrides include::
+Fixed Infrastructure Images
+---------------------------
 
-   LDS_TOOLS_IMAGE=infocyph/tools:latest
-   LDS_RUNNER_IMAGE=infocyph/runner:latest
-   LDS_NGINX_IMAGE=infocyph/nginx:latest
-   LDS_APACHE_IMAGE=infocyph/apache:latest
+Tools, Runner, Nginx, and Apache are fixed LocalDevStack product components and are
+declared directly in Compose as their published ``:latest`` images. LocalDevStack does
+not expose redundant ``LDS_*_IMAGE`` overrides for them.
 
-The moving values above are release defaults; normal users usually leave them in
-``docker/release.env`` rather than copying them to ``docker/.env``.
+``docker/release.env`` is reserved for defaults that genuinely vary, such as
+``SCRIPTOMATIC_REF``.
 
 Useful Inspection Commands
 --------------------------
@@ -169,7 +169,7 @@ Run::
 
    lds images
 
-to inspect the effective image set after release defaults and user/shell overrides.
+to inspect the effective image set. Fixed product images are reported directly; database/runtime/LLM selections reflect their actual configurable state.
 
 Runtime Version Selection
 -------------------------

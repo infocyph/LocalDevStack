@@ -42,30 +42,57 @@ docker_compose() {
   local -a env_files=(--env-file "$ENV_RELEASE")
   [[ -r "$ENV_DOCKER" ]] && env_files+=(--env-file "$ENV_DOCKER")
 
-  local ai_runtime ai_host_port
-  local -a static_f=()
+  local ai_runtime ai_host_port llm_arch llm_port runtime_override=""
+  local ai_host_port_enabled=0
+  local -a runtime_f=()
 
   ai_runtime="$(compose_control_value LDS_AI_RUNTIME "")"
   [[ -n "$ai_runtime" ]] || ai_runtime="$(detect_ai_runtime)"
   case "${ai_runtime,,}" in
-  cpu) ;;
-  nvidia) static_f+=(-f "$CFG/compose/ai-nvidia.yaml") ;;
-  amd) static_f+=(-f "$CFG/compose/ai-amd.yaml") ;;
+  cpu | nvidia | amd) ;;
   *) die "Invalid LDS_AI_RUNTIME: $ai_runtime (expected cpu|nvidia|amd)" ;;
   esac
+  ai_runtime="${ai_runtime,,}"
 
-  local llm_arch
   llm_arch="$(llm_arch_for_runtime "$ai_runtime")" ||
     die "Cannot resolve LLM image tag for runtime: $ai_runtime"
 
   ai_host_port="$(compose_control_value LDS_LLM_HOST_PORT 0)"
   case "${ai_host_port,,}" in
   "" | 0 | false | no | off) ;;
-  1 | true | yes | on) static_f+=(-f "$CFG/compose/ai-host-port.yaml") ;;
+  1 | true | yes | on) ai_host_port_enabled=1 ;;
   *) die "Invalid LDS_LLM_HOST_PORT: $ai_host_port (expected 0|1)" ;;
   esac
 
-  # Product overrides are applied before user-provided compose extras.
+  llm_port="$(compose_control_value LLM_SM_PORT 11434)"
+  [[ "$llm_port" =~ ^[0-9]+$ ]] && ((llm_port >= 1 && llm_port <= 65535)) ||
+    die "Invalid LLM_SM_PORT: $llm_port (expected 1-65535)"
+
+  if [[ "$ai_runtime" != "cpu" || "$ai_host_port_enabled" == "1" ]]; then
+    mkdir -p "$CFG/.runtime"
+    runtime_override="$(mktemp "$CFG/.runtime/ai.XXXXXX")" ||
+      die "Unable to create temporary AI Compose override"
+
+    {
+      printf '%s\n' 'services:' '  llm-sm:'
+      case "$ai_runtime" in
+      nvidia)
+        printf '%s\n' '    gpus: all'
+        ;;
+      amd)
+        printf '%s\n' '    devices:'           '      - /dev/kfd:/dev/kfd'           '      - /dev/dri:/dev/dri'
+        ;;
+      esac
+      if ((ai_host_port_enabled)); then
+        printf '%s\n' '    ports:'
+        printf '      - "127.0.0.1:%s:11434"\n' "$llm_port"
+      fi
+    } >"$runtime_override"
+
+    runtime_f=(-f "$runtime_override")
+  fi
+
+  # Runtime-generated product overrides are applied before user-provided extras.
   local -a extra_f=() f
   for f in "${__EXTRA_FILES[@]:-}"; do
     [[ -f "$f" ]] || continue
@@ -76,13 +103,17 @@ docker_compose() {
 
   local host_os="${HOST_OS:-$(detect_host_os)}"
 
+  local rc=0
   HOST_OS="$host_os" LDS_LLM_ARCH="$llm_arch" "${__LDS_DC_BIN[@]}" \
     --project-directory "$DIR" \
     -f "$COMPOSE_FILE" \
-    "${static_f[@]}" \
+    "${runtime_f[@]}" \
     "${extra_f[@]}" \
     "${env_files[@]}" \
-    "$@"
+    "$@" || rc=$?
+
+  [[ -z "$runtime_override" ]] || rm -f "$runtime_override"
+  return "$rc"
 }
 
 # helper: print the effective Compose project name.

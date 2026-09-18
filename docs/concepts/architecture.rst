@@ -12,7 +12,7 @@ Host Orchestration
    TLS installation, support tooling, and convenience wrappers.
 
 ``docker/release.env``
-   Tracked release-owned defaults such as infrastructure image aliases.
+   Tracked release/build defaults that genuinely vary, such as ``SCRIPTOMATIC_REF``. Fixed infrastructure image names live directly in Compose.
 
 ``docker/.env``
    User-owned LocalDevStack configuration.
@@ -149,7 +149,7 @@ When the ``ai`` profile is enabled:
 4. ``lds ai`` delegates higher-level/operational AI to Tools;
 5. ``lds llm`` delegates model/runtime operations to the bundled ``llm-sm`` CLI.
 
-The provider is one ``llm-sm`` service declared with the core companion services and enabled only by the ``ai`` profile. Its image is ``infocyph/llm-sm:${LDS_LLM_ARCH}``: CPU/NVIDIA resolve to ``latest`` and AMD/ROCm resolves to ``amd-latest``. Hardware-specific Compose overlays add only NVIDIA GPU access or AMD ``/dev/kfd`` + ``/dev/dri`` device mappings.
+The provider is one ``llm-sm`` service declared with the core companion services and enabled only by the ``ai`` profile. Its image is ``infocyph/llm-sm:${LDS_LLM_ARCH}``: CPU/NVIDIA resolve to ``latest`` and AMD/ROCm resolves to ``amd-latest``. No AI-specific Compose files are tracked; ``lds`` generates a temporary Compose fragment only when NVIDIA GPU access, AMD device mappings, or loopback host-port exposure is required, then removes it after the Compose command.
 
 Project Identity
 ----------------

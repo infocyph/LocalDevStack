@@ -2,7 +2,7 @@ services:
   server-tools:
     container_name: SERVER_TOOLS
     hostname: local-dock
-    image: ${LDS_TOOLS_IMAGE:-infocyph/tools:latest}
+    image: infocyph/tools:latest
     restart: unless-stopped
     environment:
       - TZ=${TZ:-}
@@ -67,7 +67,7 @@ services:
   runner:
     container_name: RUNNER
     hostname: runner
-    image: ${LDS_RUNNER_IMAGE:-infocyph/runner:latest}
+    image: infocyph/runner:latest
     restart: unless-stopped
     environment:
       - TZ=${TZ:-}

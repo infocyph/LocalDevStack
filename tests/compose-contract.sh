@@ -35,6 +35,7 @@ USER=$(id -un)
 UID=$(id -u)
 GID=$(id -g)
 PROJECT_DIR=$ROOT
+LDS_LLM_ARCH=latest
 EOF
 
 compose=(docker compose
@@ -60,18 +61,6 @@ render redis --profile redis
 render elasticsearch --profile elasticsearch
 render elasticsearch-filebeat --profile elasticsearch --profile filebeat
 render ai --profile ai
-docker compose --project-directory "$ROOT" \
-  -f "$ROOT/docker/compose/main.yaml" \
-  -f "$ROOT/docker/compose/ai-nvidia.yaml" \
-  --env-file "$release_env" --env-file "$user_env" --profile ai config --quiet
-docker compose --project-directory "$ROOT" \
-  -f "$ROOT/docker/compose/main.yaml" \
-  -f "$ROOT/docker/compose/ai-amd.yaml" \
-  --env-file "$release_env" --env-file "$user_env" --profile ai config --quiet
-docker compose --project-directory "$ROOT" \
-  -f "$ROOT/docker/compose/main.yaml" \
-  -f "$ROOT/docker/compose/ai-host-port.yaml" \
-  --env-file "$release_env" --env-file "$user_env" --profile ai config --quiet
 
 resolved="$("${compose[@]}" --profile mysql config)"
 assert_contains "$resolved" "server-tools:"
@@ -107,16 +96,13 @@ assert d["services"]["filebeat"]["image"] == "docker.elastic.co/beats/filebeat:9
 ' <<<"$elastic_json"
 pass "Elastic stack uses aligned current-stable tags because latest is unsupported"
 
-printf '%s\n' 'LDS_TOOLS_IMAGE=example.invalid/tools:user-override' >>"$user_env"
-user_override="$("${compose[@]}" config)"
-assert_contains "$user_override" "image: example.invalid/tools:user-override"
-pass "docker/.env overrides release defaults"
-
-shell_override="$(
-  LDS_TOOLS_IMAGE=example.invalid/tools:shell-override "${compose[@]}" config
-)"
-assert_contains "$shell_override" "image: example.invalid/tools:shell-override"
-pass "shell override wins over user and release env files"
+printf '%s\n' 'LDS_TOOLS_IMAGE=example.invalid/tools:ignored' >>"$user_env"
+fixed_images="$("${compose[@]}" config)"
+assert_contains "$fixed_images" "image: infocyph/tools:latest"
+if grep -Fq 'example.invalid/tools' <<<"$fixed_images"; then
+  fail "fixed infrastructure images must not be user-overridable"
+fi
+pass "fixed infrastructure images are declared directly in Compose"
 
 core_json="$("${compose[@]}" config --format json)"
 python3 -c '
@@ -151,7 +137,7 @@ assert tools["LDS_AI_MODEL"] == "qwen2.5:3b"
 ' <<<"$ai_json"
 pass "companion-owned AI profile is internal-only and deterministic"
 
-amd_json="$(LDS_LLM_ARCH=amd-latest docker compose --project-directory "$ROOT" -f "$ROOT/docker/compose/main.yaml" -f "$ROOT/docker/compose/ai-amd.yaml" --env-file "$release_env" --env-file "$user_env" --profile ai config --format json)"
+amd_json="$(COMPOSE_PROFILES=ai LDS_AI_RUNTIME=amd "$ROOT/lds" config show --json --raw 2>/dev/null)"
 python3 -c '
 import json,sys
 s=json.load(sys.stdin)["services"]["llm-sm"]
@@ -159,13 +145,18 @@ assert s["image"] == "infocyph/llm-sm:amd-latest"
 devices=" ".join(str(x) for x in s.get("devices", []))
 assert "/dev/kfd" in devices and "/dev/dri" in devices
 ' <<<"$amd_json"
-pass "AMD AI override"
+pass "AMD AI runtime is generated dynamically"
 
-nvidia_yaml="$(docker compose --project-directory "$ROOT" -f "$ROOT/docker/compose/main.yaml" -f "$ROOT/docker/compose/ai-nvidia.yaml" --env-file "$release_env" --env-file "$user_env" --profile ai config)"
-assert_contains "$nvidia_yaml" "gpus:"
-pass "NVIDIA AI override"
+nvidia_json="$(COMPOSE_PROFILES=ai LDS_AI_RUNTIME=nvidia "$ROOT/lds" config show --json --raw 2>/dev/null)"
+python3 -c '
+import json,sys
+s=json.load(sys.stdin)["services"]["llm-sm"]
+assert s["image"] == "infocyph/llm-sm:latest"
+assert s.get("gpus")
+' <<<"$nvidia_json"
+pass "NVIDIA AI runtime is generated dynamically"
 
-host_json="$(docker compose --project-directory "$ROOT" -f "$ROOT/docker/compose/main.yaml" -f "$ROOT/docker/compose/ai-host-port.yaml" --env-file "$release_env" --env-file "$user_env" --profile ai config --format json)"
+host_json="$(COMPOSE_PROFILES=ai LDS_AI_RUNTIME=cpu LDS_LLM_HOST_PORT=1 "$ROOT/lds" config show --json --raw 2>/dev/null)"
 python3 -c '
 import json,sys
 ports=json.load(sys.stdin)["services"]["llm-sm"]["ports"]
@@ -174,9 +165,13 @@ p=ports[0]
 assert p["host_ip"] == "127.0.0.1"
 assert int(p["target"]) == 11434 and int(p["published"]) == 11434
 ' <<<"$host_json"
-pass "direct Ollama port is explicit loopback-only"
+pass "direct Ollama port is generated dynamically and loopback-only"
 
-
-[[ ! -e "$ROOT/docker/compose/ai.yaml" ]] || fail "base AI service must live in companion.yaml, not ai.yaml"
+if find "$ROOT/docker/compose" -maxdepth 1 -type f -name 'ai-*.yaml' -print -quit | grep -q .; then
+  fail "AI-specific Compose files must not exist"
+fi
+if [[ -d "$ROOT/docker/.runtime" ]] && find "$ROOT/docker/.runtime" -type f -print -quit | grep -q .; then
+  fail "temporary AI Compose overrides were not cleaned up"
+fi
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'image: infocyph/llm-sm:${LDS_LLM_ARCH}'
-pass "LLM service uses one tag selector in companion.yaml"
+pass "single LLM service plus ephemeral hardware/port overrides"

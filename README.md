@@ -157,7 +157,7 @@ lds rebuild all
 
 ## Service image policy
 
-Release-owned defaults live in `docker/release.env`.
+Fixed infrastructure images are declared directly in Compose. `docker/release.env` is reserved for genuinely variable release/build defaults such as `SCRIPTOMATIC_REF`.
 
 > Prefer the moving Alpine variant when the image family provides a suitable Alpine variant; otherwise use the normal moving latest tag.
 
@@ -175,7 +175,7 @@ Inspect the effective defaults with `lds images`.
 
 ## Environment ownership and precedence
 
-Tracked release defaults live in `docker/release.env`; user LocalDevStack settings live in `docker/.env`; the repository-root `.env` remains application-facing state where applicable.
+Tracked release/build defaults live in `docker/release.env`; user LocalDevStack settings live in `docker/.env`; the repository-root `.env` remains application-facing state where applicable. Fixed Tools/Runner/Nginx/Apache image names are not env-overridable because they have no runtime variant choice.
 
 LocalDevStack control precedence is:
 

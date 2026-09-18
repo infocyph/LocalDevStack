@@ -145,7 +145,7 @@ The provider CLI does not silently download a missing model for an unrelated com
 Privacy and Trust Boundaries
 ----------------------------
 
-The base ``llm-sm`` service lives in ``docker/compose/companion.yaml`` and is gated by the ``ai`` profile. Hardware-only overlays add GPU/device access without duplicating the service definition.
+The base ``llm-sm`` service lives in ``docker/compose/companion.yaml`` and is gated by the ``ai`` profile. There are no tracked ``ai-*.yaml`` files. When NVIDIA, AMD/ROCm, or direct loopback access is selected, ``lds`` writes a small temporary Compose fragment under ``docker/.runtime/``, uses it for that Compose invocation, and removes it immediately afterward.
 
 By default, ``llm-sm`` receives:
 

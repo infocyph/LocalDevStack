@@ -50,14 +50,15 @@ assert_contains "$provider_status" "available=1"
 assert_contains "$provider_status" "model=qwen2.5:3b"
 pass "latest Tools reaches the separate provider contract"
 
-for file in ai-nvidia.yaml ai-amd.yaml ai-host-port.yaml; do
-  assert_file "$ROOT/docker/compose/$file"
-done
-[[ ! -e "$ROOT/docker/compose/ai.yaml" ]] || fail "base AI service must be consolidated into companion.yaml"
+[[ ! -e "$ROOT/docker/compose/ai.yaml" ]] || fail "base AI service must remain consolidated into companion.yaml"
+if find "$ROOT/docker/compose" -maxdepth 1 -type f -name 'ai-*.yaml' -print -quit | grep -q .; then
+  fail "AI-specific Compose overlays must be generated ephemerally"
+fi
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'image: infocyph/llm-sm:${LDS_LLM_ARCH}'
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'profiles: [ai]'
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'lds_llm:/root/.ollama'
-assert_file_contains "$ROOT/docker/compose/ai-nvidia.yaml" 'gpus: all'
-assert_file_contains "$ROOT/docker/compose/ai-amd.yaml" '/dev/kfd:/dev/kfd'
-assert_file_contains "$ROOT/docker/compose/ai-amd.yaml" '/dev/dri:/dev/dri'
-pass "single companion AI service plus hardware-only overlays"
+assert_file_contains "$ROOT/lib/compose.sh" "'    gpus: all'"
+assert_file_contains "$ROOT/lib/compose.sh" "'      - /dev/kfd:/dev/kfd'"
+assert_file_contains "$ROOT/lib/compose.sh" "'      - /dev/dri:/dev/dri'"
+assert_file_contains "$ROOT/lib/compose.sh" '"127.0.0.1:%s:11434"'
+pass "single companion AI service with ephemeral hardware/port augmentation"
