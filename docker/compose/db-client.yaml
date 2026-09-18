@@ -12,7 +12,8 @@ services:
     image: redis/redisinsight:latest
     profiles: [redis]
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
     environment:
       - RI_REDIS_HOST=redis
     volumes:
@@ -43,7 +44,8 @@ services:
     image: mongo-express:${MONGO_EXPRESS_VERSION:-latest}
     profiles: [mongodb]
     depends_on:
-      - mongodb
+      mongodb:
+        condition: service_healthy
     environment:
       - TZ=${TZ:-}
       - ME_CONFIG_BASICAUTH=false
@@ -60,7 +62,8 @@ services:
     image: kibana:${ELASTICSEARCH_VERSION:-9.5.3}
     profiles: [elasticsearch]
     depends_on:
-      - elasticsearch
+      elasticsearch:
+        condition: service_healthy
     environment:
       - TZ=${TZ:-}
       - "ELASTICSEARCH_HOSTS=http://elasticsearch:9200"
