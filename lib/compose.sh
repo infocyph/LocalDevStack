@@ -80,8 +80,14 @@ docker_compose() {
     "$@"
 }
 
-# helper: print project name
-lds_project() { printf '%s' "${__LDS_PROJECT:-$(basename -- "$DIR")}"; }
+# helper: print the effective Compose project name.
+# main.yaml owns the LocalDevStack default; COMPOSE_PROJECT_NAME remains an
+# explicit override and must be reflected by label-scoped diagnostics.
+lds_project() {
+  local project
+  project="$(compose_control_value COMPOSE_PROJECT_NAME LocalDevStack)"
+  printf '%s' "${__LDS_PROJECT:-$project}"
+}
 
 # (QUIET by default) ────────────────────────────────
 # Centralize quiet/verbose handling for compose subcommands.

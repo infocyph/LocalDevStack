@@ -52,3 +52,50 @@ assert_file_contains "$ROOT/lib/services.sh" 'cmd_vpn_fix()'
 assert_file_contains "$ROOT/lds" 'vpn-fix) cmd_vpn_fix "$@"'
 assert_file_contains "$ROOT/lib/services.sh" 'migrate_legacy_networks'
 pass "safe legacy-network migration and vpn-fix deprecation"
+
+
+# Exercise the migration path rather than only checking for its source text.
+migration_log="$(mktemp)"
+(
+  set -euo pipefail
+  RED="" GREEN="" CYAN="" YELLOW="" NC=""
+  die() { printf 'die: %s\n' "$*" >&2; exit 1; }
+  warn() { :; }
+  ok() { :; }
+  lds_project() { printf '%s' "LocalDevStack"; }
+  docker_compose() { printf 'compose %s\n' "$*" >>"$migration_log"; }
+  docker() {
+    printf 'docker %s\n' "$*" >>"$migration_log"
+    if [[ "${1:-}" == "network" && "${2:-}" == "inspect" ]]; then
+      local network="${!#}"
+      [[ "$network" == "Frontend" ]] || return 1
+      if [[ "${3:-}" != "-f" ]]; then
+        return 0
+      fi
+      case "${4:-}" in
+        *com.infocyph.network-schema*) return 0 ;;
+        *Subnet*) printf '%s\n' '172.28.0.0/24' ;;
+        *com.infocyph.stack*) printf '%s\n' 'LocalDevStack' ;;
+        *com.docker.compose.project*) printf '%s\n' 'LocalDevStack' ;;
+        *Containers*) return 0 ;;
+        *) return 0 ;;
+      esac
+      return 0
+    fi
+    if [[ "${1:-}" == "network" && "${2:-}" == "rm" ]]; then
+      return 0
+    fi
+    return 0
+  }
+  # shellcheck source=lib/services.sh
+  source "$ROOT/lib/services.sh"
+  migrate_legacy_networks
+)
+assert_file_contains "$migration_log" 'docker network inspect Frontend'
+assert_file_contains "$migration_log" 'compose down --remove-orphans'
+assert_file_contains "$migration_log" 'docker network rm Frontend'
+rm -f "$migration_log"
+if grep -Fq '\${' "$ROOT/lib/services.sh"; then
+  fail "legacy migration contains escaped parameter expansion"
+fi
+pass "legacy network migration executes against real network names"

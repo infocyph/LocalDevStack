@@ -52,9 +52,12 @@ Instead:
 
 Use::
 
+   lds domain ls
    lds config validate
 
-to validate the effective Compose graph and mounted scheduler configuration.
+to list persisted domains and validate the effective Compose graph and mounted
+scheduler configuration. Domain listing reads the NginxHosts named volume through
+server-tools rather than relying on a host-side vhost directory.
 
 Routing
 -------
@@ -96,3 +99,7 @@ Open a known UI/domain::
 Run diagnostics without mutating the stack::
 
    lds doctor
+   lds support trace project.localhost
+
+The support trace reads the persisted Nginx vhost from NginxHosts (or the running
+Nginx mount as a fallback), so upstream inference matches the active generated state.

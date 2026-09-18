@@ -69,10 +69,40 @@ flush_envs() {
 }
 
 flush_profiles() {
-  local profile
-  for profile in "${PENDING_PROFILES[@]}"; do
-    modify_profiles add "$profile"
+  local current key profile
+  local -A managed=() seen=()
+  local -a existing=() updated=()
+
+  # The setup wizard owns only catalog-managed service profiles. Generated
+  # runtime/domain profiles (for example apache/php/node fragments) must survive
+  # a service-profile reselection.
+  for key in "${SERVICE_ORDER[@]}"; do
+    profile="${SERVICES[$key]:-}"
+    [[ -n "$profile" ]] && managed["$profile"]=1
   done
+
+  for profile in "${PENDING_PROFILES[@]}"; do
+    [[ -n "$profile" && -z "${seen[$profile]:-}" ]] || continue
+    updated+=("$profile")
+    seen["$profile"]=1
+  done
+
+  current="$(dotenv_value "$ENV_DOCKER" COMPOSE_PROFILES 2>/dev/null || true)"
+  IFS=',' read -r -a existing <<<"$current"
+  for profile in "${existing[@]}"; do
+    profile="${profile//[[:space:]]/}"
+    [[ -n "$profile" ]] || continue
+    [[ -n "${managed[$profile]:-}" ]] && continue
+    [[ -n "${seen[$profile]:-}" ]] && continue
+    updated+=("$profile")
+    seen["$profile"]=1
+  done
+
+  local joined=""
+  if (("${#updated[@]}" > 0)); then
+    joined="$(IFS=,; printf '%s' "${updated[*]}")"
+  fi
+  update_env "$ENV_DOCKER" COMPOSE_PROFILES "$joined"
 }
 
 # ── setup menu (selection-first) ──────────────────────────────────────────────
@@ -80,7 +110,7 @@ flush_profiles() {
 setup_menu_print() {
   # Print menu to stderr to avoid stdout buffering in some Windows wrappers.
   {
-    printf "\n%bSetup profiles%b (will replace previous configuration, if exists):\n\n" "$CYAN" "$NC"
+    printf "\n%bSetup profiles%b (replaces catalog-managed service profiles; generated runtime/domain profiles are preserved):\n\n" "$CYAN" "$NC"
     local i=1 key slug display
     for key in "${SERVICE_ORDER[@]}"; do
       slug="${SERVICES[$key]}"

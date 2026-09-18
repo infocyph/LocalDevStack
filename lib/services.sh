@@ -118,7 +118,7 @@ compose_image_for_service() {
 declare -a __LDS_LEGACY_NETWORK_NAMES=(Frontend Backend DataStore)
 
 legacy_network_expected_subnet() {
-  case "\${1:-}" in
+  case "${1:-}" in
   Frontend) printf '%s' '172.28.0.0/24' ;;
   Backend) printf '%s' '172.29.0.0/24' ;;
   DataStore) printf '%s' '172.30.0.0/24' ;;
@@ -127,10 +127,11 @@ legacy_network_expected_subnet() {
 }
 
 migrate_legacy_networks() {
-  local network expected subnets stack_label project_label schema_label ctr ctr_project attachments
+  local network expected subnets stack_label project_label schema_label ctr ctr_project attachments project
   local -a legacy=()
+  project="$(lds_project)"
 
-  for network in "\${__LDS_LEGACY_NETWORK_NAMES[@]}"; do
+  for network in "${__LDS_LEGACY_NETWORK_NAMES[@]}"; do
     docker network inspect "$network" >/dev/null 2>&1 || continue
 
     schema_label="$(docker network inspect -f '{{index .Labels "com.infocyph.network-schema"}}' "$network" 2>/dev/null || true)"
@@ -142,30 +143,30 @@ migrate_legacy_networks() {
 
     stack_label="$(docker network inspect -f '{{index .Labels "com.infocyph.stack"}}' "$network" 2>/dev/null || true)"
     project_label="$(docker network inspect -f '{{index .Labels "com.docker.compose.project"}}' "$network" 2>/dev/null || true)"
-    if [[ "$stack_label" != "LocalDevStack" || "$project_label" != "LocalDevStack" ]]; then
-      die "Legacy subnet detected on '$network', but ownership labels do not prove it belongs to LocalDevStack. Remove or rename that network manually."
+    if [[ "$stack_label" != "LocalDevStack" || "$project_label" != "$project" ]]; then
+      die "Legacy subnet detected on '$network', but ownership labels do not prove it belongs to LocalDevStack project '$project'. Remove or rename that network manually."
     fi
 
     while IFS= read -r ctr; do
       [[ -n "$ctr" ]] || continue
       ctr_project="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "$ctr" 2>/dev/null || true)"
-      if [[ "$ctr_project" != "LocalDevStack" ]]; then
-        die "Refusing to migrate '$network': container '$ctr' is not owned by the LocalDevStack Compose project."
+      if [[ "$ctr_project" != "$project" ]]; then
+        die "Refusing to migrate '$network': container '$ctr' is not owned by LocalDevStack project '$project'."
       fi
     done < <(docker network inspect -f '{{range .Containers}}{{println .Name}}{{end}}' "$network" 2>/dev/null || true)
 
     legacy+=("$network")
   done
 
-  (("\${#legacy[@]}" > 0)) || return 0
+  (("${#legacy[@]}" > 0)) || return 0
 
-  warn "Legacy fixed LocalDevStack network(s) detected: \${legacy[*]}"
+  warn "Legacy fixed LocalDevStack network(s) detected: ${legacy[*]}"
   warn "Recreating stack networks dynamically; named volumes and persisted data are preserved."
 
   # Stop/remove only LocalDevStack Compose containers and networks. Never use -v.
   docker_compose down --remove-orphans
 
-  for network in "\${legacy[@]}"; do
+  for network in "${legacy[@]}"; do
     docker network inspect "$network" >/dev/null 2>&1 || continue
     attachments="$(docker network inspect -f '{{range .Containers}}{{println .Name}}{{end}}' "$network" 2>/dev/null || true)"
     [[ -z "$attachments" ]] ||
@@ -227,8 +228,21 @@ cmd_down() {
 }
 
 cmd_restart() {
-  cmd_stop
-  cmd_start
+  if (($# == 0)); then
+    cmd_stop
+    cmd_start
+    return 0
+  fi
+
+  local arg svc
+  local -a services=()
+  for arg in "$@"; do
+    svc="$(resolve_service "$arg")"
+    compose_service_exists "$svc" || die "Unknown service: $arg"
+    services+=("$svc")
+  done
+
+  docker_compose restart "${services[@]}"
 }
 cmd_reboot() { cmd_restart; }
 
@@ -457,12 +471,15 @@ cmd_host() {
     delete_domain "$@"
     ;;
   list)
-    shopt -s nullglob
-    for f in "$DIR/configuration/nginx/"*.conf; do
-      printf '%s
-' "$(basename -- "$f" .conf)"
-    done
-    shopt -u nullglob
+    local ctr
+    ctr="$(_project_tools_container_running || true)"
+    [[ -n "$ctr" ]] || die "server-tools container is not running for project: $(lds_project)"
+    docker exec "$ctr" sh -lc '
+      for f in /etc/share/vhosts/nginx/*.conf; do
+        [ -e "$f" ] || continue
+        basename "$f" .conf
+      done
+    ' | LC_ALL=C sort
     ;;
   *)
     die "host <add|rm|list>"
@@ -502,7 +519,7 @@ cmd_events() {
 }
 
 cmd_clean() {
-  local yes=0 vols=0
+  local yes=0 vols=0 global=0
   while [[ "${1:-}" ]]; do
     case "$1" in
     --yes | -y)
@@ -513,32 +530,85 @@ cmd_clean() {
       vols=1
       shift
       ;;
+    --global)
+      global=1
+      shift
+      ;;
     *)
-      die "clean [--yes|-y] [--volumes|-v]"
+      die "clean [--yes|-y] [--volumes|-v] [--global]"
       ;;
     esac
   done
 
   ((yes)) || die "clean requires --yes"
 
-  printf "%b[clean]%b pruning stopped containers...\n" "$CYAN" "$NC"
-  docker container prune -f >/dev/null 2>&1 || true
+  if ((global)); then
+    warn "Global Docker cleanup requested; unrelated stopped containers, images, networks, build cache, and optionally volumes may be removed."
 
-  printf "%b[clean]%b pruning unused networks...\n" "$CYAN" "$NC"
-  docker network prune -f >/dev/null 2>&1 || true
-
-  printf "%b[clean]%b pruning unused images...\n" "$CYAN" "$NC"
-  docker image prune -a -f >/dev/null 2>&1 || true
-
-  printf "%b[clean]%b pruning build cache...\n" "$CYAN" "$NC"
-  docker builder prune -a -f >/dev/null 2>&1 || true
-
-  if ((vols)); then
-    printf "%b[clean]%b pruning unused volumes...\n" "$CYAN" "$NC"
-    docker volume prune -f >/dev/null 2>&1 || true
+    printf "%b[clean]%b globally pruning stopped containers...\n" "$CYAN" "$NC"
+    docker container prune -f >/dev/null 2>&1 || true
+    printf "%b[clean]%b globally pruning unused networks...\n" "$CYAN" "$NC"
+    docker network prune -f >/dev/null 2>&1 || true
+    printf "%b[clean]%b globally pruning unused images...\n" "$CYAN" "$NC"
+    docker image prune -a -f >/dev/null 2>&1 || true
+    printf "%b[clean]%b globally pruning build cache...\n" "$CYAN" "$NC"
+    docker builder prune -a -f >/dev/null 2>&1 || true
+    if ((vols)); then
+      printf "%b[clean]%b globally pruning unused volumes...\n" "$CYAN" "$NC"
+      docker volume prune -f >/dev/null 2>&1 || true
+    fi
+    printf "%b[clean]%b global cleanup done\n" "$GREEN" "$NC"
+    return 0
   fi
 
-  printf "%b[clean]%b done\n" "$GREEN" "$NC"
+  local project id net refs image
+  local -a ids=() networks=() volumes=() images=()
+  project="$(lds_project)"
+
+  mapfile -t ids < <(
+    {
+      docker ps -aq --filter "label=com.docker.compose.project=$project" --filter status=created
+      docker ps -aq --filter "label=com.docker.compose.project=$project" --filter status=exited
+      docker ps -aq --filter "label=com.docker.compose.project=$project" --filter status=dead
+    } 2>/dev/null | awk 'NF' | sort -u
+  )
+  if (("${#ids[@]}" > 0)); then
+    printf "%b[clean]%b removing stopped LocalDevStack containers...\n" "$CYAN" "$NC"
+    docker rm "${ids[@]}" >/dev/null 2>&1 || true
+  fi
+
+  mapfile -t networks < <(
+    docker network ls -q       --filter "label=com.infocyph.stack=LocalDevStack"       --filter "label=com.docker.compose.project=$project" 2>/dev/null || true
+  )
+  for net in "${networks[@]}"; do
+    [[ -n "$net" ]] || continue
+    refs="$(docker network inspect -f '{{len .Containers}}' "$net" 2>/dev/null || printf '1')"
+    [[ "$refs" == "0" ]] || continue
+    docker network rm "$net" >/dev/null 2>&1 || true
+  done
+
+  mapfile -t images < <(
+    {
+      docker images -q --filter 'reference=localdevstack-php:*'
+      docker images -q --filter 'reference=localdevstack-node:*'
+    } 2>/dev/null | awk 'NF' | sort -u
+  )
+  for image in "${images[@]}"; do
+    docker image rm "$image" >/dev/null 2>&1 || true
+  done
+
+  if ((vols)); then
+    mapfile -t volumes < <(
+      docker volume ls -q         --filter "label=com.infocyph.lds=1"         --filter "label=com.infocyph.stack=LocalDevStack" 2>/dev/null || true
+    )
+    for id in "${volumes[@]}"; do
+      [[ -n "$id" ]] || continue
+      docker volume rm "$id" >/dev/null 2>&1 || true
+    done
+  fi
+
+  printf "%b[clean]%b LocalDevStack-scoped cleanup done\n" "$GREEN" "$NC"
+  warn "Docker build cache is intentionally untouched by scoped cleanup; use --global for host-wide pruning."
 }
 
 

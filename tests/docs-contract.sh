@@ -23,7 +23,10 @@ assert_file_contains "$index" 'guides/local-ai'
 assert_file_contains "$readme" 'Dynamic Docker networking through service DNS'
 assert_file_contains "$arch" 'Docker assigns their address ranges dynamically'
 assert_file_contains "$domain" 'generated runtime Compose fragments are written under configuration/compose/'
-pass "docs describe dynamic DNS/runtime generation"
+assert_file_contains "$domain" 'Domain listing reads the NginxHosts named volume'
+assert_file_contains "$storage" 'support traces, and support bundles'
+assert_file_contains "$readme" 'lds clean --global --yes'
+pass "docs describe dynamic DNS/runtime generation and safe operational boundaries"
 
 assert_file_contains "$profiles" 'docker/release.env'
 assert_file_contains "$profiles" 'docker/.env'

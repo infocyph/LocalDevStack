@@ -71,12 +71,39 @@ fi
 assert_contains "$redacted" "***REDACTED***"
 pass "config show redacts effective secrets by default"
 
+bundle="$(mktemp --suffix=.zip)"
+"$ROOT/lds" support bundle --redact "$bundle" >/dev/null
+python3 - "$bundle" "supersecret-ci-value" <<'PY'
+import sys, zipfile
+path, secret = sys.argv[1:]
+with zipfile.ZipFile(path) as z:
+    for name in z.namelist():
+        data = z.read(name)
+        if secret.encode() in data:
+            raise SystemExit(f"support bundle leaked secret in {name}")
+PY
+rm -f "$bundle"
+pass "support bundle redacts interpolated secrets"
+
 help="$("$ROOT/lds" help)"
 assert_contains "$help" "doctor"
 assert_contains "$help" "images"
 assert_contains "$help" "urls"
+assert_contains "$help" "support trace"
+assert_contains "$help" "--global"
 pass "QoL commands are discoverable"
 
 assert_file_contains "$ROOT/lds" 'images | urls | doctor)'
 assert_file_contains "$ROOT/lib/diagnostics.sh" 'Docker daemon is unavailable.'
 pass "doctor owns Docker availability diagnostics"
+
+
+assert_file_contains "$ROOT/lds" 'trace) cmd_support_trace "$@" ;;'
+assert_file_contains "$ROOT/lib/services.sh" '/etc/share/vhosts/nginx/*.conf'
+if grep -Fq '$DIR/configuration/nginx/' "$ROOT/lib/services.sh" "$ROOT/lib/diagnostics.sh"; then
+  fail "domain inspection must use persisted named-volume vhosts"
+fi
+assert_file_contains "$ROOT/lib/services.sh" 'docker_compose restart "${services[@]}"'
+assert_file_contains "$ROOT/lib/services.sh" '--global'
+assert_file_contains "$ROOT/lib/services.sh" 'label=com.docker.compose.project=$project'
+pass "trace, domain listing, targeted restart, and scoped cleanup contracts"

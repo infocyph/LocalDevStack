@@ -248,7 +248,20 @@ cmd_support_trace() {
   local dom="${1:-}"
   [[ -n "$dom" ]] || die "support trace <domain>"
 
-  local nconf="$DIR/configuration/nginx/$dom.conf"
+  local nconf="/etc/share/vhosts/nginx/$dom.conf"
+  local nconf_source="server-tools:$nconf"
+  local nconf_text="" ctr nginx_ctr
+  ctr="$(_project_tools_container_running || true)"
+  if [[ -n "$ctr" ]]; then
+    nconf_text="$(docker exec "$ctr" sh -c 'cat "$1" 2>/dev/null || true' sh "$nconf" 2>/dev/null || true)"
+  else
+    nginx_ctr="$(docker_compose ps -q nginx 2>/dev/null | sed -n '1p' || true)"
+    if [[ -n "$nginx_ctr" ]] && docker inspect -f '{{.State.Running}}' "$nginx_ctr" 2>/dev/null | grep -qx true; then
+      nconf="/etc/nginx/conf.d/$dom.conf"
+      nconf_source="nginx:$nconf"
+      nconf_text="$(docker exec "$nginx_ctr" sh -c 'cat "$1" 2>/dev/null || true' sh "$nconf" 2>/dev/null || true)"
+    fi
+  fi
   printf "%bTrace%b: %s\n" "$CYAN" "$NC" "$dom"
 
   # 1) DNS
@@ -277,22 +290,22 @@ cmd_support_trace() {
     curl -sk -o /dev/null -D - -w $'time_namelookup=%{time_namelookup}\ntime_connect=%{time_connect}\ntime_appconnect=%{time_appconnect}\ntime_starttransfer=%{time_starttransfer}\ntime_total=%{time_total}\nhttp_code=%{http_code}\n' "https://$dom" | sed -n '1,30p'
   fi
 
-  # 4) Upstream inference from nginx conf (if exists)
+  # 4) Upstream inference from the persisted NginxHosts state.
   printf "\n%b[Upstream]%b\n" "$DIM" "$NC"
-  if [[ -r "$nconf" ]]; then
-    if grep -q fastcgi_pass "$nconf"; then
+  if [[ -n "$nconf_text" ]]; then
+    if grep -q fastcgi_pass <<<"$nconf_text"; then
       local php
-      php="$(grep -Eo 'fastcgi_pass[[:space:]]+[^;]+' "$nconf" | awk '{print $2}' | head -n1 || true)"
+      php="$(grep -Eo 'fastcgi_pass[[:space:]]+[^;]+' <<<"$nconf_text" | awk '{print $2}' | head -n1 || true)"
       printf "type=php\nfastcgi_pass=%s\n" "${php:-unknown}"
-    elif grep -q proxy_pass "$nconf"; then
+    elif grep -q proxy_pass <<<"$nconf_text"; then
       local up
-      up="$(grep -m1 -Eo 'proxy_pass[[:space:]]+http[s]?://[^;]+' "$nconf" | awk '{print $2}' | head -n1 || true)"
+      up="$(grep -m1 -Eo 'proxy_pass[[:space:]]+http[s]?://[^;]+' <<<"$nconf_text" | awk '{print $2}' | head -n1 || true)"
       printf "type=proxy\nproxy_pass=%s\n" "${up:-unknown}"
     else
       printf "type=static\n"
     fi
   else
-    printf "nginx_conf=%s (missing)\n" "$nconf"
+    printf "nginx_conf=%s (missing or unavailable)\n" "$nconf_source"
   fi
 
   # 5) Recent nginx logs (compose)
@@ -314,6 +327,11 @@ _redact_effective_config() {
     -e 's/^([[:space:]]*(ME_CONFIG_MONGODB_URL|DATABASE_URL):[[:space:]]*).*$/\1"***REDACTED***"/' \
     -e 's/("[A-Z0-9_]*(PASSWORD|SECRET|TOKEN|PRIVATE_KEY|API_KEY|ACCESS_KEY)[A-Z0-9_]*"[[:space:]]*:[[:space:]]*)"[^"]*"/\1"***REDACTED***"/g' \
     -e 's/("(ME_CONFIG_MONGODB_URL|DATABASE_URL)"[[:space:]]*:[[:space:]]*)"[^"]*"/\1"***REDACTED***"/g'
+}
+
+_redact_support_text() {
+  _redact_effective_config | sed -E \
+    -e 's/((password|secret|token|api[_-]?key|access[_-]?key)[=:][[:space:]]*)[^[:space:]]+/\1***REDACTED***/Ig'
 }
 
 _env_key_list() {

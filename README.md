@@ -68,6 +68,7 @@ lds help
 lds up
 lds down
 lds restart
+lds restart nginx       # restart only selected service(s)
 lds status
 lds logs [service]
 lds rebuild [all|service...]
@@ -85,9 +86,17 @@ lds config show --json
 lds config show --raw       # explicitly shows secret-bearing effective config
 lds config env-used
 lds config validate
+
+lds support trace project.localhost
+lds support bundle --redact
+
+lds clean --yes                    # LocalDevStack-scoped cleanup
+lds clean --yes --volumes          # also remove unused LocalDevStack volumes
+lds clean --global --yes           # explicit host-wide Docker prune
 ```
 
-`lds config show` is **redacted by default**.
+`lds config show` is **redacted by default**. Shareable support bundles are also
+redacted by default; `--full` is intentionally raw and may contain secrets.
 
 ## Runtime selection
 
@@ -149,6 +158,10 @@ built-in fallback
 
 LocalDevStack never shell-sources `docker/.env` as executable code.
 
+Re-running `lds setup profile` replaces the catalog-managed service selection
+(database/cache/search/AI profiles) while preserving generated domain/runtime
+profiles.
+
 ## Optional local AI
 
 Enable the `ai` profile from the profile setup flow, then choose the runtime mode:
@@ -203,7 +216,7 @@ Important named volumes include:
 - `EmailStore`
 - `LLMModels`
 
-Host-owned configuration remains under `configuration/`, including PHP overrides, scheduler files, SOPS data, optional SSH material, and generated Compose fragments.
+Host-owned configuration remains under `configuration/`, including PHP overrides, scheduler files, SOPS data, optional SSH material, and generated Compose fragments. Generated Nginx/Apache vhosts remain Docker-managed state in `NginxHosts`/`ApacheHosts`; `lds domain ls`, tracing, and support bundles inspect those persisted volumes through the control plane.
 
 `server-tools` and `runner` intentionally mount `/var/run/docker.sock`. That socket is equivalent to powerful host Docker control and is limited to those trusted control-plane components. Ordinary databases/admin clients and `llm-sm` do not receive it.
 

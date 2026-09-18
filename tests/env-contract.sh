@@ -61,3 +61,36 @@ if grep -R -Fq 'dc_build --no-cache' "$ROOT/lds" "$ROOT/lib"; then
 fi
 assert_file_contains "$ROOT/lib/services.sh" 'dc_build --pull "$svc"'
 pass "runtime rebuilds preserve cache while refreshing selected bases"
+
+
+# Profile setup replaces catalog-managed service profiles while preserving
+# generated runtime/domain profiles.
+profile_tmp="$(mktemp -d)"
+(
+  set -euo pipefail
+  CFG="$ROOT/docker"
+  ENV_DOCKER="$profile_tmp/docker.env"
+  CYAN="" NC="" BLUE="" YELLOW="" GREEN=""
+  die() { printf 'die: %s\n' "$*" >&2; exit 1; }
+  dotenv_value() {
+    local file="$1" key="$2" line
+    line="$(grep -E "^${key}=" "$file" 2>/dev/null | tail -n1 || true)"
+    [[ -n "$line" ]] || return 1
+    printf '%s' "${line#*=}"
+  }
+  # shellcheck source=lib/env.sh
+  source "$ROOT/lib/env.sh"
+  # shellcheck source=lib/profiles.sh
+  source "$ROOT/lib/profiles.sh"
+  printf '%s\n' 'COMPOSE_PROFILES=mysql,redis,ai,apache,php84' >"$ENV_DOCKER"
+  PENDING_PROFILES=(postgresql)
+  flush_profiles
+  actual="$(grep '^COMPOSE_PROFILES=' "$ENV_DOCKER" | tail -n1)"
+  [[ "$actual" == 'COMPOSE_PROFILES=postgresql,apache,php84' ]] ||
+    fail "profile reselection drifted: $actual"
+)
+rm -rf "$profile_tmp"
+pass "profile setup replaces managed selections and preserves generated profiles"
+
+assert_file_contains "$ROOT/lib/compose.sh" 'compose_control_value COMPOSE_PROJECT_NAME LocalDevStack'
+pass "CLI project identity follows the Compose project contract"

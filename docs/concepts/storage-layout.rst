@@ -37,7 +37,9 @@ LLMModels
    Ollama/local-model persistence when the ai profile is enabled.
 
 Named volumes are intentionally not renamed during this integration release so existing
-developer data can survive upgrades.
+developer data can survive upgrades. Domain listing, support traces, and support bundles
+inspect generated Nginx/Apache vhost state through these named volumes instead of stale
+host-side vhost paths.
 
 Host Configuration
 ------------------

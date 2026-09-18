@@ -527,7 +527,7 @@ cmd_stack() {
 
   http) cmd_http "$@" ;;
   *)
-    die "stack <up|down|restart|status|ps|logs|exec|events|clean|config|http>"
+    die "stack <up|down|restart|status|ps|logs|exec|events|clean|config|diff|http>"
     ;;
   esac
 }
@@ -555,6 +555,7 @@ cmd_support() {
   open) cmd_open "$@" ;;
   bundle) cmd_bundle "$@" ;;
   notify) cmd_notify "$@" ;;
+  trace) cmd_support_trace "$@" ;;
   ui) cmd_ui "$@" ;;
   *)
     die "support <open|bundle|notify|ui|trace>"
@@ -607,11 +608,19 @@ cmd_bundle() {
     echo "mode=$mode"
   } >"$tmp/meta.txt"
 
-  # compose config (effective)
-  {
-    echo "# docker compose config"
-    docker_compose config 2>&1 || true
-  } >"$tmp/compose.config.txt"
+  # compose config (effective). Redacted bundles must never contain interpolated
+  # secrets from docker/.env.
+  if [[ "$mode" == "redact" ]]; then
+    {
+      echo "# docker compose config"
+      docker_compose config 2>&1 || true
+    } | _redact_support_text >"$tmp/compose.config.txt"
+  else
+    {
+      echo "# docker compose config"
+      docker_compose config 2>&1 || true
+    } >"$tmp/compose.config.txt"
+  fi
 
   # ps + networks
   docker_compose ps >"$tmp/compose.ps.txt" 2>&1 || true
@@ -626,13 +635,22 @@ cmd_bundle() {
       >"$tmp/docker.inspect.json" 2>/dev/null || true
   fi
 
-  # recent logs (tail)
-  docker_compose logs --no-color --tail 400 >"$tmp/compose.logs.txt" 2>&1 || true
+  # recent logs (tail). Apply best-effort secret-pattern redaction in the
+  # default shareable bundle.
+  if [[ "$mode" == "redact" ]]; then
+    docker_compose logs --no-color --tail 400 2>&1 | _redact_support_text >"$tmp/compose.logs.txt" || true
+  else
+    docker_compose logs --no-color --tail 400 >"$tmp/compose.logs.txt" 2>&1 || true
+  fi
 
-  # vhost configs
-  if [[ -d "$DIR/configuration/nginx" ]]; then
-    mkdir -p "$tmp/nginx"
-    cp -a "$DIR/configuration/nginx/." "$tmp/nginx/" 2>/dev/null || true
+  # Generated vhosts live in Docker named volumes. Capture them through the
+  # server-tools mount rather than stale host paths.
+  local tools_ctr
+  tools_ctr="$(_project_tools_container_running || true)"
+  if [[ -n "$tools_ctr" ]]; then
+    mkdir -p "$tmp/vhosts/nginx" "$tmp/vhosts/apache"
+    docker cp "$tools_ctr:/etc/share/vhosts/nginx/." "$tmp/vhosts/nginx/" >/dev/null 2>&1 || true
+    docker cp "$tools_ctr:/etc/share/vhosts/apache/." "$tmp/vhosts/apache/" >/dev/null 2>&1 || true
   fi
 
   # env files (redacted best-effort)
@@ -652,11 +670,16 @@ cmd_bundle() {
     fi
   fi
 
-  # tools-side quick diagnostics (inside network)
-  {
-    echo "# ip r / ip a / ss"
-    _tools_exec "ip r; echo; ip a; echo; ss -tulpen 2>/dev/null || true"
-  } >"$tmp/tools.net.txt" 2>&1 || true
+  # tools-side quick diagnostics (inside network). A support bundle remains
+  # usable even when server-tools itself is down.
+  if [[ -n "$tools_ctr" ]]; then
+    {
+      echo "# ip r / ip a / ss"
+      docker exec -i "$tools_ctr" sh -lc 'ip r; echo; ip a; echo; ss -tulpen 2>/dev/null || true'
+    } >"$tmp/tools.net.txt" 2>&1 || true
+  else
+    printf '%s\n' "server-tools is not running; in-container network diagnostics unavailable." >"$tmp/tools.net.txt"
+  fi
 
   # pack
   (cd "$tmp" && zip -qr "$out" .) || die "Failed to write bundle: $out"
@@ -679,7 +702,7 @@ cmd_help() {
 - `lds stack logs [svc] [--follow] [--since <dur>] [--grep <pattern>]`  *(alias: `logs`)*
 - `lds stack exec <svc> [cmd…]`  *(alias: `exec`)*
 - `lds stack events [--since <dur>]`  *(alias: `events`)*
-- `lds stack clean --yes [--volumes]`  *(alias: `clean`)*
+- `lds stack clean --yes [--volumes] [--global]`  *(alias: `clean`; scoped by default)*
 - `lds stack diff [--config] [--json]`  *(shows desired vs running images)*
 
 
@@ -767,7 +790,7 @@ ${CYAN}Stack (compose):${NC}
   down|stop                        Alias of: stack down
   restart|reboot                   Alias of: stack restart
   status|ps|logs|exec|events       Alias of: stack <...>
-  clean                            Alias of: stack <...>
+  clean --yes [--volumes] [--global]  Alias of: stack clean (scoped by default)
 
 ${CYAN}Domain (vhosts + routing):${NC}
   domain add|rm|ls
