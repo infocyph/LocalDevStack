@@ -688,49 +688,67 @@ cmd_bundle() {
 }
 
 cmd_help() {
-
   if [[ "${1:-}" == "--markdown" ]]; then
     cat <<'MD'
 # LocalDevStack (lds) — Command Reference
 
-## Stack (compose)
-- `lds stack up`  *(aliases: `up`)*
-- `lds stack start`  *(aliases: `start`)*
-- `lds stack down [--volumes --yes]`  *(aliases: `down`, `stop`)*
-- `lds stack restart [svc]`  *(aliases: `restart`, `reboot`)*
-- `lds stack status [status-args…]`  *(alias: `status`; forwards args to tools `status`)*
-- `lds stack ps`  *(alias: `ps`)*
-- `lds stack logs [svc] [--follow] [--since <dur>] [--grep <pattern>]`  *(alias: `logs`)*
-- `lds stack exec <svc> [cmd…]`  *(alias: `exec`)*
-- `lds stack events [--since <dur>]`  *(alias: `events`)*
-- `lds stack clean --yes [--volumes] [--global]`  *(alias: `clean`; scoped by default)*
-- `lds stack diff [--config] [--json]`  *(shows desired vs running images)*
+## Global options
+- `-v`, `--verbose`
+- `-q`, `--quiet`
+- `--reload-extras`
+- `-h`, `--help`
 
+## Stack
+- `lds stack up` *(alias: `up`)*
+- `lds stack start` *(alias: `start`)*
+- `lds stack down [--volumes --yes]` *(aliases: `down`, `stop`)*
+- `lds stack restart [service...]` *(aliases: `restart`, `reboot`)*
+- `lds stack status [args...]` *(alias: `status`)*
+- `lds stack ps` *(alias: `ps`)*
+- `lds stack logs [service] [--follow] [--since <dur>] [--grep <pattern>]` *(alias: `logs`)*
+- `lds stack exec <service> [cmd...]` *(alias: `exec`)*
+- `lds stack events [since]` *(alias: `events`)*
+- `lds stack clean --yes [--volumes] [--global]` *(alias: `clean`; scoped by default)*
+- `lds stack diff [--config] [--json]`
+- `lds stack config <show|services|profiles|env-used|validate>`
+- `lds stack http reload`
 
-## Domain (vhost lifecycle + routing)
-- `lds domain add …`
-- `lds domain rm …`
+## Domains
+- `lds domain add`
+- `lds domain rm [args...]`
 - `lds domain ls`
+- Legacy: `lds host add|rm|list`
 
-Legacy alias: `lds host …` → same subcommands as `domain`.
+## Setup and profiles
+- `lds setup init|permissions|domain|profile|profiles`
+- `lds profiles list`
+- `lds profiles add <profile...>`
+- `lds profiles remove <profile...>`
 
-## Certificates (TLS)
+## Certificates
 - `lds cert status [domain|all]`
 - `lds cert regen [domain|all] [--yes]`
 - `lds cert diagnose <domain>`
 - `lds certificate install`
 - `lds certificate uninstall [--all]`
 
-## Diagnostics
+## Diagnostics and support
 - `lds doctor`
 - `lds diag dns <domain>`
 - `lds diag net`
 - `lds diag tcp <host> <port>`
-- `lds diag http <url>` *(alias: `sniff <url>`)*
+- `lds diag http <url> [curl-args...]`
 - `lds diag tls <domain>`
+- `lds sniff <url> [curl-args...]`
+- `lds support open <admin|mail|db|redis|mongo|kibana|ai|domain>`
+- `lds support trace <domain>`
+- `lds support bundle [--redact|--full] [output.zip]`
+- `lds support notify <watch|test> ...`
+- `lds support ui`
+- Shortcuts: `open`, `bundle`, `notify`, `ui`
 
 ## Config
-- `lds config show [--json] [--raw]` *(redacted by default)*
+- `lds config show [--json] [--raw]`
 - `lds config services`
 - `lds config profiles`
 - `lds config env-used`
@@ -738,45 +756,43 @@ Legacy alias: `lds host …` → same subcommands as `domain`.
 - `lds images`
 - `lds urls`
 
-## Support
-- `lds support open <admin|mail|db|redis|mongo|kibana|ai|domain>`
-- `lds support trace <domain>`
-- `lds support bundle [--redact|--full]`
-- `lds support notify …`
-- `lds support ui`
-
-Shortcuts: `open`, `bundle`, `notify`, `ui` map to `support …`.
-
-## Secrets (senv)
-- `lds secrets …`
-
-## Tools (project server-tools container)
+## Tools / shells / secrets
 - `lds tools sh`
 - `lds tools exec "<cmd>"`
 - `lds tools file <path>`
+- `lds cli <container> [cmd...]`
+- `lds core [domain|container]`
+- `lds secrets <senv-args...>`
 
-## AI
-- `lds ai status|ask|explain|troubleshoot|review|repo-review|graphify …`
-- `lds llm models|ps|show|pull|rm|unload|run|ask|chat|prompt|code|review|json|ai-commit …`
-- `lds llm runtime <cpu|nvidia|amd>`
+## AI consumer
+- `lds ai status|ask|explain|troubleshoot|review|repo-review|graphify ...`
+
+## LLM provider
+- `lds llm models|ps|show|pull|rm|unload|run|ask|chat|prompt|code|review|json|ai-commit|ollama|api|version ...`
+- `lds llm runtime [cpu|nvidia|amd]`
 - `lds llm host-port <status|on|off>`
 
-## Setup
-- `lds setup init|permissions|domain|profiles`
+## Rebuild
+- `lds rebuild`
+- `lds rebuild all`
+- `lds rebuild <service...>`
 
-## Runner (ad‑hoc Dockerfile runner)
-- `lds run` *(default: build+start only)* / `lds run shell` *(build+start+enter)* / `lds run *` *(same as default)* (+ `ps|logs|stop|rm|open` and flags: `--publish|-p`, `--no-keepalive`, `--mount`, `--sock`, `--host-os`, `--tag`, `--name`)
+## Ad-hoc Dockerfile runner
+- `lds run`
+- `lds run shell|ps|logs|stop|rm|open`
+- flags: `--name`, `--tag`, `--no-build`, `--no-keepalive`, `--sock`, `--host-os`, `--publish|-p`, `--mount`, `--port`, `--path`, `--http`, `--https`
 
-## Other
-- `lds rebuild [all|<svc…>]`
-- `lds core [domain]`
+## Client/runtime wrappers
+- PHP/Node: `php`, `composer`, `node`, `npm`, `npx`
+- PostgreSQL: `pg`, `psql`, `pg_dump`, `pg_restore`
+- MySQL: `my`, `mysql`, `mysqldump`
+- MariaDB: `maria`, `mariadb`, `mariadb-dump`
+- Redis: `redis`, `redis-cli`
+- MongoDB: `mongo`, `mongodb`, `mongosh`, `mongoimport`, `mongoexport`
+- Elasticsearch: `es`, `elastic`, `elasticsearch`
 
-## Short client wrappers
-- `lds php|composer|node|npm|npx …`
-- `lds my|mysql|mysqldump …`
-- `lds maria|mariadb|mariadb-dump …`
-- `lds pg|psql|pg_dump|pg_restore …`
-- `lds redis|redis-cli …`
+## Deprecated
+- `lds vpn-fix` — fixed-subnet manipulation is no longer required.
 MD
     return 0
   fi
@@ -784,68 +800,69 @@ MD
   cat <<EOF
 ${BOLD}LocalDevStack (lds)${NC}
 
-${CYAN}Stack (compose):${NC}
-  stack up|start|down|restart|status|ps|logs|exec|events|clean|config|diff
-  up                               Alias of: stack up
-  start                            Alias of: stack start
-  down|stop                        Alias of: stack down
-  restart|reboot                   Alias of: stack restart
-  status|ps|logs|exec|events       Alias of: stack <...>
-  clean --yes [--volumes] [--global]  Alias of: stack clean (scoped by default)
+${CYAN}Global:${NC}
+  -v|--verbose   -q|--quiet   --reload-extras   -h|--help
 
-${CYAN}Domain (vhosts + routing):${NC}
+${CYAN}Stack:${NC}
+  stack up|start|down|restart|status|ps|logs|exec|events|clean|config|diff|http
+  up|start|down|stop|restart|reboot|status|ps|logs|exec|events
+  clean --yes [--volumes] [--global]   (LocalDevStack-scoped unless --global)
+
+${CYAN}Domains:${NC}
   domain add|rm|ls
-  host add|rm|list                 Legacy alias of: domain <...>
+  host add|rm|list                     Legacy aliases
+  core [domain|container]
+  cli <container> [cmd...]
 
-${CYAN}Certificates (TLS):${NC}
+${CYAN}Setup / Profiles:${NC}
+  setup init|permissions|domain|profile|profiles
+  profiles list|add|remove
+
+${CYAN}Certificates:${NC}
   cert status|regen|diagnose
   certificate install|uninstall [--all]
 
-${CYAN}Diagnostics:${NC}
+${CYAN}Diagnostics / Support:${NC}
   doctor
   diag dns|net|tcp|http|tls
-  sniff <url>                      Alias of: diag http <url>
+  sniff <url>
+  support open|trace|bundle|notify|ui
+  open|bundle|notify|ui                 Shortcuts
 
 ${CYAN}Config:${NC}
   config show|services|profiles|env-used|validate
   images
   urls
 
-${CYAN}Support:${NC}
-  support open <admin|mail|db|redis|mongo|kibana|ai|domain>
-  support trace <domain>
-  support bundle [--redact|--full]
-  support notify ...
-  support ui
-  open|bundle|notify|ui             Shortcuts → support <...>
-
-${CYAN}Secrets:${NC}
-  secrets <senv-args...>
-
-${CYAN}Tools (project server-tools container):${NC}
+${CYAN}Tools / Secrets:${NC}
   tools sh|exec|file
+  secrets <senv-args...>
 
 ${CYAN}AI:${NC}
   ai status|ask|explain|troubleshoot|review|repo-review|graphify
-  llm models|ps|show|pull|rm|unload|run|ask|chat|prompt|code|review|json|ai-commit
-  llm runtime <cpu|nvidia|amd>
+  llm models|ps|show|pull|rm|unload|run|ask|chat|prompt|code|review|json|ai-commit|ollama|api|version
+  llm runtime [cpu|nvidia|amd]
   llm host-port <status|on|off>
 
-${CYAN}Setup:${NC}
-  setup init|permissions|domain|profiles
+${CYAN}Maintenance:${NC}
+  rebuild [all|<service...>]
+  run [shell|ps|logs|stop|rm|open] [runner flags...]
 
-${CYAN}Runner (ad-hoc Dockerfile runner):${NC}
-  run [ps|logs|stop|rm|open] [--publish|-p A:B] [--no-keepalive] [--mount HOST[:CONT]] [--sock] [--host-os VALUE]
-
-${CYAN}Other:${NC}
-  rebuild [all|<svc…>]
-  core [domain]
+${CYAN}Wrappers:${NC}
+  php|composer|node|npm|npx
+  pg|psql|pg_dump|pg_restore
+  my|mysql|mysqldump
+  maria|mariadb|mariadb-dump
+  redis|redis-cli
+  mongo|mongodb|mongosh|mongoimport|mongoexport
+  es|elastic|elasticsearch
 
 ${CYAN}Help:${NC}
-  help [--markdown]
-
+  help
+  help --markdown
 EOF
 }
+
 
 ###############################################################################
 # 7. MAIN

@@ -1,37 +1,80 @@
 Architecture
 ============
 
-LocalDevStack is split into small, purpose-specific layers.
+LocalDevStack separates host orchestration, trusted control-plane duties, web routing,
+application runtimes, persistent service state, and optional local AI.
 
-Core Components
----------------
+Host Orchestration
+------------------
 
-lds / lds.bat
-   Host-side orchestrator for setup, profiles, Compose, diagnostics, runtime rebuilds,
-   domains, TLS, and convenience commands.
+``lds`` / ``lds.bat``
+   Host-side orchestration for setup, profiles, Compose, diagnostics, rebuilds, domains,
+   TLS installation, support tooling, and convenience wrappers.
 
-Nginx
-   Front door for local HTTP/HTTPS traffic. It routes PHP-FPM, optional Apache,
-   Node applications, admin UIs, Mailpit, and llm.localhost.
+``docker/release.env``
+   Tracked release-owned defaults such as infrastructure image aliases.
 
-Apache
-   Optional HTTP backend for projects that explicitly choose the Apache path.
+``docker/.env``
+   User-owned LocalDevStack configuration.
 
-PHP / Node runtimes
-   Locally built, version-specific runtime images. The domain wizard preserves the
-   selected PHP/Node version and uses Alpine variants.
+``configuration/compose/``
+   Generated runtime Compose fragments discovered and merged into the effective stack.
 
-Tools
-   Trusted control plane for vhost generation, certificates, admin UI, secrets,
-   Git helpers, monitoring, and AI-consumer commands. Tools control-plane state is
-   persisted separately in the ToolsState named volume.
+Core Services
+-------------
 
-Runner
-   Background execution layer for Supervisor, cron, and log rotation.
+``server-tools``
+   Trusted control plane. Tools owns vhost generation, certificate generation, durable
+   domain/runtime metadata, admin UI behavior, secrets helpers, Git/dev utilities,
+   monitoring, and AI-consumer commands.
 
-llm-sm
-   Optional local AI provider. It is enabled only through the ai profile and is
-   separate from Tools.
+``runner``
+   Background execution layer for Supervisor, cron definitions, and log rotation.
+
+``mailpit``
+   Persistent local mail capture with LocalDevStack TLS material.
+
+``nginx``
+   Host-facing HTTP/HTTPS front door. Ports 80/443 are published here.
+
+``apache``
+   Always-available alternate HTTP backend. Individual domains decide whether to route
+   through Apache; the container remains part of the core stack so CLI and Admin Panel
+   domain creation retain the same capabilities.
+
+Application Runtimes
+--------------------
+
+PHP and Node runtimes are generated per selected version. The domain wizard preserves
+the user's explicit version choice.
+
+Generated image identities are::
+
+   localdevstack-php:<selected-version>
+   localdevstack-node:<selected-version>
+
+Both runtime families use Alpine variants. Scriptomatic supplies common runtime bootstrap
+behavior and installs Toolset according to its own current contract.
+
+Optional Data Services
+----------------------
+
+Catalog-managed profiles currently include::
+
+   postgresql
+   mysql
+   mariadb
+   mongodb
+   redis
+   elasticsearch
+   ai
+
+Related admin clients are enabled through the same profiles where applicable:
+CloudBeaver, RedisInsight, Mongo Express, and Kibana.
+
+An advanced ``filebeat`` profile exists in Compose for Elastic log ingestion. It is not
+part of the normal guided catalog and should be enabled deliberately alongside
+Elasticsearch.
 
 Networking
 ----------
@@ -42,10 +85,10 @@ LocalDevStack keeps three logical networks::
    Backend
    DataStore
 
-Docker assigns their address ranges dynamically. Core services do not depend on
-hard-coded 172.28/29/30 addresses.
+Docker assigns their address ranges dynamically. Core services do not rely on fixed
+private subnet addresses.
 
-Service-to-service communication uses Docker DNS names such as::
+Service-to-service traffic uses Docker DNS names such as::
 
    server-tools
    runner
@@ -60,49 +103,103 @@ Service-to-service communication uses Docker DNS names such as::
    elasticsearch
    llm-sm
 
-The legacy lds vpn-fix workflow is deprecated because LocalDevStack no longer owns
-fixed private subnets.
+The historical ``lds vpn-fix`` command remains only as a deprecated compatibility
+message because LocalDevStack no longer owns fixed bridge subnets.
 
-Runtime Flow
-------------
+Legacy Network Migration
+------------------------
 
-A normal web-domain flow is:
+``lds up`` and ``lds start`` call the legacy-network migration guard before starting the
+stack.
 
-1. lds setup domain delegates domain/runtime generation to Tools.
-2. Tools writes HTTP vhosts into persistent named volumes.
-3. Tools writes runtime Compose fragments under configuration/compose/.
-4. Nginx routes by Docker service name or PHP-FPM socket.
-5. Selected PHP/Node runtime images are built only for the chosen versions.
+The migration is deliberately conservative:
 
-For optional AI:
+1. only the known historical network names are considered;
+2. the expected historical subnet must match;
+3. ownership labels must prove the network belongs to LocalDevStack;
+4. attached containers must also belong to the effective Compose project;
+5. Compose is brought down without ``-v``;
+6. only proven legacy networks are removed.
 
-1. the ai profile starts llm-sm;
-2. Tools consumes http://llm-sm:11434 internally;
-3. Nginx exposes https://llm.localhost;
-4. lds ai delegates operational AI to Tools;
-5. lds llm delegates provider/model management to llm-sm.
+Persistent named volumes are not removed by this migration.
+
+Domain Flow
+-----------
+
+A normal domain flow is:
+
+1. ``lds setup domain`` delegates domain/runtime generation to Tools;
+2. Tools writes Nginx/Apache vhosts into persistent named volumes;
+3. Tools writes runtime Compose fragments under ``configuration/compose/``;
+4. generated runtime/server profiles are updated;
+5. LocalDevStack recreates the effective stack;
+6. Nginx routes through Docker service names or PHP-FPM sockets.
+
+Removing a domain follows the corresponding Tools ``rmhost`` state and removes generated
+profiles before recreating the stack.
+
+AI Flow
+-------
+
+When the ``ai`` profile is enabled:
+
+1. ``llm-sm`` provides the Ollama runtime and persistent model store;
+2. Tools consumes ``http://llm-sm:11434`` internally;
+3. Nginx exposes ``https://llm.localhost`` to the user;
+4. ``lds ai`` delegates higher-level/operational AI to Tools;
+5. ``lds llm`` delegates model/runtime operations to the bundled ``llm-sm`` CLI.
+
+The standard CPU/NVIDIA provider and AMD/ROCm provider remain separate image variants.
+
+Project Identity
+----------------
+
+The Compose project contract defaults to ``LocalDevStack``. Label-scoped commands such
+as diagnostics, events, support bundles, and cleanup use the effective Compose project
+name instead of deriving identity from the checkout directory.
+
+An explicit ``COMPOSE_PROJECT_NAME`` override therefore remains coherent with these
+operations.
+
+Tool Proxying
+-------------
+
+Some non-privileged developer utilities can be resolved from ``server-tools`` when they
+are unavailable on the host. Host binaries win first. Docker and other host-control
+commands are never proxied.
+
+Disable proxying for a command with::
+
+   LDS_PROXY_TOOLS=0 lds <command>
 
 Trust Boundaries
 ----------------
 
-server-tools and runner intentionally receive /var/run/docker.sock because their
-supported workflows control sibling containers. Docker socket access is equivalent
-to powerful host Docker control.
+``server-tools`` and ``runner`` intentionally receive ``/var/run/docker.sock`` because
+their supported workflows control sibling containers. Docker socket access is
+equivalent to powerful host Docker control.
 
 The Docker socket is not mounted into:
 
-- llm-sm;
+- ``llm-sm``;
 - databases;
 - database admin clients;
-- Nginx/Apache;
-- ordinary runtime services.
+- Nginx or Apache;
+- ordinary generated runtimes.
 
-llm-sm also receives no project/repository mount by default. AI output is not
+The separate ad-hoc ``lds run --sock`` option is an explicit opt-in and should be used
+only with trusted Dockerfiles/code.
+
+``llm-sm`` also receives no project/repository mount by default. AI output is not
 automatically executed as shell, SQL, or code.
 
 Persistence
 -----------
 
-Runtime-generated vhosts, certificate material, databases, Mailpit state, runtime
-sockets/pools, and AI models use named volumes. Host-editable/generated configuration,
-logs, SOPS state, optional SSH material, and public TLS exports remain under the repository.
+Runtime-generated vhosts, certificate material, databases, Mailpit data, PHP-FPM state,
+Tools control state, and AI models use named Docker volumes.
+
+Host-editable/generated configuration, logs, SOPS/Age state, optional SSH material, and
+public TLS exports remain under the repository.
+
+See :doc:`storage-layout` for ownership details.

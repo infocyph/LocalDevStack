@@ -1,29 +1,56 @@
 # LocalDevStack
 
-**Docker-based XAMPP alternative for PHP and Node.js local development.**
+**A Docker-based XAMPP alternative for modern PHP and Node.js local development.**
 
-LocalDevStack gives you local domains, trusted HTTPS, selectable PHP/Node runtimes, databases and admin UIs, Mailpit, background jobs, and optional local AI behind one `lds` CLI.
+LocalDevStack provides local domains, trusted HTTPS, selectable PHP and Node runtimes, databases and admin UIs, Mailpit, background workers, developer utilities, diagnostics, and optional local AI behind one `lds` command.
 
-## What you get
+It is designed for **trusted local development infrastructure**. It is not a production deployment stack.
 
-- Nginx as the front door on ports 80/443, with optional Apache behind it.
-- Interactive PHP and Node runtime selection per domain.
-- PostgreSQL, MySQL, MariaDB, MongoDB, Redis, and Elasticsearch profiles.
-- CloudBeaver, RedisInsight, Mongo Express, and Kibana where applicable.
-- Persistent Mailpit with local SMTP TLS.
-- Runner-based cron, Supervisor, and log rotation.
-- Optional local AI via `llm-sm`, available internally at `http://llm-sm:11434` and through `https://llm.localhost`.
-- Dynamic Docker networking through service DNS; no fixed `172.28/29/30` addresses.
+## Highlights
 
-LocalDevStack is for **trusted local development infrastructure**, not production deployment.
+- Nginx is the local HTTP/HTTPS front door on ports 80/443.
+- Apache is always available as an alternate HTTP backend for domains that need it.
+- PHP and Node runtimes are selected per domain and built as version-specific Alpine images.
+- PostgreSQL, MySQL, MariaDB, MongoDB, Redis, and Elasticsearch are profile-driven.
+- CloudBeaver, RedisInsight, Mongo Express, and Kibana are enabled with their related profiles.
+- Mailpit is part of the core stack and persists captured mail.
+- Runner provides cron, Supervisor, and log-rotation support.
+- Tools owns domains, certificates, the admin UI, developer helpers, secrets integration, diagnostics, monitoring, and AI-consumer features.
+- Optional `llm-sm` provides a small local Ollama runtime with persistent models.
+- Dynamic Docker networking through service DNS removes fixed subnet dependencies.
+- Linux, Windows/Git Bash, WSL, and Docker Desktop workflows are supported by the host CLI.
+
+## Architecture at a glance
+
+```text
+Host
+ └─ lds / lds.bat
+      │
+      ├─ Docker Compose
+      │    ├─ server-tools
+      │    ├─ runner
+      │    ├─ mailpit
+      │    ├─ nginx
+      │    ├─ apache
+      │    ├─ optional databases/admin clients
+      │    ├─ generated PHP/Node runtimes
+      │    └─ optional llm-sm
+      │
+      ├─ configuration/
+      └─ logs/
+```
+
+LocalDevStack uses three logical Docker networks: `Frontend`, `Backend`, and `DataStore`. Docker assigns their address ranges dynamically. Internal communication uses service names such as `nginx`, `postgres`, `redis`, `server-tools`, and `llm-sm`.
 
 ## Prerequisites
 
 Install Docker first:
 
-- Docker Engine is preferred on Linux.
-- Docker Desktop is supported on Windows/macOS and can also be used on Linux.
-- Windows CLI access uses `lds.bat` + Git Bash.
+- **Linux:** Docker Engine is preferred; Docker Desktop is also usable.
+- **Windows:** Docker Desktop plus Git Bash. `lds.bat` bridges into the Bash CLI.
+- **macOS:** Docker Desktop.
+
+Useful host tools such as `jq`, `yq`, `rg`, `fd`, `tree`, and `shellcheck` can be proxied through the running `server-tools` container when they are not installed on the host. Docker itself always remains a host requirement.
 
 ## Recommended layout
 
@@ -36,7 +63,7 @@ project-root/
 └─ LocalDevStack/
 ```
 
-Set `PROJECT_DIR` in `docker/.env` when your project directory lives elsewhere.
+The default application bind mount is the sibling `application/` directory. Set `PROJECT_DIR` in `docker/.env` when your projects live elsewhere.
 
 ## Quick start
 
@@ -45,109 +72,112 @@ git clone https://github.com/infocyph/LocalDevStack.git
 cd LocalDevStack
 
 chmod +x ./lds 2>/dev/null || true
-sudo ./lds setup permissions   # Linux/macOS
+sudo ./lds setup permissions      # Linux/macOS
 ./lds setup init
 ./lds setup profile
 ./lds up
+```
+
+The first `up` starts the control plane and web stack. Then create a domain:
+
+```bash
 ./lds setup domain
 ```
 
-On Windows, run the equivalent commands through `lds.bat` or Git Bash. The permissions command configures the wrapper path and does not apply Unix chmod logic.
-
-Install the generated LocalDevStack root CA when you want browser-trusted HTTPS:
+For browser-trusted HTTPS, install the generated root CA:
 
 ```bash
-sudo lds certificate install
+sudo ./lds certificate install    # Linux
 ```
 
-## Common commands
+On Windows, use `lds.bat` or Git Bash. Certificate installation targets the current user's Windows root store and does not require the Unix `sudo` path.
+
+Run these checks after setup:
 
 ```bash
-lds help
-
-lds up
-lds down
-lds restart
-lds restart nginx       # restart only selected service(s)
-lds status
-lds logs [service]
-lds rebuild [all|service...]
-
-lds setup profile
-lds setup domain
-lds profiles list
-
-lds urls
-lds images
 lds doctor
-
-lds config show
-lds config show --json
-lds config show --raw       # explicitly shows secret-bearing effective config
-lds config env-used
+lds urls
 lds config validate
-
-lds support trace project.localhost
-lds support bundle --redact
-
-lds clean --yes                    # LocalDevStack-scoped cleanup
-lds clean --yes --volumes          # also remove unused LocalDevStack volumes
-lds clean --global --yes           # explicit host-wide Docker prune
 ```
 
-`lds config show` is **redacted by default**. Shareable support bundles are also
-redacted by default; `--full` is intentionally raw and may contain secrets.
+## Built-in endpoints
 
-## Runtime selection
+The exact optional endpoints shown by `lds urls` depend on enabled profiles.
 
-The domain wizard keeps the runtime selector as the source of truth:
+| Purpose | URL |
+| --- | --- |
+| Tools/Admin | `https://admin.localhost` |
+| Mailpit | `https://webmail.localhost` |
+| CloudBeaver | `https://db.localhost` |
+| RedisInsight | `https://ri.localhost` |
+| Mongo Express | `https://me.localhost` |
+| Kibana | `https://kibana.localhost` |
+| Local AI | `https://llm.localhost` |
 
-- PHP: select the PHP version for that domain.
-- Node: select a Node version/tag for that domain.
+Use `lds open admin`, `lds open mail`, `lds open db`, `lds open redis`, `lds open mongo`, `lds open kibana`, or `lds open ai` to open a known endpoint.
 
-Generated local images remain version-specific:
+## Profiles
+
+The guided profile selector is:
+
+```bash
+lds setup profile
+```
+
+Catalog-managed optional profiles are `postgresql`, `mysql`, `mariadb`, `mongodb`, `redis`, `elasticsearch`, and `ai`.
+
+Re-running the wizard **replaces the catalog-managed selection** while preserving generated domain/runtime profiles.
+
+Manual profile operations remain available:
+
+```bash
+lds profiles list
+lds profiles add redis
+lds profiles remove redis
+```
+
+## PHP and Node runtimes
+
+The domain wizard keeps runtime version choice in the user's hands. A selected version becomes a version-specific local image:
 
 ```text
 localdevstack-php:<selected-version>
 localdevstack-node:<selected-version>
 ```
 
-Selected PHP and Node images use Alpine variants.
+Both runtime families use Alpine variants. Runtime builds consume Scriptomatic from `main` by default. For reproducible debugging/release work, `SCRIPTOMATIC_REF` also accepts a full 40-character commit SHA.
 
-The local build path consumes Scriptomatic from `main` by default. Advanced users/releases may set `SCRIPTOMATIC_REF` to a full 40-character commit SHA.
+Rebuild selected services with normal Docker cache preserved:
+
+```bash
+lds rebuild php84
+lds rebuild nginx
+lds rebuild all
+```
 
 ## Service image policy
 
-Default image selection follows this rule:
+Release-owned defaults live in `docker/release.env`.
 
-> Prefer the moving Alpine variant when that image family publishes a suitable one; otherwise use its normal moving latest tag.
+> Prefer the moving Alpine variant when the image family provides a suitable Alpine variant; otherwise use the normal moving latest tag.
 
 Examples:
 
 - PostgreSQL: `postgres:alpine`
-- Tools / Runner / Nginx / Apache: their published `:latest` images (already built on their intended Alpine bases)
-- LLM: `infocyph/llm-sm:latest`
-- AMD LLM: `infocyph/llm-sm:amd-latest`
+- Tools / Runner / Nginx / Apache: published `:latest`
+- MySQL / MariaDB / MongoDB / Redis: their supported moving defaults
+- local AI: `infocyph/llm-sm:latest`
+- AMD local AI: `infocyph/llm-sm:amd-latest`
 
-Elasticsearch, Kibana, and Filebeat are kept on one aligned version because those image families do not provide a supported moving `latest` contract for this stack.
+Elasticsearch, Kibana, and Filebeat stay on one aligned Elastic version.
 
-Run `lds images` to see the effective image set after release, user, and shell overrides.
+Inspect the effective defaults with `lds images`.
 
-## Profiles and environment
+## Environment ownership and precedence
 
-Tracked product defaults live in:
+Tracked release defaults live in `docker/release.env`; user LocalDevStack settings live in `docker/.env`; the repository-root `.env` remains application-facing state where applicable.
 
-```text
-docker/release.env
-```
-
-User stack settings live in:
-
-```text
-docker/.env
-```
-
-Precedence is:
+LocalDevStack control precedence is:
 
 ```text
 built-in fallback
@@ -156,15 +186,55 @@ built-in fallback
     < command-scoped shell environment
 ```
 
-LocalDevStack never shell-sources `docker/.env` as executable code.
+`docker/.env` is read as dotenv data; it is not shell-sourced as executable code.
 
-Re-running `lds setup profile` replaces the catalog-managed service selection
-(database/cache/search/AI profiles) while preserving generated domain/runtime
-profiles.
+Useful inspection commands:
+
+```bash
+lds config env-used
+lds config show
+lds config show --json
+lds config show --raw
+lds config services
+lds config profiles
+lds config validate
+```
+
+`config show` is redacted by default. `--raw` can expose credentials.
+
+## Databases and clients
+
+Applications connect through Docker DNS names, not fixed IP addresses: `postgres`, `mysql`, `mariadb`, `mongodb`, `redis`, and `elasticsearch`.
+
+Host-side wrappers forward into the appropriate LocalDevStack service:
+
+```bash
+lds pg ...
+lds psql ...
+lds my ...
+lds mysql ...
+lds maria ...
+lds mariadb ...
+lds redis-cli ...
+lds mongo ...
+lds mongosh ...
+lds es ...
+```
+
+See `docs/guides/databases-and-clients.rst` for the profile/client map.
 
 ## Optional local AI
 
-Enable the `ai` profile from the profile setup flow, then choose the runtime mode:
+Enable the `ai` profile through `lds setup profile`.
+
+```text
+Tools consumer -> http://llm-sm:11434
+User HTTPS     -> https://llm.localhost
+Default model  -> qwen2.5:3b
+Model store    -> LLMModels
+```
+
+Choose the runtime explicitly:
 
 ```bash
 lds llm runtime cpu
@@ -172,88 +242,129 @@ lds llm runtime nvidia
 lds llm runtime amd
 ```
 
-Useful commands:
+CPU/NVIDIA use `infocyph/llm-sm:latest`; AMD uses `infocyph/llm-sm:amd-latest`.
+
+Common commands:
 
 ```bash
 lds ai status
-lds ai ask "explain this error"
+lds ai ask "Explain this error"
 lds ai troubleshoot ...
+lds ai review ...
+lds ai repo-review ...
+
 lds llm models
 lds llm pull <model>
+lds llm show <model>
 lds llm chat ...
 ```
 
-Models persist in the `LLMModels` named volume.
+Direct host Ollama access is off by default. `lds llm host-port on` binds only to `127.0.0.1:11434` by default.
 
-Default access is through:
-
-```text
-https://llm.localhost
-```
-
-Direct Ollama host access is disabled by default. When explicitly enabled:
-
-```bash
-lds llm host-port on
-```
-
-it binds only to:
-
-```text
-127.0.0.1:11434
-```
-
-The LLM container does **not** receive the Docker socket or a project mount by default.
+The `llm-sm` container receives **no Docker socket and no project/repository bind mount** by default. Current published `llm-sm` images are `linux/amd64`; the rest of LocalDevStack can still run on arm64 with the AI profile disabled.
 
 ## Storage and trust boundaries
 
-Important named volumes include:
+Important named volumes include `NginxHosts`, `ApacheHosts`, `SSLKeys`, `SSLRootCA`, `FPMPools`, `FPMSocks`, `ComposerGlobal`, `GitConfig`, `ToolsState`, database/admin stores, `EmailStore`, and `LLMModels`.
 
-- `NginxHosts` / `ApacheHosts`
-- `SSLKeys` / `SSLRootCA`
-- `FPMPools` / `FPMSocks`
-- database/admin-client stores
-- `EmailStore`
-- `LLMModels`
+Generated Nginx/Apache vhosts are Docker-managed state. `lds domain ls`, support tracing, and support bundles read the persisted vhost state through the control plane.
 
-Host-owned configuration remains under `configuration/`, including PHP overrides, scheduler files, SOPS data, optional SSH material, and generated Compose fragments. Generated Nginx/Apache vhosts remain Docker-managed state in `NginxHosts`/`ApacheHosts`; `lds domain ls`, tracing, and support bundles inspect those persisted volumes through the control plane.
+`server-tools` and `runner` intentionally receive `/var/run/docker.sock`. Docker socket access is equivalent to powerful host Docker control. Ordinary databases, admin clients, Nginx/Apache, generated runtimes, and `llm-sm` do not receive it unless a user explicitly opts into a separate ad-hoc runner `--sock` flow.
 
-`server-tools` and `runner` intentionally mount `/var/run/docker.sock`. That socket is equivalent to powerful host Docker control and is limited to those trusted control-plane components. Ordinary databases/admin clients and `llm-sm` do not receive it.
+## Operations and support
 
-## Networking
-
-Core networks are still logically separated as:
-
-```text
-Frontend
-Backend
-DataStore
+```bash
+lds up
+lds down
+lds restart
+lds restart nginx
+lds status
+lds ps
+lds logs nginx --follow
+lds stack diff
 ```
 
-Docker assigns their subnets dynamically. Services communicate by Docker DNS names such as:
+A normal restart does not pull fresh images. Use `lds rebuild <service>` when you want to refresh/recreate a service.
 
-```text
-server-tools
-runner
-mailpit
-postgres
-mysql
-mariadb
-mongodb
-redis
-elasticsearch
-llm-sm
+The first `up` or `start` after upgrading from the historical fixed-network layout safely migrates proven LocalDevStack legacy networks to dynamic bridges while preserving named volumes.
+
+Support tools:
+
+```bash
+lds doctor
+lds support trace project.localhost
+lds support bundle --redact
 ```
 
-The legacy `lds vpn-fix` command is deprecated because LocalDevStack no longer owns fixed private subnets.
+Redacted support bundles are the default. `--full` is intentionally raw and can contain credentials or other sensitive material.
+
+Cleanup is scoped by default:
+
+```bash
+lds clean --yes
+lds clean --yes --volumes
+```
+
+Host-wide Docker pruning is a separate explicit action:
+
+```bash
+lds clean --global --yes
+```
+
+That global mode can remove unrelated stopped containers, unused images/networks, build cache, and optionally volumes. `lds down --volumes --yes` is also destructive and should not be used for normal upgrades.
+
+## Ad-hoc Dockerfile runner
+
+From a directory containing a Dockerfile:
+
+```bash
+lds run
+lds run shell
+lds run logs
+lds run stop
+lds run rm
+```
+
+The current directory is mounted at `/workspace`.
+
+```bash
+lds run --publish 8080:8080
+lds run --mount ./data:/data
+```
+
+`--sock` deliberately grants the ad-hoc container the host Docker socket and should be used only for trusted images/code.
+
+## Notifications
+
+```bash
+lds notify watch
+lds notify test "LocalDevStack" "Notifications work"
+```
+
+Linux/WSLg uses `notify-send` when available. Windows/Git Bash and compatible WSL environments use PowerShell toast support. Other hosts fall back to terminal output.
+
+## Command reference
+
+```bash
+lds help
+lds help --markdown
+```
+
+The complete reference is maintained in `docs/reference/cli.rst`.
 
 ## Documentation
 
 - Full docs: https://docs.infocyph.com/projects/LocalDevStack
-- Quick reference: `lds help`
-- Local AI: `docs/guides/local-ai.rst`
+- Getting started: `docs/quickstart.rst`
+- Architecture: `docs/concepts/architecture.rst`
 - Profiles/env: `docs/concepts/profiles-and-env.rst`
 - Storage: `docs/concepts/storage-layout.rst`
+- Domain setup: `docs/guides/domain-setup.rst`
+- Databases/clients: `docs/guides/databases-and-clients.rst`
+- Local AI: `docs/guides/local-ai.rst`
+- Operations/support: `docs/guides/operations-and-support.rst`
+- Ad-hoc runner: `docs/guides/ad-hoc-runner.rst`
+- CLI reference: `docs/reference/cli.rst`
 
 ## License
 

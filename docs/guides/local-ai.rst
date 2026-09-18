@@ -1,28 +1,28 @@
 Local AI
 ========
 
-LocalDevStack can run a local Ollama-compatible provider as an optional profile. The
-provider/runtime is llm-sm; Tools remains an AI consumer and never embeds a second
-Ollama runtime.
+LocalDevStack can run a local Ollama-compatible provider as an optional profile.
+``llm-sm`` owns the provider/runtime; Tools remains the higher-level AI consumer and
+never embeds a second Ollama runtime.
 
 Enable AI
 ---------
 
-Use the guided service setup::
+Use the guided profile setup::
 
    lds setup profile
 
-Select Local AI / the ai profile.
+Select Local AI / the ``ai`` profile.
 
-The default provider contract is::
+The default consumer contract is::
 
    LDS_AI_ENABLED=auto
    LDS_AI_PROVIDER=ollama
    LDS_AI_URL=http://llm-sm:11434
    LDS_AI_MODEL=qwen2.5:3b
 
-The explicit LocalDevStack model default avoids ambiguity when several models are
-installed in the persistent Ollama store.
+The explicit model default avoids ambiguity when multiple models are installed in the
+persistent Ollama store.
 
 Runtime Modes
 -------------
@@ -33,15 +33,20 @@ Select the provider runtime explicitly::
    lds llm runtime nvidia
    lds llm runtime amd
 
-CPU and NVIDIA use the standard infocyph/llm-sm:latest image. AMD/ROCm uses
-infocyph/llm-sm:amd-latest.
+CPU and NVIDIA use ``infocyph/llm-sm:latest``. AMD/ROCm uses
+``infocyph/llm-sm:amd-latest``.
+
+NVIDIA mode adds Docker GPU access. AMD mode exposes ``/dev/kfd`` and ``/dev/dri``.
 
 LocalDevStack does not attempt unreliable automatic GPU detection.
+
+Changing runtime mode updates ``docker/.env``. Recreate/start the service afterward so
+the Compose override changes take effect.
 
 Access
 ------
 
-Container-to-container provider endpoint::
+Internal provider endpoint::
 
    http://llm-sm:11434
 
@@ -49,25 +54,28 @@ User-facing HTTPS endpoint::
 
    https://llm.localhost
 
-Nginx owns the host-facing route and preserves streaming behavior for Ollama/OpenAI-style
-API calls.
+Internal Docker consumers should use the service endpoint directly rather than routing
+through Nginx.
 
-Direct host Ollama access is disabled by default. To opt in::
+Direct host Ollama access is disabled by default. Opt in with::
 
    lds llm host-port on
 
-The direct binding is loopback-only::
+The default direct binding is loopback-only::
 
    127.0.0.1:11434
 
-Disable it again with::
+Show/disable it with::
 
+   lds llm host-port status
    lds llm host-port off
+
+The port can be changed through ``LLM_SM_PORT`` when direct host access is enabled.
 
 AI vs LLM Commands
 ------------------
 
-lds ai is for Tools-owned operational intelligence::
+``lds ai`` is for Tools-owned operational/developer intelligence::
 
    lds ai status
    lds ai ask "explain this error"
@@ -77,105 +85,113 @@ lds ai is for Tools-owned operational intelligence::
    lds ai repo-review ...
    lds ai graphify ...
 
-lds llm is for provider/model runtime management::
+``lds llm`` is for the provider/model CLI::
 
    lds llm models
    lds llm ps
    lds llm show <model>
    lds llm pull <model>
    lds llm rm <model>
+   lds llm unload <model>
    lds llm run <model>
+   lds llm ask ...
    lds llm chat ...
+   lds llm prompt ...
+   lds llm code ...
+   lds llm review ...
+   lds llm json ...
+   lds llm ai-commit ...
+   lds llm ollama ...
+   lds llm api ...
    lds llm version
 
-This separation keeps application/operational AI in Tools and model lifecycle inside
+This separation keeps application/operational AI in Tools and model/runtime behavior in
 the provider image.
 
 Model Persistence
 -----------------
 
-Ollama state persists in the LLMModels named volume mounted at /root/.ollama.
-Removing/recreating the container does not remove installed models unless the volume is
-explicitly deleted.
+Ollama state persists in the ``LLMModels`` named volume mounted at
+``/root/.ollama``.
 
-Do not use destructive docker compose down -v during normal LocalDevStack upgrades.
+Container recreation/image replacement does not delete user-pulled models while the
+volume is retained.
+
+Do not use ``lds down --volumes --yes`` or destructive volume cleanup during a normal
+upgrade.
 
 Selecting a Different Model
 ---------------------------
 
-Install the model through the provider::
+Pull a model explicitly::
 
    lds llm pull <model>
 
-Then set LDS_AI_MODEL in docker/.env to make Tools use that model by default.
-Shell environment overrides still have the highest precedence.
+Then set ``LDS_AI_MODEL`` in ``docker/.env`` if Tools should use that model by default.
+A command-scoped shell value remains the highest-precedence override.
+
+The provider CLI does not silently download a missing model for an unrelated command.
 
 Privacy and Trust Boundaries
 ----------------------------
 
-By default, llm-sm receives:
+By default, ``llm-sm`` receives:
 
 - no Docker socket;
 - no project/repository bind mount;
 - no host port;
-- only its model volume and the LocalDevStack networks needed for provider access.
+- only the model volume and LocalDevStack networks needed for provider access.
 
 Tools may send bounded/sanitized context to the local provider when the user invokes an
-AI feature. Deterministic monitoring and system checks remain the source of truth.
+AI feature. Deterministic monitoring/system checks remain the source of truth.
 
 LocalDevStack does not:
 
-- fall back silently to a cloud AI provider;
+- silently fall back to a cloud AI provider;
 - automatically execute model-generated shell commands;
 - automatically execute model-generated SQL;
 - automatically execute generated code.
 
+Repository Context
+------------------
+
+LocalDevStack intentionally does not mount the project/repository into ``llm-sm`` by
+default.
+
+Repository-aware analysis should normally use the Tools consumer layer::
+
+   lds ai review ...
+   lds ai repo-review ...
+   lds ai graphify ...
+
+For direct provider commands, file/PDF/image paths must exist inside the provider
+container. The upstream ``llm-sm`` CLI also supports stdin-based flows such as
+``ai-commit --diff-stdin`` when explicitly invoked.
+
 Graphify
 --------
 
-lds ai graphify delegates Graphify-assisted analysis to the Tools AI layer. The
-LocalDevStack AI provider remains only the model runtime; Graphify integration does not
-grant llm-sm direct repository access.
+``lds ai graphify`` delegates Graphify-assisted analysis to the Tools AI layer.
+``llm-sm`` remains only the model provider and does not gain direct repository access
+from this integration.
 
 Diagnostics
 -----------
 
-Show provider state through Tools::
+::
 
    lds ai status
-
-Check the LocalDevStack stack non-destructively::
-
+   lds llm models
    lds doctor
-
-List convenience endpoints::
-
    lds urls
-
+   lds logs llm-sm
 
 Platform Availability
 ---------------------
 
-The current llm-sm 0.03 publication is linux/amd64 only. LocalDevStack itself remains
-usable on arm64 with the ai profile disabled. Native arm64 local-AI support should only
-be advertised after the llm-sm image publishes and validates a native arm64 runtime.
+The current published ``llm-sm`` standard and AMD images are validated/published as
+``linux/amd64`` only.
 
-Direct File and Repository Context
-----------------------------------
-
-LocalDevStack intentionally does not mount the project/repository into llm-sm by default.
-
-This means normal provider/model commands work directly, including ask, chat, model
-management, API access, and stdin-based prompts. Repository-aware analysis should use
-the Tools consumer layer by default::
-
-   lds ai review ...
-   lds ai repo-review ...
-
-For direct llm-sm commands, file/PDF/image paths must exist inside the provider
-container. Git-diff based ai-commit can be used without a repository mount by piping
-the diff through stdin to the provider CLI.
-
-The upstream llm-sm image provides an optional workspace override for explicit
-repository mounts, but LocalDevStack does not enable it automatically. That preserves
-the default no-repository-ingestion trust boundary.
+LocalDevStack itself can still be used on arm64 with the ``ai`` profile disabled. Native
+arm64 local-AI support should only be advertised after the provider publishes and
+validates that platform.

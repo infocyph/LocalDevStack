@@ -1,109 +1,170 @@
 Storage Layout
 ==============
 
-LocalDevStack deliberately separates Docker-managed runtime state from host-managed
-configuration and exports.
+LocalDevStack separates Docker-managed persistent runtime state from host-managed
+configuration, exports, and logs.
 
 Named Volumes
 -------------
 
 Important named volumes include:
 
-NginxHosts / ApacheHosts
+``NginxHosts`` / ``ApacheHosts``
    Generated HTTP vhost configuration consumed by Nginx/Apache.
 
-SSLKeys / SSLRootCA
+``SSLKeys`` / ``SSLRootCA``
    Runtime certificate/key material and the mkcert CA store.
 
-FPMPools / FPMSocks
+``FPMPools`` / ``FPMSocks``
    Generated PHP-FPM pool configuration and runtime sockets.
 
-ComposerGlobal / GitConfig
-   Shared runtime state for Composer and Git integration.
+``ComposerGlobal`` / ``GitConfig``
+   Shared Composer/Git runtime state.
 
-ToolsState
-   Durable Tools control-plane state under /etc/share/state, including host-manager
-   state, profile/runtime metadata, monitor history, alert acknowledgements, and
-   other state owned by the Tools image.
+``ToolsState``
+   Durable Tools control-plane state under ``/etc/share/state``, including domain/runtime
+   metadata, monitor history, alert acknowledgements, and other Tools-owned state.
 
-Database/admin volumes
-   Persistent PostgreSQL, MySQL, MariaDB, MongoDB, Redis, Elasticsearch, Kibana,
-   RedisInsight, CloudBeaver, and Filebeat state.
+Database volumes
+   ``PostgresStore``, ``MySQLStore``, ``MariaDBStore``, ``MongoDBStore``,
+   ``RedisStore``, and ``ElasticSearchStore``.
 
-EmailStore
+Admin/observability volumes
+   ``RedisInsightStore``, ``CloudBeaverStore``, ``KibanaStore``, and ``FilebeatStore``.
+
+``EmailStore``
    Mailpit persistence.
 
-LLMModels
-   Ollama/local-model persistence when the ai profile is enabled.
+``LLMModels``
+   Ollama/local-model persistence when the ``ai`` profile is enabled.
 
-Named volumes are intentionally not renamed during this integration release so existing
-developer data can survive upgrades. Domain listing, support traces, and support bundles
-inspect generated Nginx/Apache vhost state through these named volumes instead of stale
-host-side vhost paths.
+These named volumes are intentionally stable so developer data can survive container and
+image replacement.
+
+Generated Vhost State
+---------------------
+
+Active Nginx/Apache vhosts do **not** live under host-side
+``configuration/nginx``/``configuration/apache`` directories.
+
+They are persisted in ``NginxHosts`` / ``ApacheHosts`` and are available to Tools and
+the web servers through their mounted paths.
+
+Accordingly:
+
+- ``lds domain ls`` reads persisted Nginx vhost state through ``server-tools``;
+- ``lds support trace`` reads the named-volume vhost, with the running Nginx mount as a
+  fallback;
+- support bundles copy generated Nginx/Apache vhost state through ``server-tools``.
 
 Host Configuration
 ------------------
 
-configuration/compose/
-   LocalDevStack-generated runtime Compose fragments. The CLI discovers only YAML files
-   in this directory and validates the effective Compose graph before use.
+``configuration/compose/``
+   LocalDevStack-generated/runtime Compose fragments. Only YAML files are discovered.
 
-configuration/php/
-   User-editable PHP configuration. Normal updates must not overwrite user customizations.
+``configuration/php/``
+   User-editable PHP configuration.
 
-configuration/scheduler/cron-jobs/
+``configuration/scheduler/cron-jobs/``
    Runner cron definitions.
 
-configuration/scheduler/supervisor/
+``configuration/scheduler/supervisor/``
    Runner Supervisor definitions.
 
-configuration/sops/config/, configuration/sops/global/, configuration/sops/keys/
-   SOPS/Age configuration and sensitive key material.
+``configuration/sops/config/``, ``configuration/sops/global/``,
+``configuration/sops/keys/``
+   SOPS/Age configuration, global secret data, and sensitive key material.
 
-configuration/ssh/
-   Optional SSH material mounted read-only into supported runtime/tool flows.
+``configuration/ssh/``
+   Optional SSH material mounted read-only into supported Tools/runtime flows.
 
-configuration/ssl/
-   User-facing TLS exports from Tools. The public root CA is exported here as
-   rootCA.pem. Optional password-protected mTLS user artifacts may also appear here.
+``configuration/ssl/``
+   User-facing TLS exports from Tools. The public root CA is ``rootCA.pem``. Optional
+   password-protected user mTLS artifacts may also be exported here.
 
-logs/
+``logs/``
    Host-visible service logs consumed by Runner log rotation and diagnostics.
 
 TLS Authority
 -------------
 
-Runtime TLS state is owned by the named volumes:
+Runtime TLS state is owned by:
 
-- SSLKeys for server/client certificate material;
-- SSLRootCA for the mkcert CA store.
+- ``SSLKeys`` for server/client certificate material;
+- ``SSLRootCA`` for the mkcert CA store.
 
 Tools exports the public root certificate to::
 
    configuration/ssl/rootCA.pem
 
-lds certificate install uses that current path. Older installations using
-configuration/rootCA/rootCA.pem remain readable as a migration fallback.
+``lds certificate install`` uses that current path. Older installations using::
+
+   configuration/rootCA/rootCA.pem
+
+remain readable as a migration fallback.
 
 The private CA key is not intended as a public host export.
+
+Application Mount
+-----------------
+
+``PROJECT_DIR`` controls the application bind mount. A sibling ``application/`` directory
+is the default, but absolute or relative alternatives are supported.
+
+Local AI receives no application/project bind mount by default.
+
+Docker Socket Boundary
+----------------------
+
+``server-tools`` and ``runner`` intentionally mount::
+
+   /var/run/docker.sock
+
+because their supported workflows need Docker control.
+
+Persistent databases, admin clients, Nginx/Apache, and ``llm-sm`` do not receive the
+socket by default.
+
+``lds run --sock`` is a separate explicit opt-in for an ad-hoc container.
 
 Permissions
 -----------
 
-On Unix-like hosts, lds setup permissions uses group-writable setgid directories
-for configuration/ and logs/ rather than broad world-writable 777 modes.
+On Unix-like hosts, ``lds setup permissions`` uses group-writable setgid directories for
+``configuration/`` and ``logs/`` rather than broad world-writable modes.
 
 Sensitive host directories are restricted:
 
-- configuration/ssh/ directories: 0700; files: 0600;
-- configuration/sops/keys/ directories: 0700; files: 0600.
+- ``configuration/ssh/`` directories: ``0700``; files: ``0600``;
+- ``configuration/sops/keys/`` directories: ``0700``; files: ``0600``;
+- exported P12/PFX/private-key-style files under ``configuration/ssl/``: ``0600``.
 
-Windows keeps its platform-specific wrapper/permission behavior.
+Public certificate exports remain readable.
 
-Project Mount
--------------
+Cleanup and Data Safety
+-----------------------
 
-PROJECT_DIR controls the application bind mount. A common layout is a sibling
-application/ directory, but absolute or relative alternatives are supported.
+Normal stack shutdown does not delete named volumes::
 
-Local AI receives no application/project bind mount by default.
+   lds down
+
+Explicit destructive volume removal requires confirmation::
+
+   lds down --volumes --yes
+
+Scoped cleanup is safer for routine maintenance::
+
+   lds clean --yes
+
+Adding ``--volumes`` attempts to remove LocalDevStack-labelled volumes that are not in
+use::
+
+   lds clean --yes --volumes
+
+Host-wide Docker pruning requires the explicit ``--global`` flag and may affect unrelated
+projects::
+
+   lds clean --global --yes
+
+Do not use destructive volume cleanup as part of a normal upgrade.

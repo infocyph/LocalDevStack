@@ -2,26 +2,27 @@ TLS and Certificates
 ====================
 
 LocalDevStack uses mkcert-based local TLS for development. Tools owns certificate
-generation; Nginx, Apache, Mailpit, and runtime consumers receive only the mounts needed
-by the LocalDevStack runtime contract.
+generation; the host ``lds`` CLI owns trust-store installation/removal.
 
 Runtime TLS State
 -----------------
 
 The active runtime state is stored in Docker named volumes:
 
-SSLRootCA
-   mkcert CA store exposed to trusted LocalDevStack consumers at /etc/share/rootCA.
+``SSLRootCA``
+   mkcert CA store exposed to trusted LocalDevStack consumers at
+   ``/etc/share/rootCA``.
 
-SSLKeys
-   generated server/client certificate material exposed at /etc/mkcert where needed.
+``SSLKeys``
+   Generated server/client certificate material exposed at ``/etc/mkcert`` where
+   needed.
 
-Tools automatically refreshes certificates through certify.
+Tools refreshes certificates through its ``certify`` command family.
 
 Public Host Export
 ------------------
 
-Tools exports user-facing certificate artifacts to the host-mounted directory::
+Tools exports user-facing certificate artifacts to::
 
    configuration/ssl/
 
@@ -29,88 +30,128 @@ The public root CA is::
 
    configuration/ssl/rootCA.pem
 
-lds certificate install uses this path. For upgrades, the legacy
-configuration/rootCA/rootCA.pem path remains a read fallback.
+For upgrades, the legacy path remains a read fallback::
 
-The public CA export is safe to install into the host trust store. The private CA key
-is not intended as a user-facing export.
+   configuration/rootCA/rootCA.pem
 
-Optional user mTLS export is disabled by default. When explicitly enabled in Tools,
-a password-protected user P12 is exported under configuration/ssl/.
+The public CA certificate is safe to install into the host trust store. The private CA
+key is not intended as a public export.
+
+Optional password-protected user mTLS artifacts may also be exported under
+``configuration/ssl/``.
 
 Certificate Coverage
 --------------------
 
-The generated certificate SAN set includes at least::
+The generated SAN set includes at least::
 
    localhost
    *.localhost
    127.0.0.1
    ::1
 
-Tools also discovers generated vhost/service domains. The \*.localhost entry covers
-built-in convenience endpoints such as:
+Tools can also discover generated vhost/service domains.
 
-- admin.localhost;
-- webmail.localhost;
-- db.localhost;
-- ri.localhost;
-- me.localhost;
-- kibana.localhost;
-- llm.localhost.
+The wildcard covers built-in endpoints such as:
 
-Installing the Root CA
-----------------------
+- ``admin.localhost``;
+- ``webmail.localhost``;
+- ``db.localhost``;
+- ``ri.localhost``;
+- ``me.localhost``;
+- ``kibana.localhost``;
+- ``llm.localhost``.
 
-Linux/macOS where supported::
+Install the Root CA
+-------------------
+
+Linux::
 
    sudo lds certificate install
 
-Windows through Git Bash/lds.bat uses the CurrentUser root certificate store and does
-not require the Unix sudo path.
+The installer detects common Linux families and uses their normal trust-store location/
+refresh mechanism where available:
 
-After installation, restart browsers that cache trust decisions.
+- Debian/Ubuntu-style ``update-ca-certificates``;
+- RHEL/Fedora-style ``update-ca-trust``;
+- Arch-style p11-kit/trust handling.
+
+When ``certutil`` is available, the invoking user's NSS database is also updated on
+supported Unix flows.
+
+Windows/Git Bash::
+
+   lds.bat certificate install
+
+Windows imports the CA into ``CurrentUser\\Root`` through PowerShell.
+
+macOS
+   LocalDevStack can run through Docker Desktop, but automatic macOS Keychain import is
+   not currently implemented by the host installer. Trust
+   ``configuration/ssl/rootCA.pem`` manually in Keychain when required.
+
+Restart browsers that cache trust results after changing the CA.
 
 Uninstalling
 ------------
 
-Remove the LocalDevStack trust anchor::
+Linux::
 
    sudo lds certificate uninstall
 
-Scan/remove known legacy anchor locations too::
+Scan/remove all known LocalDevStack anchor locations too::
 
    sudo lds certificate uninstall --all
 
-This removes the host trust-store entry. It does not destroy the LocalDevStack named
-certificate volumes.
+Windows/Git Bash::
 
-Mutual TLS
-----------
+   lds.bat certificate uninstall
 
-When a domain enables mutual TLS, browser/user certificate material must be imported
-separately. User-facing P12 export is intentionally opt-in and password-protected.
+The uninstall operation removes the host trust anchor. It does not delete the
+``SSLRootCA`` / ``SSLKeys`` Docker volumes.
 
-Internal Nginx-to-Apache mTLS material remains runtime state and is not the same as the
-user-facing client certificate.
+Tools Certificate Commands
+--------------------------
 
-Troubleshooting
----------------
-
-Check LocalDevStack health and TLS readiness::
-
-   lds doctor
-
-Inspect a domain TLS handshake::
-
-   lds diag tls project.localhost
-
-Regenerate/diagnose through the existing certificate commands::
+The Tools certificate workflow is exposed separately through::
 
    lds cert status
    lds cert regen all
    lds cert diagnose project.localhost
 
-If the host export is missing, ensure server-tools is running and certificate
-generation has completed. The current public export should appear at
-configuration/ssl/rootCA.pem.
+``lds certificate ...`` manages host trust; ``lds cert ...`` delegates certificate
+generation/status/diagnostics to Tools.
+
+Mutual TLS
+----------
+
+When a domain enables mutual TLS, browser/user certificate material must be imported
+separately. User-facing P12/PFX exports are intentionally opt-in and password-protected.
+
+Internal Nginx-to-Apache mTLS material remains runtime state and is not the same as a
+user-facing browser certificate.
+
+Permissions
+-----------
+
+``lds setup permissions`` keeps public CA exports readable while applying restrictive
+permissions to exported private-key-style files (including P12/PFX/key artifacts).
+
+Troubleshooting
+---------------
+
+Check TLS readiness::
+
+   lds doctor
+
+Inspect a domain handshake::
+
+   lds diag tls project.localhost
+
+Run the end-to-end trace::
+
+   lds support trace project.localhost
+
+If the public export is missing, ensure ``server-tools`` is running and certificate
+generation has completed. The current export should appear at
+``configuration/ssl/rootCA.pem``.
