@@ -1444,9 +1444,83 @@ compose_image_for_service() {
 ###############################################################################
 # 6. STACK COMMANDS (CLI)
 ###############################################################################
-cmd_up() { dc_up "$@"; }
+
+# One-time migration from the historical fixed 172.28/29/30 /24 networks.
+# Only known LocalDevStack-owned networks are touched, and named volumes are
+# never removed. New networks carry com.infocyph.network-schema=dynamic-v1.
+declare -a __LDS_LEGACY_NETWORK_NAMES=(Frontend Backend DataStore)
+
+legacy_network_expected_subnet() {
+  case "\${1:-}" in
+  Frontend) printf '%s' '172.28.0.0/24' ;;
+  Backend) printf '%s' '172.29.0.0/24' ;;
+  DataStore) printf '%s' '172.30.0.0/24' ;;
+  *) return 1 ;;
+  esac
+}
+
+migrate_legacy_networks() {
+  local network expected subnets stack_label project_label schema_label ctr ctr_project attachments
+  local -a legacy=()
+
+  for network in "\${__LDS_LEGACY_NETWORK_NAMES[@]}"; do
+    docker network inspect "$network" >/dev/null 2>&1 || continue
+
+    schema_label="$(docker network inspect -f '{{index .Labels "com.infocyph.network-schema"}}' "$network" 2>/dev/null || true)"
+    [[ "$schema_label" != "dynamic-v1" ]] || continue
+
+    expected="$(legacy_network_expected_subnet "$network")"
+    subnets="$(docker network inspect -f '{{range .IPAM.Config}}{{println .Subnet}}{{end}}' "$network" 2>/dev/null || true)"
+    grep -Fxq "$expected" <<<"$subnets" || continue
+
+    stack_label="$(docker network inspect -f '{{index .Labels "com.infocyph.stack"}}' "$network" 2>/dev/null || true)"
+    project_label="$(docker network inspect -f '{{index .Labels "com.docker.compose.project"}}' "$network" 2>/dev/null || true)"
+    if [[ "$stack_label" != "LocalDevStack" || "$project_label" != "LocalDevStack" ]]; then
+      die "Legacy subnet detected on '$network', but ownership labels do not prove it belongs to LocalDevStack. Remove or rename that network manually."
+    fi
+
+    while IFS= read -r ctr; do
+      [[ -n "$ctr" ]] || continue
+      ctr_project="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "$ctr" 2>/dev/null || true)"
+      if [[ "$ctr_project" != "LocalDevStack" ]]; then
+        die "Refusing to migrate '$network': container '$ctr' is not owned by the LocalDevStack Compose project."
+      fi
+    done < <(docker network inspect -f '{{range .Containers}}{{println .Name}}{{end}}' "$network" 2>/dev/null || true)
+
+    legacy+=("$network")
+  done
+
+  (("\${#legacy[@]}" > 0)) || return 0
+
+  warn "Legacy fixed LocalDevStack network(s) detected: \${legacy[*]}"
+  warn "Recreating stack networks dynamically; named volumes and persisted data are preserved."
+
+  # Stop/remove only LocalDevStack Compose containers and networks. Never use -v.
+  docker_compose down --remove-orphans
+
+  for network in "\${legacy[@]}"; do
+    docker network inspect "$network" >/dev/null 2>&1 || continue
+    attachments="$(docker network inspect -f '{{range .Containers}}{{println .Name}}{{end}}' "$network" 2>/dev/null || true)"
+    [[ -z "$attachments" ]] ||
+      die "Cannot remove legacy network '$network': attached container(s) remain: $(tr '\n' ' ' <<<"$attachments")"
+    docker network rm "$network" >/dev/null
+  done
+
+  ok "Legacy fixed networks removed; Compose will recreate dynamic bridge networks."
+}
+
+cmd_vpn_fix() {
+  warn "vpn-fix is deprecated: LocalDevStack no longer owns fixed Docker subnets."
+  warn "If a VPN conflict remains after dynamic-network migration, diagnose the VPN/Docker route directly."
+}
+
+cmd_up() {
+  migrate_legacy_networks
+  dc_up "$@"
+}
 
 cmd_start() {
+  migrate_legacy_networks
   dc_up -d "$@"
   http_reload
 }
@@ -3461,6 +3535,7 @@ main() {
   redis | redis-cli) exec "$DIR/bin/redis-cli" "$@" ;;
   es | elastic | elasticsearch) exec "$DIR/bin/es" "$@" ;;
   mongo | mongodb | mongosh | mongoimport | mongoexport) exec "$DIR/bin/mongo" "$@" ;;
+  vpn-fix) cmd_vpn_fix "$@" ;;
   *)
     if declare -F "cmd_$cmd" >/dev/null 2>&1; then
       "cmd_$cmd" "$@"
