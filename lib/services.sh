@@ -722,7 +722,6 @@ cmd_rebuild() {
   cmd_reboot
 }
 
-cmd_config() { docker_compose config; }
 
 docker_shell() {
   local c="${1:-}"
