@@ -137,7 +137,7 @@ assert tools["LDS_AI_MODEL"] == "qwen2.5:3b"
 ' <<<"$ai_json"
 pass "companion-owned AI profile is internal-only and deterministic"
 
-amd_json="$(COMPOSE_PROFILES=ai LDS_AI_RUNTIME=amd "$ROOT/lds" config show --json --raw 2>/dev/null)"
+amd_json="$(COMPOSE_PROFILES=ai LDS_AI_RUNTIME=amd "$ROOT/lds" --quiet config show --json --raw 2>/dev/null)"
 python3 -c '
 import json,sys
 s=json.load(sys.stdin)["services"]["llm-sm"]
@@ -147,7 +147,7 @@ assert "/dev/kfd" in devices and "/dev/dri" in devices
 ' <<<"$amd_json"
 pass "AMD AI runtime is generated dynamically"
 
-nvidia_json="$(COMPOSE_PROFILES=ai LDS_AI_RUNTIME=nvidia "$ROOT/lds" config show --json --raw 2>/dev/null)"
+nvidia_json="$(COMPOSE_PROFILES=ai LDS_AI_RUNTIME=nvidia "$ROOT/lds" --quiet config show --json --raw 2>/dev/null)"
 python3 -c '
 import json,sys
 s=json.load(sys.stdin)["services"]["llm-sm"]
@@ -156,7 +156,7 @@ assert s.get("gpus")
 ' <<<"$nvidia_json"
 pass "NVIDIA AI runtime is generated dynamically"
 
-host_json="$(COMPOSE_PROFILES=ai LDS_AI_RUNTIME=cpu LDS_LLM_HOST_PORT=1 "$ROOT/lds" config show --json --raw 2>/dev/null)"
+host_json="$(COMPOSE_PROFILES=ai LDS_AI_RUNTIME=cpu LDS_LLM_HOST_PORT=1 "$ROOT/lds" --quiet config show --json --raw 2>/dev/null)"
 python3 -c '
 import json,sys
 ports=json.load(sys.stdin)["services"]["llm-sm"]["ports"]
