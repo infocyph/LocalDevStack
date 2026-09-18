@@ -107,3 +107,11 @@ pass "latest Runner preserves logrotate/health contract"
 
 assert_contains "$php_template" './docker/conf/www-php.conf:/usr/local/etc/php-fpm.d/www.conf'
 pass "generated PHP runtime uses the maintained FPM pool config"
+
+tools_certify="$(
+  docker run --rm --entrypoint cat "${release[LDS_TOOLS_IMAGE]}" /usr/local/bin/certify
+)"
+assert_contains "$tools_certify" 'EXPORT_DIR="${EXPORT_DIR:-/etc/share/certs}"'
+assert_contains "$tools_certify" 'EXPORT_ROOTCA_NAME="${EXPORT_ROOTCA_NAME:-rootCA.pem}"'
+assert_contains "$tools_certify" 'atomic_install 0644 "$root_ca" "$EXPORT_DIR/$EXPORT_ROOTCA_NAME"'
+pass "latest Tools public TLS export contract"
