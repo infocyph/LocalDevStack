@@ -9,6 +9,8 @@ file="$ROOT/docker/dockerfiles/php.Dockerfile"
 assert_file "$file"
 assert_file_contains "$file" 'ARG PHP_VERSION=8.4'
 assert_file_contains "$file" 'FROM php:${PHP_VERSION}-fpm-alpine'
+[[ "$(grep -c '^ARG PHP_VERSION' "$file")" -eq 2 ]] ||
+  fail "PHP_VERSION must be redeclared inside the build stage"
 assert_file_contains "$file" 'ARG PHP_PROFILE_KEY=84'
 assert_file_contains "$file" 'ARG LINUX_PKG'
 assert_file_contains "$file" 'ARG LINUX_PKG_VERSIONED'
