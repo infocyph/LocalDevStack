@@ -5,6 +5,7 @@
 !docker/compose
 !docker/conf
 !docker/dockerfiles
+!docker/release.env
 !docs
 !logs
 !.github/

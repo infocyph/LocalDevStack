@@ -303,6 +303,7 @@ DIR="$(dirname -- "$(_realpath "$0")")"
 CFG="$DIR/docker"
 ENV_MAIN="$DIR/.env"
 ENV_DOCKER="$CFG/.env"
+ENV_RELEASE="$CFG/release.env"
 COMPOSE_FILE="$CFG/compose/main.yaml"
 EXTRAS_DIR="$DIR/configuration/compose"
 
@@ -422,6 +423,13 @@ docker_compose() {
     fi
   fi
 
+  [[ -r "$ENV_RELEASE" ]] || die "Missing release compatibility manifest: $ENV_RELEASE"
+
+  # Release defaults are loaded first; user docker/.env overrides them.
+  # Shell variables remain higher-precedence Compose interpolation inputs.
+  local -a env_files=(--env-file "$ENV_RELEASE")
+  [[ -r "$ENV_DOCKER" ]] && env_files+=(--env-file "$ENV_DOCKER")
+
   # Build -f list (stable order; later overrides earlier)
   local -a extra_f=() f
   for f in "${__EXTRA_FILES[@]:-}"; do
@@ -437,7 +445,7 @@ docker_compose() {
     --project-directory "$DIR" \
     -f "$COMPOSE_FILE" \
     "${extra_f[@]}" \
-    --env-file "$ENV_DOCKER" \
+    "${env_files[@]}" \
     "$@"
 }
 
