@@ -65,6 +65,14 @@ fix_perms() {
     find "$private_dir" -type f -exec chmod 0600 {} +
   done
 
+  # Public CA exports may stay readable, but password-protected/user key
+  # artifacts must retain the restrictive mode Tools assigns to them.
+  if [[ -d "$DIR/configuration/ssl" ]]; then
+    find "$DIR/configuration/ssl" -type d -exec chmod 0755 {} +
+    find "$DIR/configuration/ssl" -type f -exec chmod 0644 {} +
+    find "$DIR/configuration/ssl" -type f \(       -name '*.p12' -o -name '*.pfx' -o -name '*.key' -o -name '*-key.pem'     \) -exec chmod 0600 {} +
+  fi
+
   find "$DIR/docker" -type d -exec chmod 0755 {} +
   find "$DIR/docker" -type f -exec chmod 0644 {} +
 
