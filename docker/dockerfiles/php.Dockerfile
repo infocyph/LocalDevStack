@@ -1,5 +1,6 @@
 ARG PHP_VERSION=8.4
 FROM php:${PHP_VERSION}-fpm-alpine
+ARG PHP_VERSION
 
 LABEL org.opencontainers.image.source="https://github.com/infocyph/LocalDevStack"
 LABEL org.opencontainers.image.description="PHP FPM Alpine"
