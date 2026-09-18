@@ -19,7 +19,8 @@ services:
     networks:
       - frontend
     depends_on:
-      - server-tools
+      server-tools:
+        condition: service_healthy
 
   apache:
     container_name: APACHE
