@@ -50,9 +50,7 @@ configuration/scheduler/cron-jobs/
 configuration/scheduler/supervisor/
    Runner Supervisor definitions.
 
-configuration/sops/config/
-configuration/sops/global/
-configuration/sops/keys/
+configuration/sops/config/, configuration/sops/global/, configuration/sops/keys/
    SOPS/Age configuration and sensitive key material.
 
 configuration/ssh/
