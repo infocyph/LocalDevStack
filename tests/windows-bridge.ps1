@@ -34,7 +34,7 @@ Write-Host "PASS: Windows bridge has no unconditional Docker preflight"
 
 $helpOutput = & cmd.exe /d /c ('"' + $batPath + '" help') 2>&1
 if ($LASTEXITCODE -ne 0) {
-    throw "lds.bat help failed with exit code $LASTEXITCODE: $helpOutput"
+    throw "lds.bat help failed with exit code ${LASTEXITCODE}: $helpOutput"
 }
 if (($helpOutput -join "`n") -notmatch 'LocalDevStack') {
     throw "lds.bat help did not reach the Bash CLI"
