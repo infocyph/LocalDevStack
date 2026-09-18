@@ -16,6 +16,17 @@ services:
       - SOPS_CFG_DIR=/etc/share/sops/config
       - SOPS_GLOBAL_DIR=/etc/share/sops/global
       - SOPS_REPO_DIR=/etc/share/vhosts/sops
+      - LDS_AI_ENABLED=${LDS_AI_ENABLED:-auto}
+      - LDS_AI_PROVIDER=${LDS_AI_PROVIDER:-ollama}
+      - LDS_AI_URL=${LDS_AI_URL:-http://llm-sm:11434}
+      - LDS_AI_MODEL=${LDS_AI_MODEL:-qwen2.5:3b}
+      - LDS_AI_CONNECT_TIMEOUT
+      - LDS_AI_PREFLIGHT_TIMEOUT
+      - LDS_AI_TIMEOUT
+      - LDS_AI_AVAILABILITY_TTL
+      - LDS_AI_MAX_CONTEXT_BYTES
+      - LDS_AI_MAX_REQUEST_BYTES
+      - LDS_AI_MAX_RESPONSE_BYTES
     volumes:
       - "${PROJECT_DIR:-./../../../application}:/app"
       - lds_ssl_roots:/etc/share/rootCA
