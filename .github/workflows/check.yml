@@ -141,3 +141,16 @@ jobs:
 
       - name: Build documentation
         run: sphinx-build -W --keep-going -b html docs docs/_build/html
+
+
+  runtime-build:
+    name: Runtime build compatibility
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Build current selected PHP/Node runtimes
+        run: bash tests/runtime-build-smoke.sh
