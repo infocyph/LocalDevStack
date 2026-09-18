@@ -1,68 +1,98 @@
 Domain Setup
 ============
 
-LocalDevStack creates domains and vhosts, when you run ``lds setup domain``.
+Use the interactive domain wizard::
 
-How ``lds setup domain`` works
-------------------------------
+   lds setup domain
 
-1. Run the interactive wizard.
-2. Enable the selected profiles.
-3. Bring the stack up and reload HTTP.
+The wizard delegates generation to the Tools mkhost workflow while LocalDevStack
+owns the surrounding Compose/profile/runtime orchestration.
 
-Wizard flow (what the user answers)
------------------------------------
+Wizard Flow
+-----------
 
-``lds setup domain`` runs an interactive 8-step flow:
+The wizard collects the information needed for the selected application type, including:
 
-1. Domain name
-2. App type (PHP or NodeJs)
-3. Runtime version (PHP Major.Minor, or Node major/tags)
-4. Server type (PHP: Nginx or Apache; Node: Nginx forced + optional Node start command)
-5. Protocol (HTTP only / HTTPS only / both + optional redirect)
-6. Document root (relative path mapped under ``/app``)
-7. Client max body size
-8. Mutual TLS toggle (only available when HTTPS is enabled; this requires client side certificate)
+1. domain name;
+2. PHP or Node application type;
+3. runtime version;
+4. HTTP server mode where applicable;
+5. HTTP/HTTPS behavior;
+6. document root;
+7. request/body limits;
+8. optional mutual TLS settings.
 
-What it generates
+Runtime Version Selection
 -------------------------
 
-Vhost configs
-~~~~~~~~~~~~~~~~~~
+Runtime selection is interactive and version-specific.
 
-Writes generated vhost files:
+For PHP, the selected version remains the PHP_VERSION build input and produces::
 
-- Nginx vhost:
-  ``configuration/nginx/<domain>.conf``
+   localdevstack-php:<selected-version>
 
-- Apache vhost (only when Apache mode is selected):
-  ``configuration/apache/<domain>.conf``
+For Node, the selected version/tag remains the NODE_VERSION build input and produces::
 
-TLS handling (HTTPS)
-~~~~~~~~~~~~~~~~~~~~
+   localdevstack-node:<selected-version>
 
-If you select HTTPS in the wizard, after writing the HTTPS config;
-this generates/refreshes certificates for all known hosts.
+Both runtime families use Alpine variants.
 
-See: :doc:`tls-and-certificates`
+Generated State
+---------------
 
-Node apps (optional)
-~~~~~~~~~~~~~~~~~~~~
+The current architecture does not write active Nginx/Apache vhosts to
+configuration/nginx or configuration/apache.
 
-If you choose **NodeJs** app type:
+Instead:
 
-- It generates a Node compose fragment:
+- Nginx vhosts persist in the NginxHosts named volume;
+- Apache vhosts persist in the ApacheHosts named volume;
+- PHP-FPM pool state persists in FPMPools;
+- generated runtime Compose fragments are written under configuration/compose/.
 
-  ``docker/extras/<token>.yaml``
+Use::
 
-The token is derived from the domain (slugified).
-This compose fragment defines a Node service (internal port is always ``3000``) and sets a profile like:
+   lds config validate
 
-- ``node_<token>``
+to validate the effective Compose graph and mounted scheduler configuration.
 
-Tips
-----
+Routing
+-------
 
-- Prefer a consistent domain scheme (e.g., ``project.localhost``) so your routing stays predictable.
-- After any vhost/cert changes, ``lds`` will run ``lds http reload`` automatically as part of setup;
-  you can also run it manually when you edit configs yourself.
+LocalDevStack uses Docker DNS/service names instead of fixed bridge addresses. Generated
+HTTP configuration routes to logical runtime service names or PHP-FPM sockets.
+
+The three logical networks remain Frontend, Backend, and DataStore, but Docker chooses
+their address ranges dynamically.
+
+TLS
+---
+
+When HTTPS is selected, Tools refreshes the shared LocalDevStack certificate set. The
+certificate SAN set always includes localhost, *.localhost, 127.0.0.1, and ::1 in
+addition to generated domains/service-derived hosts.
+
+This means convenience hosts such as admin.localhost, webmail.localhost, and
+llm.localhost can use the same LocalDevStack trust chain.
+
+Convenience Commands
+--------------------
+
+List active convenience URLs::
+
+   lds urls
+
+Open a known UI/domain::
+
+   lds open admin
+   lds open mail
+   lds open db
+   lds open redis
+   lds open mongo
+   lds open kibana
+   lds open ai
+   lds open project.localhost
+
+Run diagnostics without mutating the stack::
+
+   lds doctor
