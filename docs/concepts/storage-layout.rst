@@ -21,6 +21,11 @@ FPMPools / FPMSocks
 ComposerGlobal / GitConfig
    Shared runtime state for Composer and Git integration.
 
+ToolsState
+   Durable Tools control-plane state under /etc/share/state, including host-manager
+   state, profile/runtime metadata, monitor history, alert acknowledgements, and
+   other state owned by the Tools image.
+
 Database/admin volumes
    Persistent PostgreSQL, MySQL, MariaDB, MongoDB, Redis, Elasticsearch, Kibana,
    RedisInsight, CloudBeaver, and Filebeat state.
