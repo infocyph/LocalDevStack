@@ -139,8 +139,15 @@ volumes:
       com.infocyph.lds: "1"
       com.infocyph.stack: "LocalDevStack"
       com.infocyph.purpose: "Filebeat Data"
+  lds_llm:
+    name: LLMModels
+    labels:
+      com.infocyph.lds: "1"
+      com.infocyph.stack: "LocalDevStack"
+      com.infocyph.purpose: "LLM Model Store"
 include:
   - docker/compose/companion.yaml
   - docker/compose/db.yaml
   - docker/compose/db-client.yaml
   - docker/compose/http.yaml
+  - docker/compose/ai.yaml
