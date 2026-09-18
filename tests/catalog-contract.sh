@@ -55,6 +55,9 @@ while IFS='|' read -r key profile display service_key version_env defaults promp
     [[ "$defaults" == *"LDS_AI_RUNTIME=cpu"* ]] || fail "AI runtime default drift"
     [[ "$defaults" == *"LDS_LLM_HOST_PORT=no"* ]] || fail "AI host-port default drift"
     ;;
+  ELASTICSEARCH)
+    [[ "$defaults" == *"ELASTICSEARCH_VERSION=9.5.4"* ]] || fail "Elastic stable default drift"
+    ;;
   esac
 done <"$catalog"
 
