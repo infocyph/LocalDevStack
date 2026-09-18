@@ -54,6 +54,9 @@ jobs:
       - name: Wrapper contract
         run: tests/wrappers-contract.sh
 
+      - name: Service hardening contract
+        run: bash tests/service-hardening-contract.sh
+
   compose:
     name: Compose contract
     runs-on: ubuntu-latest
