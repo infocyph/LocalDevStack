@@ -805,25 +805,56 @@ modify_profiles() {
 # 3a. PROFILES: DEFINITIONS + SETUP FLOW
 ###############################################################################
 
-declare -A SERVICES=(
-  [POSTGRESQL]="postgresql"
-  [MYSQL]="mysql"
-  [MARIADB]="mariadb"
-  [ELASTICSEARCH]="elasticsearch"
-  [MONGODB]="mongodb"
-  [REDIS]="redis"
-)
+CATALOG_FILE="$CFG/catalog/services.psv"
 
-declare -a SERVICE_ORDER=(POSTGRESQL MYSQL MARIADB ELASTICSEARCH MONGODB REDIS)
+declare -A SERVICES=()
+declare -A SERVICE_DISPLAY=()
+declare -A SERVICE_KEY=()
+declare -A SERVICE_VERSION_ENV=()
+declare -A PROFILE_ENV=()
+declare -A PROFILE_PROMPTS=()
+declare -A SERVICE_ADMIN_CLIENT=()
+declare -A SERVICE_VOLUME=()
+declare -A SERVICE_URL=()
+declare -A SERVICE_CATEGORY=()
+declare -A SERVICE_OPTIONAL=()
+declare -A SERVICE_DEFAULT_ENABLED=()
+declare -A SERVICE_RUNTIME_MODES=()
+declare -a SERVICE_ORDER=()
 
-declare -A PROFILE_ENV=(
-  [elasticsearch]="ELASTICSEARCH_VERSION=9.3.0"
-  [mysql]="MYSQL_VERSION=latest MYSQL_ROOT_PASSWORD=12345 MYSQL_USER=infocyph MYSQL_PASSWORD=12345 MYSQL_DATABASE=localdb"
-  [mariadb]="MARIADB_VERSION=latest MARIADB_ROOT_PASSWORD=12345 MARIADB_USER=infocyph MARIADB_PASSWORD=12345 MARIADB_DATABASE=localdb"
-  [mongodb]="MONGODB_VERSION=latest MONGODB_ROOT_USERNAME=root MONGODB_ROOT_PASSWORD=12345"
-  [redis]="REDIS_VERSION=latest"
-  [postgresql]="POSTGRES_VERSION=latest POSTGRES_USER=postgres POSTGRES_PASSWORD=postgres POSTGRES_DATABASE=postgres"
-)
+load_service_catalog() {
+  [[ -r "$CATALOG_FILE" ]] || die "Missing service catalog: $CATALOG_FILE"
+
+  local key profile display service_key version_env defaults prompts
+  local admin_client volume url category optional default_enabled runtime_modes
+
+  while IFS='|' read -r key profile display service_key version_env defaults prompts admin_client volume url category optional default_enabled runtime_modes; do
+    [[ -n "$key" && "$key" != \#* ]] || continue
+    [[ -n "$profile" && -n "$display" && -n "$service_key" ]] ||
+      die "Invalid service catalog row for: $key"
+    [[ -z "${SERVICES[$key]+x}" ]] || die "Duplicate service catalog key: $key"
+    [[ -z "${PROFILE_ENV[$profile]+x}" ]] || die "Duplicate service catalog profile: $profile"
+
+    SERVICE_ORDER+=("$key")
+    SERVICES["$key"]="$profile"
+    SERVICE_DISPLAY["$key"]="$display"
+    SERVICE_KEY["$key"]="$service_key"
+    SERVICE_VERSION_ENV["$key"]="$version_env"
+    PROFILE_ENV["$profile"]="$defaults"
+    PROFILE_PROMPTS["$profile"]="$prompts"
+    SERVICE_ADMIN_CLIENT["$key"]="$admin_client"
+    SERVICE_VOLUME["$key"]="$volume"
+    SERVICE_URL["$key"]="$url"
+    SERVICE_CATEGORY["$key"]="$category"
+    SERVICE_OPTIONAL["$key"]="$optional"
+    SERVICE_DEFAULT_ENABLED["$key"]="$default_enabled"
+    SERVICE_RUNTIME_MODES["$key"]="$runtime_modes"
+  done <"$CATALOG_FILE"
+
+  (("${#SERVICE_ORDER[@]}" > 0)) || die "Service catalog is empty: $CATALOG_FILE"
+}
+
+load_service_catalog
 
 declare -a PENDING_ENVS=()
 declare -a PENDING_PROFILES=()
@@ -852,10 +883,11 @@ setup_menu_print() {
   # Print menu to stderr to avoid stdout buffering in some Windows wrappers.
   {
     printf "\n%bSetup profiles%b (will replace previous configuration, if exists):\n\n" "$CYAN" "$NC"
-    local i=1 key slug
+    local i=1 key slug display
     for key in "${SERVICE_ORDER[@]}"; do
       slug="${SERVICES[$key]}"
-      printf "  %2d) %-12s  (%s)\n" "$i" "$key" "$slug"
+      display="${SERVICE_DISPLAY[$key]}"
+      printf "  %2d) %-16s  (%s)\n" "$i" "$display" "$slug"
       i=$((i + 1))
     done
     printf "\n  a) ALL\n"
@@ -932,16 +964,46 @@ setup_choose_services() {
 setup_service() {
   local service="$1"
   local profile="${SERVICES[$service]:-}"
+  local display="${SERVICE_DISPLAY[$service]:-$service}"
   [[ -n "$profile" ]] || die "Unknown service: $service"
 
-  printf "\n%b→ %s%b\n" "$YELLOW" "$service" "$NC"
+  printf "\n%b→ %s%b\n" "$YELLOW" "$display" "$NC"
   queue_profile "$profile"
 
-  printf "%bEnter value(s) for %s:%b\n" "$BLUE" "$service" "$NC"
-  local pair key def val
-  for pair in ${PROFILE_ENV[$profile]}; do
+  local defaults="${PROFILE_ENV[$profile]:-}"
+  [[ -n "$defaults" ]] || return 0
+
+  printf "%bEnter value(s) for %s:%b\n" "$BLUE" "$display" "$NC"
+
+  local -a pairs=() prompts=()
+  IFS=';' read -r -a pairs <<<"$defaults"
+  IFS=';' read -r -a prompts <<<"${PROFILE_PROMPTS[$profile]:-}"
+
+  local i pair key def val prompt
+  for i in "${!pairs[@]}"; do
+    pair="${pairs[$i]}"
+    [[ -n "$pair" ]] || continue
     IFS='=' read -r key def <<<"$pair"
-    val=$(read_default "$key" "$def")
+    prompt="${prompts[$i]:-$key}"
+    val="$(read_default "$prompt" "$def")"
+
+    case "$key" in
+    LDS_AI_RUNTIME)
+      val="${val,,}"
+      case "$val" in
+      cpu | nvidia | amd) ;;
+      *) die "AI runtime must be cpu, nvidia, or amd" ;;
+      esac
+      ;;
+    LDS_LLM_HOST_PORT)
+      case "${val,,}" in
+      1 | y | yes | true | on) val=1 ;;
+      0 | n | no | false | off) val=0 ;;
+      *) die "Direct localhost API must be yes or no" ;;
+      esac
+      ;;
+    esac
+
     queue_env "$key=$val"
   done
 }
@@ -955,7 +1017,7 @@ process_all() {
 
   printf "\n%bWill configure:%b\n" "$CYAN" "$NC"
   while IFS= read -r svc; do
-    printf "  - %s (%s)\n" "$svc" "${SERVICES[$svc]}"
+    printf "  - %s (%s)\n" "${SERVICE_DISPLAY[$svc]:-$svc}" "${SERVICES[$svc]}"
   done <<<"$selected"
   echo
 
