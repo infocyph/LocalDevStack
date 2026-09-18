@@ -57,6 +57,12 @@ jobs:
       - name: Service hardening contract
         run: bash tests/service-hardening-contract.sh
 
+      - name: QoL contract
+        run: bash tests/qol-contract.sh
+
+      - name: Permission contract
+        run: bash tests/permissions-contract.sh
+
   compose:
     name: Compose contract
     runs-on: ubuntu-latest
