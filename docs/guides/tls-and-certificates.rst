@@ -48,7 +48,7 @@ The generated certificate SAN set includes at least::
    127.0.0.1
    ::1
 
-Tools also discovers generated vhost/service domains. The *.localhost entry covers
+Tools also discovers generated vhost/service domains. The \*.localhost entry covers
 built-in convenience endpoints such as:
 
 - admin.localhost;
