@@ -63,6 +63,9 @@ jobs:
       - name: Permission contract
         run: bash tests/permissions-contract.sh
 
+      - name: Documentation contract
+        run: bash tests/docs-contract.sh
+
   compose:
     name: Compose contract
     runs-on: ubuntu-latest
