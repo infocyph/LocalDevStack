@@ -27,13 +27,19 @@ foreach ($needle in $required) {
     }
 }
 
-# Characterize the existing Docker preflight. Batch 7 will move Docker
-# availability checks behind commands that actually require Docker.
-if (-not $content.Contains('docker info')) {
-    Write-Host "INFO: unconditional Docker preflight is already absent"
-} else {
-    Write-Host "INFO: current bridge still performs the known unconditional Docker preflight"
+if ($content.Contains('docker info') -or $content.Contains('where docker.exe')) {
+    throw "lds.bat must not require Docker for offline-safe commands"
 }
+Write-Host "PASS: Windows bridge has no unconditional Docker preflight"
+
+$helpOutput = & cmd.exe /d /c ('"' + $batPath + '" help') 2>&1
+if ($LASTEXITCODE -ne 0) {
+    throw "lds.bat help failed with exit code $LASTEXITCODE: $helpOutput"
+}
+if (($helpOutput -join "`n") -notmatch 'LocalDevStack') {
+    throw "lds.bat help did not reach the Bash CLI"
+}
+Write-Host "PASS: lds.bat help works without wrapper-level Docker checks"
 
 $tempParent = Join-Path $env:RUNNER_TEMP "Local Dev Stack"
 New-Item -ItemType Directory -Force -Path $tempParent | Out-Null
