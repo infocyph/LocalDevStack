@@ -23,7 +23,8 @@ PHP / Node runtimes
 
 Tools
    Trusted control plane for vhost generation, certificates, admin UI, secrets,
-   Git helpers, monitoring, and AI-consumer commands.
+   Git helpers, monitoring, and AI-consumer commands. Tools control-plane state is
+   persisted separately in the ToolsState named volume.
 
 Runner
    Background execution layer for Supervisor, cron, and log rotation.
