@@ -308,7 +308,7 @@ COMPOSE_FILE="$CFG/compose/main.yaml"
 EXTRAS_DIR="$DIR/configuration/compose"
 
 # Read a single dotenv value without sourcing/evaluating the file.
-# This is intentionally limited to literal KEY=VALUE state used by LDS itself.
+# Only literal KEY=VALUE state is accepted; nothing is executed.
 dotenv_value() {
   local file="${1:-}" key="${2:-}" line value first last
   [[ -r "$file" && -n "$key" ]] || return 1
@@ -317,7 +317,37 @@ dotenv_value() {
   [[ -n "$line" ]] || return 1
 
   value="${line#*=}"
-  value="${value%
+  if (("${#value}" >= 2)); then
+    first="${value:0:1}"
+    last="${value: -1}"
+    if [[ "$first" == '"' && "$last" == '"' ]]; then
+      value="${value:1:${#value}-2}"
+    elif [[ "$first" == "'" && "$last" == "'" ]]; then
+      value="${value:1:${#value}-2}"
+    fi
+  fi
+  printf '%s' "$value"
+}
+
+# Resolution mirrors Compose intent: shell > user docker/.env > release.env > fallback.
+compose_control_value() {
+  local key="${1:?}" fallback="${2-}" value
+  if [[ -v "$key" ]]; then
+    printf '%s' "${!key}"
+    return 0
+  fi
+  if value="$(dotenv_value "$ENV_DOCKER" "$key")"; then
+    printf '%s' "$value"
+    return 0
+  fi
+  if value="$(dotenv_value "$ENV_RELEASE" "$key")"; then
+    printf '%s' "$value"
+    return 0
+  fi
+  printf '%s' "$fallback"
+}
+
+if [[ "${1:-}" == "--__win_workdir" ]]; then
   export WORKDIR_WIN="${2:-}"
   shift 2
 fi
