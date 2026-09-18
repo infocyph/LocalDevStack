@@ -96,3 +96,14 @@ assert_contains "$php_template" 'image: localdevstack-php:{{PHP_VERSION}}'
 assert_contains "$node_template" 'NODE_VERSION: {{NODE_VERSION}}'
 assert_contains "$node_template" 'image: localdevstack-node:{{NODE_VERSION}}'
 pass "selected runtime versions remain build/image identity inputs"
+
+docker run --rm --entrypoint sh "${release[LDS_RUNNER_IMAGE]}" -ec '
+  test -x /usr/local/bin/logrotate-worker.sh
+  test -x /usr/local/bin/runner-healthcheck.sh
+  test -f /etc/logrotate.d/daily
+  test -f /etc/logrotate.d/supervisord
+'
+pass "latest Runner preserves logrotate/health contract"
+
+assert_contains "$php_template" './docker/conf/www-php.conf:/usr/local/etc/php-fpm.d/www.conf'
+pass "generated PHP runtime uses the maintained FPM pool config"
