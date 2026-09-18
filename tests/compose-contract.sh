@@ -59,6 +59,7 @@ render mongodb --profile mongodb
 render redis --profile redis
 render elasticsearch --profile elasticsearch
 render elasticsearch-filebeat --profile elasticsearch --profile filebeat
+render apache --profile apache
 render ai --profile ai
 docker compose --project-directory "$ROOT" \
   -f "$ROOT/docker/compose/main.yaml" \
@@ -81,7 +82,6 @@ assert_contains "$resolved" "cloudbeaver:"
 assert_contains "$resolved" "image: infocyph/tools:latest"
 assert_contains "$resolved" "image: infocyph/runner:latest"
 assert_contains "$resolved" "image: infocyph/nginx:latest"
-assert_contains "$resolved" "image: infocyph/apache:latest"
 if grep -Eq 'ipv4_address:|172\\.28\\.0\\.|172\\.29\\.0\\.|172\\.30\\.0\\.' <<<"$resolved"; then
   fail "resolved Compose config still contains fixed LocalDevStack addresses"
 fi
@@ -119,15 +119,29 @@ shell_override="$(
 assert_contains "$shell_override" "image: example.invalid/tools:shell-override"
 pass "shell override wins over user and release env files"
 
-# Apache is currently an unconditional service in the baseline. This is
-# characterized here; Batch 5 will make the product's optional-HTTP contract
-# explicit rather than silently changing it in the compatibility batch.
-assert_contains "$resolved" "apache:"
-pass "current Apache compose presence characterized"
-
 core_json="$("${compose[@]}" config --format json)"
-python3 -c 'import json,sys; d=json.load(sys.stdin); assert "llm-sm" not in d.get("services", {})' <<<"$core_json"
-pass "AI provider remains outside the default profile"
+python3 -c '
+import json,sys
+d=json.load(sys.stdin)
+assert "apache" not in d.get("services", {})
+assert "llm-sm" not in d.get("services", {})
+assert d["volumes"]["lds_tools_state"]["name"] == "ToolsState"
+tools=d["services"]["server-tools"]
+targets={v["target"] for v in tools["volumes"]}
+assert "/etc/share/state" in targets
+' <<<"$core_json"
+pass "optional Apache/AI stay outside default stack and Tools state is persistent"
+
+apache_json="$("${compose[@]}" --profile apache config --format json)"
+python3 -c '
+import json,sys
+d=json.load(sys.stdin)
+s=d["services"]["apache"]
+assert s["image"] == "infocyph/apache:latest"
+assert s["profiles"] == ["apache"]
+assert "nginx" in s["depends_on"]
+' <<<"$apache_json"
+pass "Apache backend is activated only through its profile"
 
 ai_json="$("${compose[@]}" --profile ai config --format json)"
 python3 -c '
