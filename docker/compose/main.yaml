@@ -145,6 +145,12 @@ volumes:
       com.infocyph.lds: "1"
       com.infocyph.stack: "LocalDevStack"
       com.infocyph.purpose: "LLM Model Store"
+  lds_tools_state:
+    name: ToolsState
+    labels:
+      com.infocyph.lds: "1"
+      com.infocyph.stack: "LocalDevStack"
+      com.infocyph.purpose: "Tools Durable State"
 include:
   - docker/compose/companion.yaml
   - docker/compose/db.yaml
