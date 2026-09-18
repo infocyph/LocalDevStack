@@ -2,7 +2,7 @@ services:
   nginx:
     container_name: NGINX
     hostname: nginx
-    image: ${LDS_NGINX_IMAGE:-infocyph/nginx:0.4.1}
+    image: ${LDS_NGINX_IMAGE:-infocyph/nginx:latest}
     restart: unless-stopped
     environment:
       - TZ=${TZ:-}
@@ -24,7 +24,7 @@ services:
   apache:
     container_name: APACHE
     hostname: apache
-    image: ${LDS_APACHE_IMAGE:-infocyph/apache:0.4.2}
+    image: ${LDS_APACHE_IMAGE:-infocyph/apache:latest}
     restart: unless-stopped
     environment:
       - TZ=${TZ:-}
