@@ -51,3 +51,21 @@ assert_file_contains "$certs" 'local current="$DIR/configuration/ssl/rootCA.pem"
 assert_file_contains "$certs" 'local legacy="$DIR/configuration/rootCA/rootCA.pem"'
 assert_file_contains "$certs" 'src_ca="$(host_root_ca_path || true)"'
 pass "certificate export bridge uses the current public host path with legacy fallback"
+
+main="$ROOT/docker/compose/main.yaml"
+assert_file_contains "$main" 'name: ToolsState'
+assert_file_contains "$companion" 'lds_tools_state:/etc/share/state'
+pass "Tools durable state persistence"
+
+assert_file_contains "$http" 'profiles: [apache]'
+assert_file_contains "$ROOT/lib/hosts.sh" 'modify_profiles add "$svr_prof"'
+assert_file_contains "$ROOT/lib/hosts.sh" 'modify_profiles remove "$apache_cont"'
+pass "Apache domain profile lifecycle is wired end to end"
+
+cert_helper_uses="$(grep -c 'src_ca="$(host_root_ca_path || true)"' "$certs")"
+[[ "$cert_helper_uses" -ge 3 ]] ||
+  fail "Windows install/uninstall and Unix install must all use host_root_ca_path"
+if grep -Fq 'local src_ca="$DIR/configuration/rootCA/rootCA.pem"' "$certs"; then
+  fail "Unix CA install regressed to the legacy-only path"
+fi
+pass "all CA install paths use current export with legacy fallback"
