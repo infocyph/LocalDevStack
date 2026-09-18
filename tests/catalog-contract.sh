@@ -44,7 +44,7 @@ while IFS='|' read -r key profile display service_key version_env defaults promp
   fi
 
   case "$key" in
-  POSTGRESQL|MYSQL|MARIADB|MONGODB|REDIS|ELASTICSEARCH)
+  POSTGRESQL|MYSQL|MARIADB|MONGODB|REDIS)
     [[ -n "$volume" ]] || fail "persistent service missing volume metadata: $key"
     ;;
   AI)
