@@ -77,7 +77,8 @@ services:
       - ../../logs/redis-insight:/global/log/redis-insight
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
-      - server-tools
+      server-tools:
+        condition: service_healthy
     networks:
       - backend
 
@@ -98,7 +99,8 @@ services:
       - lds_ssl_keys:/certs:ro
       - lds_mail:/data
     depends_on:
-      - server-tools
+      server-tools:
+        condition: service_healthy
     networks:
       - frontend
       - backend
