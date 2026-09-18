@@ -18,11 +18,6 @@ services:
     volumes:
       - lds_ri:/data
       - ../../logs/redis-insight:/var/log/redis-insight
-    networks:
-      datastore:
-        ipv4_address: 172.30.0.150
-      frontend:
-        ipv4_address: 172.28.0.150
 
   cloudbeaver:
     <<: *db-client-service
@@ -40,11 +35,6 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-    networks:
-      datastore:
-        ipv4_address: 172.30.0.151
-      frontend:
-        ipv4_address: 172.28.0.151
 
   mongo-express:
     <<: *db-client-service
@@ -62,11 +52,6 @@ services:
       - ME_CONFIG_MONGODB_URL=mongodb://${MONGODB_ROOT_USERNAME:-root}:${MONGODB_ROOT_PASSWORD:-12345}@mongodb:${MONGODB_PORT:-27017}/admin
     volumes:
       - ../../logs/mongo-express:/var/log/mongo-express
-    networks:
-      datastore:
-        ipv4_address: 172.30.0.152
-      frontend:
-        ipv4_address: 172.28.0.152
 
   kibana:
     <<: *db-client-service
@@ -82,11 +67,6 @@ services:
     volumes:
       - lds_kb:/usr/share/kibana/data
       - ../../logs/kibana:/usr/share/kibana/logs
-    networks:
-      datastore:
-        ipv4_address: 172.30.0.153
-      frontend:
-        ipv4_address: 172.28.0.153
 
   filebeat:
     image: docker.elastic.co/beats/filebeat:${ELASTICSEARCH_VERSION:-9.3.0}
@@ -102,5 +82,4 @@ services:
       - ../../logs:/global/log:ro
     command: ["--strict.perms=false"]
     networks:
-      datastore:
-        ipv4_address: 172.30.0.154
+      - datastore
