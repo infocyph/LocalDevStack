@@ -531,7 +531,13 @@ dc_cmd() {
 
 dc_up() { dc_cmd up "$@"; }
 dc_pull() { dc_cmd pull "$@"; }
-dc_build() { dc_cmd build "$@"; }
+dc_build() {
+  local scriptomatic_ref
+  scriptomatic_ref="$(compose_control_value SCRIPTOMATIC_REF main)"
+  [[ "$scriptomatic_ref" == "main" || "$scriptomatic_ref" =~ ^[0-9A-Fa-f]{40}$ ]] ||
+    die "SCRIPTOMATIC_REF must be main or a full 40-character commit SHA"
+  dc_cmd build --build-arg "SCRIPTOMATIC_REF=$scriptomatic_ref" "$@"
+}
 
 # helper for our own minimal logging (still shows in quiet mode)
 logv() { ((VERBOSE)) && printf "%b[%s]%b %s\n" "$CYAN" "${1:-info}" "$NC" "${2:-}" >&2 || true; }
@@ -2257,7 +2263,7 @@ cmd_rebuild() {
 
     if compose_has_build "$svc"; then
       logq rebuild "build/recreate $svc"
-      dc_build --no-cache --pull "$svc"
+      dc_build --pull "$svc"
       dc_up -d --no-deps --force-recreate "$svc"
       continue
     fi
@@ -2271,7 +2277,7 @@ cmd_rebuild() {
       docker rmi -f "$img" >/dev/null 2>&1 || true
       dc_pull "$svc" || true
     else
-      dc_build --no-cache --pull "$svc" >/dev/null 2>&1 || true
+      dc_build --pull "$svc" >/dev/null 2>&1 || true
     fi
 
     dc_up -d --no-deps --force-recreate "$svc"
