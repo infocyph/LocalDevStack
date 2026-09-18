@@ -9,6 +9,7 @@ mapfile -t shell_files < <(
   {
     printf '%s\n' "$ROOT/lds"
     find "$ROOT/bin" -maxdepth 1 -type f -print
+    find "$ROOT/lib" -type f -name '*.sh' -print
     find "$ROOT/tests" -type f -name '*.sh' -print
   } | sort -u
 )
