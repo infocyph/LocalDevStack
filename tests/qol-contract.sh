@@ -76,3 +76,7 @@ assert_contains "$help" "doctor"
 assert_contains "$help" "images"
 assert_contains "$help" "urls"
 pass "QoL commands are discoverable"
+
+assert_file_contains "$ROOT/lds" 'images | urls | doctor)'
+assert_file_contains "$ROOT/lib/diagnostics.sh" 'Docker daemon is unavailable.'
+pass "doctor owns Docker availability diagnostics"
