@@ -1,137 +1,106 @@
 Getting Started
 ===============
 
-Lets start with simple basics first without too many fuzz. LocalDevStack is a modular Docker-based
-local dev stack orchestrated by the ``lds`` CLI and powered by Compose profiles.
+LocalDevStack is a Docker-based XAMPP alternative for PHP and Node.js local development.
+The lds CLI manages Compose profiles, local domains, TLS, runtime builds, databases,
+admin tools, background jobs, and optional local AI.
 
 Prerequisites
 -------------
 
-Install Docker on your system first. If you already have Docker installed, you can skip this step.
+Install Docker first.
 
-- Recommended: Docker Engine (Linux) for best performance and lowest overhead.
-- If Docker Engine is not supported on your OS, use Docker Desktop (Windows/macOS; can also be used on Linux).
+- Docker Engine is preferred on Linux.
+- Docker Desktop is supported on Windows and macOS.
+- Windows CLI access uses lds.bat with Git Bash.
 
 Quick Start
 -----------
 
-1. Make ``lds`` executable and apply permissions
+Clone the repository and enter it::
 
-   Linux/macOS::
+   git clone https://github.com/infocyph/LocalDevStack.git
+   cd LocalDevStack
 
-      chmod +x ./lds
-      sudo ./lds setup permissions
+On Linux/macOS, prepare the CLI and host permissions::
 
-   Notes:
+   chmod +x ./lds
+   sudo ./lds setup permissions
 
-   - On Linux, the permissions step is recommended to avoid common volume/UID permission issues.
-   - On Windows, you typically run the wrapper (example: ``lds.bat``) and may need to add the project root directory
-     to your Environment PATH if you want ``lds`` usable from any directory.
+Then initialize LocalDevStack and choose optional services::
 
-2. Start the stack::
+   ./lds setup init
+   ./lds setup profile
 
-      lds start
+Start the stack::
 
-3. Add a domain (generates vhosts and updates stack selection)::
+   ./lds up
 
-      lds setup domain
+Create your first local domain::
 
-4. (Optional) Generate and trust TLS certificates
+   ./lds setup domain
 
-   If you enabled HTTPS vhosts and want browser trust, use the TLS workflow described in:
+The domain wizard asks for the application type and runtime version. PHP and Node
+selection remains version-specific; the selected value becomes the runtime image identity.
 
-   - :doc:`guides/tls-and-certificates`
+For browser-trusted HTTPS, install the exported LocalDevStack root CA::
 
-Directory Structure
+   sudo ./lds certificate install
+
+On Windows, run the same workflow through lds.bat or Git Bash. The permissions
+command configures the wrapper path and does not apply Unix chmod logic.
+
+Useful First Checks
 -------------------
 
-Recommended project layout
-~~~~~~~~~~~~~~~~~~~~~~~~~
+Show the active convenience URLs::
 
-By default, keep your projects in a sibling directory (simple and predictable)::
+   lds urls
+
+Show effective infrastructure/runtime image defaults::
+
+   lds images
+
+Run non-destructive diagnostics::
+
+   lds doctor
+
+Validate the effective Compose and scheduler configuration::
+
+   lds config validate
+
+Show effective Compose configuration with secret values redacted::
+
+   lds config show
+
+Use lds config show --raw only when you intentionally need the unredacted output.
+
+Project Layout
+--------------
+
+A common layout is::
 
    project-root/
    ├─ application/
    │  ├─ site1/
    │  ├─ site2/
    │  └─ ...
-   └─ LocalDevStack/        (this repository)
+   └─ LocalDevStack/
 
-This layout is flexible. If you want a different projects folder, set ``PROJECT_DIR`` in your env.
+Set PROJECT_DIR in docker/.env when your application directory is elsewhere.
 
-Example::
+LocalDevStack keeps host-managed state under configuration/ and logs/ while
+runtime vhosts, certificates, databases, and other service data primarily live in
+named Docker volumes.
 
-   PROJECT_DIR=../path/to/your/projects  # supports relative/absolute path (recommended to use absolute path for less confusion)
-
-LocalDevStack layout
-~~~~~~~~~~~~~~~~~~~~
-
-Where things live::
-
-   LocalDevStack/
-   ├─ bin/                      # optional helper binaries / shims (Don't touch)
-   ├─ configuration/            # These are created and persisted according to the process you follow (generated automatically)
-   │  ├─ apache/                # Generated apache vhost configs (if you use apache mode)
-   │  ├─ nginx/                 # Generated nginx vhost configs (primary entry in most setups)
-   │  ├─ php/                   # php.ini and php overrides (The php.ini you see here can be modified)
-   │  ├─ ssh/                   # ssh keys (optional; useful for git over ssh inside containers)
-   │  ├─ ssl/                   # generated TLS certs (can be used for trusting systemwide)
-   │  └─ rootCA/                # local CA store (The generated root certificate)
-   ├─ docker/                   # internal stack definition (Don't touch)
-   │  ├─ compose/               # main.yaml + service fragments (http/php/db/tools/... etc)
-   │  ├─ conf/                  # container configuration templates/snippets
-   │  ├─ data/                  # persistent service data (db volumes etc.)
-   │  └─ logs/                  # container logs (if your stack writes here)
-   ├─ .env                      # Docker only env (generated by tools, Don't touch)
-   ├─ lds                    # main CLI (Linux/macOS) (Don't touch)
-   └─ lds.bat                # Windows wrapper (Don't touch)
-
-Run the server (the easy way)
------------------------------
-
-1. Create or update env files (minimum: profiles + project dir).
-
-   Typical locations used by this stack:
-
-   - ``docker/.env`` (stack settings / profiles)
-   - ``.env`` (project-level env, exposed to your projects)
-
-2. Start the stack::
-
-      lds start
-
-3. Add domains via the wizard (recommended)::
-
-      lds setup domain
-
-Usage
------
-
-Common commands::
-
-   lds start
-   lds stop
-   lds reload
-   lds restart
-   lds rebuild
-
-HTTP utilities::
-
-   lds http reload
-
-Shells::
-
-   lds core <domain>
-
-Notes:
-
-- ``lds core <domain>`` is intended to open the right runtime container shell for that domain.
-
-Next steps
+Next Steps
 ----------
 
-- Domain and vhosts: :doc:`guides/domain-setup`
-- Local TLS (mkcert + certify): :doc:`guides/tls-and-certificates`
-- Node apps behind Nginx: :doc:`guides/node-apps`
-- Encrypted secrets (SOPS + Age): :doc:`guides/secrets-sops-age`
-- Notifications: :doc:`guides/notifications`
+- Profiles and environment: concepts/profiles-and-env
+- Architecture: concepts/architecture
+- Storage: concepts/storage-layout
+- Domain setup: guides/domain-setup
+- TLS: guides/tls-and-certificates
+- Local AI: guides/local-ai
+- Encrypted secrets: guides/secrets-sops-age
+- Notifications: guides/notifications
