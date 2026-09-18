@@ -99,7 +99,7 @@ pass "selected runtime versions remain build/image identity inputs"
 
 docker run --rm --entrypoint sh "${release[LDS_RUNNER_IMAGE]}" -ec '
   test -x /usr/local/bin/logrotate-worker.sh
-  test -x /usr/local/bin/runner-healthcheck.sh
+  test -x /usr/local/bin/runner-healthcheck
   test -f /etc/logrotate.d/daily
   test -f /etc/logrotate.d/supervisord
 '
