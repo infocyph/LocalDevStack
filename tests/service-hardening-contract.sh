@@ -20,14 +20,14 @@ if grep -RqsF '/var/run/docker.sock' "$ROOT/docker/compose/ai.yaml" "$ROOT/docke
 fi
 pass "Docker socket trust boundary"
 
-assert_file_contains "$db" 'PGPASSWORD="$${POSTGRES_PASSWORD}" pg_isready -U "$${POSTGRES_USER}" -h 127.0.0.1 -d "$${POSTGRES_DB}"'
-assert_file_contains "$db" 'mysqladmin ping -h127.0.0.1 -u root -p"$${MYSQL_ROOT_PASSWORD}"'
-assert_file_contains "$db" 'mysqladmin ping -h127.0.0.1 -u root -p"$${MARIADB_ROOT_PASSWORD}"'
-assert_file_contains "$db" '--username "$${MONGO_INITDB_ROOT_USERNAME}" --password "$${MONGO_INITDB_ROOT_PASSWORD}"'
-if grep -Fq '${POSTGRES_DB:-postgres}' "$db"; then
-  fail "PostgreSQL healthcheck must probe the container POSTGRES_DB value"
+assert_file_contains "$db" 'pg_isready -h 127.0.0.1'
+assert_file_contains "$db" 'test: ["CMD", "mysqladmin", "ping", "-h127.0.0.1", "--silent"]'
+assert_file_contains "$db" 'mongosh --host 127.0.0.1 --quiet --eval'
+if grep -E 'healthcheck:|PGPASSWORD=|MYSQL_ROOT_PASSWORD|MARIADB_ROOT_PASSWORD|MONGO_INITDB_ROOT_PASSWORD' "$db" |
+   grep -E 'PGPASSWORD=|MYSQL_ROOT_PASSWORD|MARIADB_ROOT_PASSWORD|MONGO_INITDB_ROOT_PASSWORD' >/dev/null; then
+  fail "database readiness probes must not embed credentials"
 fi
-pass "database health probes use container runtime state"
+pass "database health probes are credential-free local readiness checks"
 
 for file in "$companion" "$http" "$clients"; do
   assert_file_contains "$file" 'condition: service_healthy'
