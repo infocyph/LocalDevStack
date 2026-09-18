@@ -59,7 +59,6 @@ render mongodb --profile mongodb
 render redis --profile redis
 render elasticsearch --profile elasticsearch
 render elasticsearch-filebeat --profile elasticsearch --profile filebeat
-render apache --profile apache
 render ai --profile ai
 docker compose --project-directory "$ROOT" \
   -f "$ROOT/docker/compose/main.yaml" \
@@ -123,25 +122,14 @@ core_json="$("${compose[@]}" config --format json)"
 python3 -c '
 import json,sys
 d=json.load(sys.stdin)
-assert "apache" not in d.get("services", {})
+assert "apache" in d.get("services", {})
 assert "llm-sm" not in d.get("services", {})
 assert d["volumes"]["lds_tools_state"]["name"] == "ToolsState"
 tools=d["services"]["server-tools"]
 targets={v["target"] for v in tools["volumes"]}
 assert "/etc/share/state" in targets
 ' <<<"$core_json"
-pass "optional Apache/AI stay outside default stack and Tools state is persistent"
-
-apache_json="$("${compose[@]}" --profile apache config --format json)"
-python3 -c '
-import json,sys
-d=json.load(sys.stdin)
-s=d["services"]["apache"]
-assert s["image"] == "infocyph/apache:latest"
-assert s["profiles"] == ["apache"]
-assert "nginx" in s["depends_on"]
-' <<<"$apache_json"
-pass "Apache backend is activated only through its profile"
+pass "Apache remains compatibility-safe for CLI/Admin hosts, AI stays optional, and Tools state is persistent"
 
 ai_json="$("${compose[@]}" --profile ai config --format json)"
 python3 -c '
