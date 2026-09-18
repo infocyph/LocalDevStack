@@ -1956,3 +1956,100 @@ LocalDevStack must preserve the published Tools runtime-selection contract:
 - explicit user-selected versions always win.
 
 Batch 6 must not collapse these selectors into a single global PHP or Node version.
+
+
+---
+
+# Implementation completion record — 2026-09-18
+
+All planned LocalDevStack integration batches are implemented on branch `plan/docker-ecosystem-bottom-up`.
+
+## Completed batches
+
+1. **Batch 1 — CI + characterization**
+   - permanent CI foundation;
+   - CLI/env/runtime/network characterization;
+   - Windows bridge coverage;
+   - published-image checks.
+
+2. **Batch 2 — image/default policy**
+   - tracked `docker/release.env`;
+   - deterministic fallback/release/user/shell precedence;
+   - user-directed Alpine-first moving image policy;
+   - explicit Elastic aligned-version exception.
+
+3. **Batch 3 — networking/DNS migration**
+   - static `172.28/29/30` addresses removed;
+   - Docker DNS/service-name routing;
+   - deterministic legacy-network migration;
+   - `vpn-fix` deprecated.
+
+4. **Batch 4 — optional AI integration**
+   - optional `ai` profile;
+   - persistent `LLMModels`;
+   - CPU/NVIDIA/AMD modes;
+   - `https://llm.localhost`;
+   - loopback-only optional direct host port;
+   - Tools consumer wiring;
+   - `lds ai` / `lds llm` separation;
+   - fake-provider integration test.
+
+5. **Batch 5 — profiles/catalog/runtime defaults**
+   - canonical host service catalog;
+   - profile setup driven from catalog metadata;
+   - AI setup fields;
+   - published Tools profile-drift checks;
+   - interactive runtime version selection preserved.
+
+6. **Batch 6 — PHP/Node runtime modernization**
+   - Scriptomatic `main` / full-SHA contract;
+   - bounded download + non-empty/syntax validation;
+   - selected `PHP_VERSION` / `NODE_VERSION` retained inside build stage;
+   - Alpine runtime bases retained;
+   - rebuild cache preserved with `--pull`.
+
+7. **Batch 7 — CLI modularization + wrapper cleanup**
+   - `lds` split into focused `lib/*.sh` modules;
+   - Windows wrapper Docker preflight boundary corrected;
+   - wrapper/runtime/database contracts added;
+   - fixed-IP assumptions removed from wrappers.
+
+8. **Batch 8 — Compose/service hardening**
+   - health-gated service dependencies;
+   - credential-free database readiness checks;
+   - Docker socket limited to Tools/Runner;
+   - inactive PostgreSQL tuning config made explicit;
+   - unused legacy FPM config removed;
+   - Runner health/logrotate contract validated;
+   - public TLS export bridge corrected to `configuration/ssl/rootCA.pem` with legacy fallback.
+
+9. **Batch 9 — permissions/QoL/docs/release gate**
+   - broad `chmod -R 777` removed;
+   - SSH/SOPS key directories hardened;
+   - `lds urls`, `lds images`, redacted grouped `lds config`, and diagnostic-only `lds doctor`;
+   - Sphinx user documentation rewritten for the implemented architecture;
+   - dedicated local-AI guide;
+   - docs contract + warning-as-error Sphinx CI;
+   - release-gate script contains all Linux/runtime/AI/published-image contracts.
+
+## Final policy clarifications
+
+- Prefer a moving Alpine variant when an image family provides a suitable one; otherwise use its normal moving latest alias.
+- PostgreSQL defaults to `postgres:alpine`.
+- Tools, Runner, Nginx and Apache consume their published `:latest` aliases.
+- Standard LLM uses `infocyph/llm-sm:latest`; AMD/ROCm uses `infocyph/llm-sm:amd-latest`.
+- Elasticsearch, Kibana and Filebeat remain version-aligned on the tested stable version because their required image contract does not provide a suitable moving `latest` alias.
+- PHP/Node runtime selection remains user-driven and version-specific.
+- Existing named volumes and container names remain intentionally stable for this release.
+
+## Non-blocking follow-ups retained from the plan
+
+These remain future work rather than release blockers:
+
+- multi-instance container/volume namespacing;
+- automatic dependency-update PRs;
+- Docker socket proxy if it can reduce privilege without breaking supported workflows;
+- automatic GPU detection;
+- Graphify installation/management;
+- additional browser AI UI;
+- automatic model downloads beyond the provider defaults.
