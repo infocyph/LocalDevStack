@@ -30,17 +30,17 @@ fi
 pass "release and user env ownership boundaries"
 
 expected=(
-  'LDS_TOOLS_IMAGE=infocyph/tools:0.23.2'
-  'LDS_RUNNER_IMAGE=infocyph/runner:0.5'
-  'LDS_NGINX_IMAGE=infocyph/nginx:0.4.1'
-  'LDS_APACHE_IMAGE=infocyph/apache:0.4.2'
-  'LDS_LLM_IMAGE=infocyph/llm-sm:0.03'
-  'LDS_LLM_AMD_IMAGE=infocyph/llm-sm:amd-0.03'
+  'LDS_TOOLS_IMAGE=infocyph/tools:latest'
+  'LDS_RUNNER_IMAGE=infocyph/runner:latest'
+  'LDS_NGINX_IMAGE=infocyph/nginx:latest'
+  'LDS_APACHE_IMAGE=infocyph/apache:latest'
+  'LDS_LLM_IMAGE=infocyph/llm-sm:latest'
+  'LDS_LLM_AMD_IMAGE=infocyph/llm-sm:amd-latest'
 )
 for entry in "${expected[@]}"; do
   assert_file_contains "$release_env" "$entry"
 done
-pass "published compatibility manifest"
+pass "moving latest image manifest"
 
 assert_file_contains "$ROOT/lds" 'CATALOG_FILE="$CFG/catalog/services.psv"'
 assert_file_contains "$ROOT/lds" 'load_service_catalog()'
