@@ -40,3 +40,20 @@ pass "Tools and Runner publish healthchecks"
 [[ "${release[LDS_LLM_AMD_IMAGE]:-}" == "infocyph/llm-sm:amd-0.03" ]] ||
   fail "unexpected AMD LLM compatibility image"
 pass "LLM compatibility references are release-pinned"
+
+tools_profile_chooser="$(
+  docker run --rm --entrypoint cat "${release[LDS_TOOLS_IMAGE]}" /usr/local/bin/profile-chooser
+)"
+catalog="$ROOT/docker/catalog/services.psv"
+
+while IFS='|' read -r key profile _display _service_key _version_env defaults _prompts _admin _volume _url _category _optional _default_enabled _runtime_modes; do
+  [[ -n "$key" && "$key" != \#* ]] || continue
+  [[ "$profile" != "ai" ]] || continue
+
+  expected_defaults="${defaults//;/ }"
+  grep -Fq "[$key]=\"$profile\"" <<<"$tools_profile_chooser" ||
+    fail "Tools profile-chooser service mapping drift: $key -> $profile"
+  grep -Fq "[$profile]=\"$expected_defaults\"" <<<"$tools_profile_chooser" ||
+    fail "Tools profile-chooser defaults drift for profile: $profile"
+done <"$catalog"
+pass "LocalDevStack catalog matches overlapping Tools 0.23.2 profile defaults"
