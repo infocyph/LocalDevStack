@@ -698,6 +698,7 @@ Legacy alias: `lds host …` → same subcommands as `domain`.
 - `lds certificate uninstall [--all]`
 
 ## Diagnostics
+- `lds doctor`
 - `lds diag dns <domain>`
 - `lds diag net`
 - `lds diag tcp <host> <port>`
@@ -705,15 +706,17 @@ Legacy alias: `lds host …` → same subcommands as `domain`.
 - `lds diag tls <domain>`
 
 ## Config
-- `lds config show [--json]`
+- `lds config show [--json] [--raw]` *(redacted by default)*
 - `lds config services`
 - `lds config profiles`
 - `lds config env-used`
 - `lds config validate`
+- `lds images`
+- `lds urls`
 
 ## Support
-- `lds support open <mail|db|redis|kibana|domain>
-  support trace <domain>`
+- `lds support open <admin|mail|db|redis|mongo|kibana|ai|domain>`
+- `lds support trace <domain>`
 - `lds support bundle [--redact|--full]`
 - `lds support notify …`
 - `lds support ui`
@@ -775,14 +778,17 @@ ${CYAN}Certificates (TLS):${NC}
   certificate install|uninstall [--all]
 
 ${CYAN}Diagnostics:${NC}
+  doctor
   diag dns|net|tcp|http|tls
   sniff <url>                      Alias of: diag http <url>
 
 ${CYAN}Config:${NC}
   config show|services|profiles|env-used|validate
+  images
+  urls
 
 ${CYAN}Support:${NC}
-  support open <mail|db|redis|kibana|domain>
+  support open <admin|mail|db|redis|mongo|kibana|ai|domain>
   support trace <domain>
   support bundle [--redact|--full]
   support notify ...
@@ -868,8 +874,17 @@ main() {
     exit 0
   fi
 
-  # Do not require docker for pure help output; everything else expects the stack.
-  need docker
+  # Offline-safe read-only commands do not require a running Docker daemon.
+  case "$cmd" in
+  images | urls)
+    ;;
+  config)
+    [[ "${1:-}" == "env-used" ]] || need docker
+    ;;
+  *)
+    need docker
+    ;;
+  esac
 
   case "$cmd" in
   php | composer | node | npm | npx) exec "$DIR/bin/$cmd" "$@" ;;
