@@ -1938,3 +1938,21 @@ The Alpine-first moving-tag policy changes default image selection only; it does
 - persistent-volume behavior;
 - loopback-only optional Ollama host exposure;
 - compatibility/contract testing.
+
+
+## Runtime version-selection invariant
+
+The Alpine-first moving-image policy does **not** replace the existing PHP/Node runtime version selector.
+
+LocalDevStack must preserve the published Tools runtime-selection contract:
+
+- `mkhost` reads `/etc/share/runtime-versions.json`;
+- PHP runtime selection remains version-specific;
+- Node runtime selection remains version/tag-specific;
+- the selected PHP value remains the `PHP_VERSION` build arg and `localdevstack-php:<version>` image identity;
+- the selected Node value remains the `NODE_VERSION` build arg and `localdevstack-node:<version>` image identity;
+- selected PHP and Node bases continue to use their Alpine variants;
+- moving Alpine/latest defaults apply only when the user has not selected/persisted a more specific version;
+- explicit user-selected versions always win.
+
+Batch 6 must not collapse these selectors into a single global PHP or Node version.
