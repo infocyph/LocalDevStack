@@ -71,3 +71,6 @@ if grep -Fq 'local src_ca="$DIR/configuration/rootCA/rootCA.pem"' "$certs"; then
   fail "Unix CA install regressed to the legacy-only path"
 fi
 pass "all CA install paths use current export with legacy fallback"
+
+assert_file_contains "$companion" 'COMPOSE_PROFILES=${COMPOSE_PROFILES:-}'
+pass "Tools profile visibility follows LocalDevStack profile selection"
