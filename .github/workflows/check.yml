@@ -7,6 +7,10 @@ on:
       - "plan/**"
       - "feature/**"
   pull_request:
+  schedule:
+    # Related moving latest images refresh weekly; re-run the full compatibility
+    # suite after that window even when LocalDevStack source has not changed.
+    - cron: "30 2 * * 1"
   workflow_dispatch:
 
 permissions:
