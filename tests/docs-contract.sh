@@ -36,7 +36,8 @@ assert_file_contains "$storage" 'configuration/ssl/rootCA.pem'
 assert_file_contains "$tls" 'configuration/ssl/rootCA.pem'
 assert_file_contains "$tls" 'configuration/rootCA/rootCA.pem'
 assert_file_contains "$storage" 'SSLKeys / SSLRootCA'
-pass "docs distinguish runtime TLS state from public host exports"
+assert_file_contains "$storage" 'ToolsState'
+pass "docs distinguish persistent runtime/control state and public TLS exports"
 
 assert_file_contains "$ai" 'http://llm-sm:11434'
 assert_file_contains "$ai" 'https://llm.localhost'
@@ -44,7 +45,9 @@ assert_file_contains "$ai" '127.0.0.1:11434'
 assert_file_contains "$ai" 'no Docker socket'
 assert_file_contains "$ai" 'no project/repository bind mount'
 assert_file_contains "$ai" 'automatically execute model-generated shell commands'
-pass "local AI trust boundary and access paths are documented"
+assert_file_contains "$ai" 'linux/amd64 only'
+assert_file_contains "$ai" 'does not mount the project/repository into llm-sm by default'
+pass "local AI trust boundary, platform and workspace limits are documented"
 
 for stale in   'Scriptomatic/master'   'infocyph/tools:0.23.2'   'infocyph/runner:0.5'   'infocyph/nginx:0.4.1'   'infocyph/apache:0.4.2'   'infocyph/llm-sm:0.03'; do
   if grep -RqsF "$stale" "$ROOT/README.md" "$ROOT/docs" --exclude-dir=plans; then
