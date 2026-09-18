@@ -1,128 +1,116 @@
 TLS and Certificates
 ====================
 
-LocalDevStack uses **mkcert-based local TLS** for development.
+LocalDevStack uses mkcert-based local TLS for development. Tools owns certificate
+generation; Nginx, Apache, Mailpit, and runtime consumers receive only the mounts needed
+by the LocalDevStack runtime contract.
 
-At first run, it creates a **local Root CA** and issues development certificates.
-After that, it scans your vhost configs and (re)generates certificates for all detected domains.
+Runtime TLS State
+-----------------
 
-Certificates are generated and persisted under the host-mounted ``configuration/`` tree so they survive rebuilds.
+The active runtime state is stored in Docker named volumes:
 
-Generated files (host)
-----------------------
+SSLRootCA
+   mkcert CA store exposed to trusted LocalDevStack consumers at /etc/share/rootCA.
 
-LocalDevStack persists TLS artifacts in this layout::
+SSLKeys
+   generated server/client certificate material exposed at /etc/mkcert where needed.
 
-  configuration/
-  ├── rootCA
-  │   ├── rootCA-key.pem
-  │   └── rootCA.pem
-  └── ssl
-      ├── apache-client-key.pem
-      ├── apache-client.pem
-      ├── apache-server-key.pem
-      ├── apache-server.pem
-      ├── local-key.pem
-      ├── local.pem
-      ├── nginx-client-key.pem
-      ├── nginx-client.p12
-      ├── nginx-client.pem
-      ├── nginx-proxy-key.pem
-      ├── nginx-proxy.pem
-      ├── nginx-server-key.pem
-      └── nginx-server.pem
+Tools automatically refreshes certificates through certify.
 
-Notes:
+Public Host Export
+------------------
 
-- ``configuration/rootCA/rootCA.pem`` is your local development CA certificate.
-- The ``*-server*.pem`` pairs are used by Nginx/Apache for HTTPS.
-- The ``*-client*.pem`` pairs are used when **mutual TLS** is enabled for a domain.
-- ``nginx-client.p12`` is provided for convenient browser import when mutual TLS is enabled.
+Tools exports user-facing certificate artifacts to the host-mounted directory::
 
-Domain discovery
-----------------
+   configuration/ssl/
 
-Certificate generation scans all ``*.conf`` files under the shared vhost directory (mounted from your host).
-From those filenames/configs, LocalDevStack derives domain names and generates SAN certificates
-covering all detected domains.
+The public root CA is::
 
-This keeps certs aligned with your active vhost set: add/remove a domain, regenerate, done.
+   configuration/ssl/rootCA.pem
 
-Trusting the Root CA
+lds certificate install uses this path. For upgrades, the legacy
+configuration/rootCA/rootCA.pem path remains a read fallback.
+
+The public CA export is safe to install into the host trust store. The private CA key
+is not intended as a user-facing export.
+
+Optional user mTLS export is disabled by default. When explicitly enabled in Tools,
+a password-protected user P12 is exported under configuration/ssl/.
+
+Certificate Coverage
 --------------------
 
-To trust your local CA on your host system, run::
+The generated certificate SAN set includes at least::
 
-  sudo lds certificate install
+   localhost
+   *.localhost
+   127.0.0.1
+   ::1
 
-This installs ``configuration/rootCA/rootCA.pem`` into your OS trust store (where supported).
+Tools also discovers generated vhost/service domains. The *.localhost entry covers
+built-in convenience endpoints such as:
 
-Manual install is also possible:
+- admin.localhost;
+- webmail.localhost;
+- db.localhost;
+- ri.localhost;
+- me.localhost;
+- kibana.localhost;
+- llm.localhost.
 
-- Import ``configuration/rootCA/rootCA.pem`` into your OS trust store using your system UI/tools.
-- This is useful in locked-down environments where automated install is restricted.
+Installing the Root CA
+----------------------
 
-Mutual TLS (Client certificates)
---------------------------------
+Linux/macOS where supported::
 
-If you enable **mutual TLS** for any domain:
+   sudo lds certificate install
 
-- You must install the client certificate in your browser.
-- Recommended: import ``configuration/ssl/nginx-client.p12`` into the browser certificate store.
+Windows through Git Bash/lds.bat uses the CurrentUser root certificate store and does
+not require the Unix sudo path.
 
-After importing, the browser will present the client certificate when accessing mTLS-protected domains.
+After installation, restart browsers that cache trust decisions.
 
-Uninstalling the Root CA
-------------------------
+Uninstalling
+------------
 
-If you previously trusted the LocalDevStack Root CA and want to remove it from your system trust store, use::
+Remove the LocalDevStack trust anchor::
 
-  sudo lds certificate uninstall
+   sudo lds certificate uninstall
 
-This removes the installed CA file from the detected OS trust anchor location and then refreshes the system trust store
-(best-effort).
+Scan/remove known legacy anchor locations too::
 
-Remove from all known locations (cleanup mode)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   sudo lds certificate uninstall --all
 
-If you changed distros, moved CA paths, or installed it manually in different locations, use::
+This removes the host trust-store entry. It does not destroy the LocalDevStack named
+certificate volumes.
 
-  sudo lds certificate uninstall --all
+Mutual TLS
+----------
 
-This additionally scans common CA anchor locations and removes any leftover ``rootCA`` entries it finds, then refreshes
-the trust store.
+When a domain enables mutual TLS, browser/user certificate material must be imported
+separately. User-facing P12 export is intentionally opt-in and password-protected.
 
-Notes
-~~~~~
-
-- Uninstall requires sudo/admin privileges.
-- Trust store refresh is best-effort; on uncommon distributions you may need to refresh trust manually after removal.
-- This only removes the *installed* OS trust anchor. It does not delete your generated CA files under
-  ``configuration/rootCA`` (those are part of your project persistence).
-
+Internal Nginx-to-Apache mTLS material remains runtime state and is not the same as the
+user-facing client certificate.
 
 Troubleshooting
 ---------------
 
-Browser still shows “Not Secure”
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Check LocalDevStack health and TLS readiness::
 
-- Confirm the Root CA is trusted:
+   lds doctor
 
-  - Run ``lds certificate install`` again, or
-  - Manually install ``configuration/rootCA/rootCA.pem`` into your OS trust store.
+Inspect a domain TLS handshake::
 
-- Restart the browser after installing the CA (some browsers cache trust decisions).
+   lds diag tls project.localhost
 
-Certificate mismatch after changing domains
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Regenerate/diagnose through the existing certificate commands::
 
-- If you renamed/removed domains, regenerate certs so SANs match the current vhost set.
-- Ensure the vhost files under ``configuration/nginx`` / ``configuration/apache`` reflect the current domains.
+   lds cert status
+   lds cert regen all
+   lds cert diagnose project.localhost
 
-Mutual TLS enabled but browser doesn’t prompt / request fails
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-- Import the client cert (recommended): ``configuration/ssl/nginx-client.p12``.
-- Verify the client cert is imported into the *correct* browser profile.
-- If you have multiple client certs, remove old ones and retry to avoid wrong-certificate selection.
+If the host export is missing, ensure server-tools is running and certificate
+generation has completed. The current public export should appear at
+configuration/ssl/rootCA.pem.
