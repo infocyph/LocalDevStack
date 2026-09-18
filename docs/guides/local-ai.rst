@@ -151,3 +151,31 @@ Check the LocalDevStack stack non-destructively::
 List convenience endpoints::
 
    lds urls
+
+
+Platform Availability
+---------------------
+
+The current llm-sm 0.03 publication is linux/amd64 only. LocalDevStack itself remains
+usable on arm64 with the ai profile disabled. Native arm64 local-AI support should only
+be advertised after the llm-sm image publishes and validates a native arm64 runtime.
+
+Direct File and Repository Context
+----------------------------------
+
+LocalDevStack intentionally does not mount the project/repository into llm-sm by default.
+
+This means normal provider/model commands work directly, including ask, chat, model
+management, API access, and stdin-based prompts. Repository-aware analysis should use
+the Tools consumer layer by default::
+
+   lds ai review ...
+   lds ai repo-review ...
+
+For direct llm-sm commands, file/PDF/image paths must exist inside the provider
+container. Git-diff based ai-commit can be used without a repository mount by piping
+the diff through stdin to the provider CLI.
+
+The upstream llm-sm image provides an optional workspace override for explicit
+repository mounts, but LocalDevStack does not enable it automatically. That preserves
+the default no-repository-ingestion trust boundary.
