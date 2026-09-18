@@ -155,8 +155,7 @@ LocalDevStack does not:
 Repository Context
 ------------------
 
-LocalDevStack intentionally does not mount the project/repository into ``llm-sm`` by
-default.
+LocalDevStack intentionally does not mount the project/repository into llm-sm by default.
 
 Repository-aware analysis should normally use the Tools consumer layer::
 
@@ -189,8 +188,8 @@ Diagnostics
 Platform Availability
 ---------------------
 
-The current published ``llm-sm`` standard and AMD images are validated/published as
-``linux/amd64`` only.
+The current published ``llm-sm`` standard and AMD images have a linux/amd64 only
+platform contract.
 
 LocalDevStack itself can still be used on arm64 with the ``ai`` profile disabled. Native
 arm64 local-AI support should only be advertised after the provider publishes and

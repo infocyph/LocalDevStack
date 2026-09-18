@@ -826,7 +826,11 @@ ${CYAN}Diagnostics / Support:${NC}
   doctor
   diag dns|net|tcp|http|tls
   sniff <url>
-  support open|trace|bundle|notify|ui
+  support open <target>
+  support trace <domain>
+  support bundle [--redact|--full] [output.zip]
+  support notify <watch|test> ...
+  support ui
   open|bundle|notify|ui                 Shortcuts
 
 ${CYAN}Config:${NC}

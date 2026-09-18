@@ -50,6 +50,9 @@ Active Nginx/Apache vhosts do **not** live under host-side
 They are persisted in ``NginxHosts`` / ``ApacheHosts`` and are available to Tools and
 the web servers through their mounted paths.
 
+Domain listing, support traces, and support bundles all read this persisted state rather
+than a stale host-side vhost directory.
+
 Accordingly:
 
 - ``lds domain ls`` reads persisted Nginx vhost state through ``server-tools``;
@@ -72,8 +75,7 @@ Host Configuration
 ``configuration/scheduler/supervisor/``
    Runner Supervisor definitions.
 
-``configuration/sops/config/``, ``configuration/sops/global/``,
-``configuration/sops/keys/``
+``configuration/sops/config/`` / ``configuration/sops/global/`` / ``configuration/sops/keys/``
    SOPS/Age configuration, global secret data, and sensitive key material.
 
 ``configuration/ssh/``
@@ -89,7 +91,7 @@ Host Configuration
 TLS Authority
 -------------
 
-Runtime TLS state is owned by:
+Runtime TLS state is owned by the SSLKeys / SSLRootCA volume pair:
 
 - ``SSLKeys`` for server/client certificate material;
 - ``SSLRootCA`` for the mkcert CA store.

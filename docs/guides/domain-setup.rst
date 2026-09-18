@@ -59,7 +59,7 @@ Active vhosts are Docker-managed state:
 - Apache vhosts persist in ``ApacheHosts``;
 - PHP-FPM pool state persists in ``FPMPools``;
 - PHP-FPM sockets use ``FPMSocks``;
-- generated runtime Compose fragments are written under ``configuration/compose/``.
+- generated runtime Compose fragments are written under configuration/compose/.
 
 There is no active host-side ``configuration/nginx`` source of truth.
 
@@ -70,7 +70,7 @@ List persisted Nginx domains::
 
    lds domain ls
 
-The list is read through ``server-tools`` from the ``NginxHosts`` named volume.
+Domain listing reads the NginxHosts named volume through ``server-tools``.
 
 Remove a Domain
 ---------------
