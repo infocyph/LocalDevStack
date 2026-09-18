@@ -57,7 +57,7 @@ services:
     <<: *db-client-service
     container_name: KIBANA
     hostname: kibana
-    image: kibana:${ELASTICSEARCH_VERSION:-9.5.4}
+    image: kibana:${ELASTICSEARCH_VERSION:-9.5.3}
     profiles: [elasticsearch]
     depends_on:
       - elasticsearch
@@ -69,7 +69,7 @@ services:
       - ../../logs/kibana:/usr/share/kibana/logs
 
   filebeat:
-    image: docker.elastic.co/beats/filebeat:${ELASTICSEARCH_VERSION:-9.5.4}
+    image: docker.elastic.co/beats/filebeat:${ELASTICSEARCH_VERSION:-9.5.3}
     container_name: FILEBEAT
     restart: unless-stopped
     user: root
