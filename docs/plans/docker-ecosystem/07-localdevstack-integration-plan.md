@@ -1,144 +1,840 @@
-# LocalDevStack — File-by-File Integration + Product Plan
+# LocalDevStack — Final Integration, Hardening & Productization Plan
 
-## Role
+## Status
 
-`infocyph/LocalDevStack` is the product/orchestrator above all supporting Docker images. It should present a simple XAMPP-like local-development experience while hiding most Docker complexity.
+Planning branch: `plan/docker-ecosystem-bottom-up`
 
-This phase executes only after lower-level image contracts are stable.
+Product repository: `infocyph/LocalDevStack`
 
-## Product Invariants
+Baseline:
 
-- `lds` remains the single primary CLI.
-- `lds.bat` keeps Windows/Git Bash interoperability.
-- PHP and Node remain locally generated/customizable runtimes.
-- Nginx remains the default HTTP/TLS edge.
+- LocalDevStack `main`: `008c3266313d89dbc4e8243e0c1515447fdceaa9`
+- Product role: Docker-based XAMPP/MAMP/LAMP alternative for PHP + Node.js development
+- Primary CLI: `lds`
+- Windows bridge: `lds.bat`
+- Default HTTP/TLS edge: Nginx
+- Optional compatibility backend: Apache
+- PHP and Node runtimes: locally generated/customized images
+- Infrastructure images: published, independently versioned images
+- Local AI: optional, provider-backed, never required for the default stack
+
+All lower-layer ecosystem work is complete and published. This file is now the authoritative implementation plan for the LocalDevStack phase and supersedes the earlier exploratory version of this plan.
+
+## Published compatibility baseline
+
+LocalDevStack implementation must begin against this tested ecosystem set:
+
+| Layer | Contract |
+| --- | --- |
+| Scriptomatic | hardened `main`; downstreams may use `main` or an explicit full SHA |
+| Toolset | stable `2.0` release/installer contract |
+| Runner | `infocyph/runner:0.5` |
+| Nginx | `infocyph/nginx:0.4.1` |
+| Apache | `infocyph/apache:0.4.2` |
+| Tools | `infocyph/tools:0.23.2` |
+| LLM standard | `infocyph/llm-sm:0.03` |
+| LLM AMD | `infocyph/llm-sm:amd-0.03` |
+
+Do not silently replace those defaults with moving `:latest` tags during the first LocalDevStack integration release.
+
+Users may override image references explicitly, but a released LocalDevStack version must have a reproducible compatibility baseline.
+
+---
+
+# 1. Product definition
+
+LocalDevStack is not a generic production orchestrator.
+
+It is a local developer workstation product intended to provide the convenience of XAMPP/MAMP/LAMP while retaining Docker isolation and modern PHP/Node workflows.
+
+The product should make these workflows easy:
+
+1. install/initialize once;
+2. choose services and runtimes;
+3. create a local domain;
+4. get trusted local HTTPS;
+5. run PHP/Composer and Node/npm tooling;
+6. use databases and their admin clients;
+7. use local mail;
+8. run cron/Supervisor workers;
+9. inspect status/logs/health;
+10. optionally enable local AI without changing the core stack.
+
+Docker remains the implementation mechanism, not the user experience.
+
+---
+
+# 2. Final architecture
+
+Target architecture:
+
+```text
+Host
+ │
+ ├── lds / lds.bat
+ │      │
+ │      ├── setup / profiles / domains / certificates
+ │      ├── runtime generation
+ │      ├── service wrappers
+ │      └── Compose orchestration
+ │
+ └── Docker
+        │
+        ├── nginx 0.4.1
+        │     ├── project.localhost -> PHP / Apache / Node
+        │     ├── admin.localhost   -> server-tools:9911
+        │     ├── webmail.localhost -> mailpit:8025
+        │     ├── db/ri/me/kibana convenience routes
+        │     └── llm.localhost     -> llm-sm:11434
+        │
+        ├── apache 0.4.2 (optional backend)
+        ├── PHP runtimes (local builds)
+        ├── Node runtimes (local builds)
+        ├── server-tools 0.23.2
+        │     ├── host/domain/TLS/config control plane
+        │     ├── monitoring/admin panel
+        │     ├── askai / aiops / gitx AI consumer paths
+        │     └── http://llm-sm:11434
+        │
+        ├── runner 0.5
+        │     └── Supervisor / cron / logrotate / sibling exec
+        │
+        ├── mailpit
+        ├── databases and admin clients
+        │
+        └── llm-sm 0.03 (optional)
+              ├── qwen2.5:3b baked default
+              ├── persistent /root/.ollama
+              └── Ollama API :11434
+```
+
+Service-to-service AI traffic must use:
+
+```text
+http://llm-sm:11434
+```
+
+Host/user-facing AI traffic must use:
+
+```text
+https://llm.localhost
+```
+
+Do not route Tools -> LLM traffic through Nginx.
+
+---
+
+# 3. Product invariants
+
+These are hard constraints for the LocalDevStack phase.
+
+## 3.1 CLI and platform
+
+- `lds` remains the primary user-facing CLI.
+- `lds.bat` remains the Windows/Git-Bash bridge.
+- Existing public commands/aliases should remain compatible unless a command is proven obsolete.
+- Refactoring the implementation must not force users to learn Docker Compose internals.
+- Linux, macOS, WSL/Git Bash and Windows Docker Desktop behavior must remain intentionally supported where the current product already targets them.
+
+## 3.2 Runtime model
+
+- PHP remains locally generated from official `php:<version>-fpm-alpine`.
+- Node remains locally generated from official `node:<version>-alpine`.
+- User-selected packages/extensions/globals remain supported.
+- Host UID/GID alignment remains supported.
+- Project source remains bind-mounted; it is never baked into infrastructure images.
+
+## 3.3 HTTP model
+
+- Nginx remains the only default host-facing HTTP/TLS edge.
 - Apache remains optional.
-- databases/admin clients/mail/runner remain selectively enabled through profiles/configuration.
-- local TLS and multiple domains remain first-class.
-- AI remains optional.
-- persisted DB/cache/mail/model data survives container recreation.
-- project source remains host-mounted, not copied into infrastructure images.
+- Local certificates remain generated/owned by LocalDevStack/Tools, not Nginx or Apache.
+- Project routing and infrastructure routing must use Docker DNS/service names.
+- Static container IPs are not product contracts.
 
-## Top-Level Files
+## 3.4 State model
 
-### New `.github/workflows/check.yml`
+The following must survive container recreation:
 
-Add product-level CI before major refactoring.
+- database data;
+- Redis data where persistence is enabled;
+- Mailpit data;
+- LocalDevStack generated/shared state;
+- Composer global state where currently persisted;
+- Git config state where currently persisted;
+- AI model state under `/root/.ollama`.
 
-Required stages:
+Deleting volumes must remain an explicit destructive action.
 
-1. `bash -n` for `lds` and Bash wrappers;
-2. ShellCheck for maintained scripts with explicit suppressions;
-3. validate `lds.bat` static expectations where Windows runners are practical;
-4. Compose configuration validation with representative profile sets;
-5. generated PHP runtime Compose fixture;
-6. generated Node runtime Compose fixture;
-7. canonical service-catalog schema validation;
-8. smoke `lds help`, `lds config`, profile parsing, env handling without destructive host operations;
-9. integration job using released supporting images for core Nginx/Tools/Runner flow;
-10. optional heavier domain/TLS/runtime smoke job.
+## 3.5 AI model
 
-Use Linux CI as baseline; add Windows CI for bridge/path-specific behavior rather than trying to run every container integration twice.
+- AI is optional.
+- `docker-tools` is an AI consumer, never an Ollama runtime.
+- `docker-llm-sm` is the only LocalDevStack Ollama/model runtime.
+- LocalDevStack must remain fully usable when `llm-sm` is absent.
+- No automatic execution of model-generated shell, SQL or code is introduced.
+- No external/cloud AI fallback is added by LocalDevStack.
+- No Docker socket is mounted into `llm-sm`.
+- No repository/workspace is mounted into `llm-sm` by default.
 
-### `.gitignore`
+## 3.6 Single-stack compatibility
 
-Current file is allowlist-oriented.
+The current product uses fixed container names and globally named volumes.
 
-Plan:
+For this release:
 
-- keep the allowlist model if intentional;
-- whitelist new static product resources such as `docker/catalog/**`, tests and CI fixtures;
-- keep generated runtime `.env`, certificates, secrets, logs and user-generated Compose artifacts ignored;
-- make the tracked-vs-generated boundary explicit.
+- preserve those names unless a concrete bug requires change;
+- do not combine the networking migration with a container/volume naming migration;
+- document that the current architecture is optimized for one LocalDevStack installation per Docker engine.
 
-### `.gitattributes`
+Multi-stack namespacing may be a later project. It must not risk existing user data in this integration release.
 
-Preserve LF shell scripts and Windows batch compatibility. Add path-specific rules only if needed.
+---
 
-### `README.md`
+# 4. Implementation strategy
 
-Rewrite after implementation to present the product as a Docker-based XAMPP alternative for PHP + Node.
+The LocalDevStack work should be implemented bottom-up inside this repository.
 
-Quickstart should prioritize:
+Do not begin by splitting the 100+ KB `lds` file.
 
-- install Docker;
-- clone/setup `lds`;
-- select services/runtime;
-- create domain;
-- trust local CA;
-- work through `lds php`, `lds composer`, Node/npm commands and service shortcuts.
+First establish CI and compatibility characterization, then change orchestration, then modularize code.
 
-Keep advanced internals in docs, not the first screen.
+Each implementation batch has three phases:
 
-### `LICENSE`
+1. **Implement** — make the bounded change.
+2. **Validate** — static/unit/Compose/runtime checks.
+3. **Integrate** — exercise the change through `lds` and the published images.
 
-No change.
+Recommended order:
 
-## `lds` Modularization
+- Batch 1 — CI + characterization
+- Batch 2 — release/image defaults
+- Batch 3 — networking/DNS migration
+- Batch 4 — optional AI integration
+- Batch 5 — profiles/catalog/runtime defaults
+- Batch 6 — PHP/Node build modernization
+- Batch 7 — `lds` modularization + wrapper cleanup
+- Batch 8 — config/log/socket hardening
+- Batch 9 — documentation/QoL/release gate
 
-### Existing `lds`
+A batch should leave the branch usable before moving to the next one.
 
-Do not rewrite behavior in one step.
+---
 
-Migration sequence:
+# 5. Batch 1 — CI and behavior characterization
 
-1. add characterization tests around current commands;
-2. identify stable command/public-output contracts;
-3. extract internal modules while leaving `lds` as bootstrap/dispatcher;
-4. only then simplify duplicated code.
+## 5.1 New `.github/workflows/check.yml`
 
-Target layout:
+This is the first implementation task.
 
-- `lds` — bootstrap, global flag parsing, command dispatch;
-- `lib/core.sh` — errors, output, command/tool lookup, OS detection;
-- `lib/compose.sh` — Compose wrapper, service resolution, profiles/extras;
-- `lib/env.sh` — dotenv read/write/quoting and product defaults;
-- `lib/catalog.sh` — canonical service/runtime catalog reader;
-- `lib/profiles.sh` — service/profile selection and persistence;
-- `lib/hosts.sh` — mkhost/rmhost integration and reload lifecycle;
-- `lib/certificates.sh` — host trust-store install/uninstall;
-- `lib/runtime.sh` — PHP/Node/runtime-image generation/rebuild integration;
-- `lib/diagnostics.sh` — doctor/diag/sniff/status helpers;
-- `lib/maintenance.sh` — clean/disk/events/rebuild operations;
-- `lib/platform.sh` — Windows/macOS/Linux path/platform helpers when separation is useful.
+Required jobs:
+
+### Static shell validation
+
+Validate:
+
+- `lds`;
+- executable files under `bin/`;
+- new `lib/*.sh` modules once introduced;
+- maintained shell fixtures.
+
+Use:
+
+- `bash -n`;
+- ShellCheck with explicit, documented suppressions only.
+
+Do not globally ignore broad ShellCheck classes to make CI green.
+
+### Batch/Windows bridge validation
+
+At minimum:
+
+- parse/static-check `lds.bat` expectations;
+- validate paths containing spaces;
+- validate Git-for-Windows Bash discovery assumptions;
+- validate caller working-directory preservation.
+
+A Windows runner should be added for bridge-specific smoke tests when practical.
+
+Do not duplicate the entire Linux Docker integration suite on Windows.
+
+### Compose validation
+
+Run `docker compose config` for representative matrices:
+
+- core only;
+- core + Apache;
+- each DB profile;
+- Elasticsearch + Kibana/Filebeat;
+- AI CPU;
+- AI NVIDIA override config syntax;
+- AI AMD override config syntax;
+- generated PHP runtime;
+- generated Node runtime.
+
+Compose validation must catch missing variables, duplicate keys, invalid profiles and invalid override merges.
+
+### CLI characterization
+
+Add non-destructive tests for:
+
+- `lds help`;
+- `lds setup` routing;
+- profile parsing;
+- dotenv reads/writes;
+- compose-file resolution;
+- runtime selection;
+- aliases;
+- status/doctor/config commands;
+- domain argument validation;
+- unknown-command handling;
+- commands that should work without Docker where applicable.
+
+### Published-image core integration
+
+Use the exact compatibility baseline:
+
+```text
+infocyph/tools:0.23.2
+infocyph/runner:0.5
+infocyph/nginx:0.4.1
+infocyph/apache:0.4.2
+```
+
+Validate:
+
+- Tools reaches healthy state using its own healthcheck;
+- Runner reaches healthy state;
+- Nginx validates and starts;
+- Apache validates and starts when enabled;
+- `admin.localhost` routes to Tools;
+- core containers resolve each other through Docker DNS;
+- clean SIGTERM/Compose down behavior.
+
+### AI integration smoke without model download
+
+Do not download a 3B model on every LocalDevStack PR.
+
+Use a lightweight fake Ollama-compatible service named `llm-sm` for the normal PR test.
+
+Validate:
+
+- Tools `askai --status` reaches `http://llm-sm:11434`;
+- Tools `aiops provider` works;
+- Nginx `llm.localhost` reaches the fake service;
+- streamed response is not buffered incorrectly;
+- AI absence leaves core services healthy.
+
+A manual/release-gate job may optionally exercise the real published `infocyph/llm-sm:0.03`, because that image already has its own model-bearing runtime gate.
+
+## 5.2 New `tests/`
+
+Suggested layout:
+
+```text
+tests/
+  lib/
+    assertions.sh
+    fixtures.sh
+  static.sh
+  cli-contract.sh
+  env-contract.sh
+  compose-contract.sh
+  networking-contract.sh
+  runtime-php-contract.sh
+  runtime-node-contract.sh
+  ai-contract.sh
+  release-gate.sh
+  fixtures/
+    env/
+    compose/
+    projects/
+    fake-ollama/
+```
+
+Keep fixtures disposable.
+
+Never commit real certificates, private keys, SOPS keys or user secrets.
+
+---
+
+# 6. Batch 2 — Compatibility image defaults
+
+## 6.1 New tracked `docker/release.env`
+
+Create a committed compatibility manifest.
+
+Initial values:
+
+```text
+LDS_TOOLS_IMAGE=infocyph/tools:0.23.2
+LDS_RUNNER_IMAGE=infocyph/runner:0.5
+LDS_NGINX_IMAGE=infocyph/nginx:0.4.1
+LDS_APACHE_IMAGE=infocyph/apache:0.4.2
+LDS_LLM_IMAGE=infocyph/llm-sm:0.03
+LDS_LLM_AMD_IMAGE=infocyph/llm-sm:amd-0.03
+```
 
 Rules:
 
-- sourced modules are not user-facing commands;
-- no module should execute work merely when sourced;
-- keep `set -euo pipefail` behavior intentional;
-- avoid global mutable state where function-local state works;
-- preserve existing command aliases until a documented deprecation.
+- this file is owned by the LocalDevStack release;
+- user overrides belong in `docker/.env`;
+- user overrides always win;
+- `lds` should load release defaults before user overrides;
+- do not copy release defaults into a user file on every update;
+- upgrades should not overwrite user values.
 
-### `lds.bat`
+The exact implementation may use repeated Compose `--env-file` flags or controlled export/merge logic in `lds`, but precedence must be deterministic and covered by tests.
 
-Plan:
+## 6.2 Compose image references
 
-- preserve Git-for-Windows Bash bridge;
-- preserve caller working directory and Windows->Unix path conversion;
-- validate Docker installed/running errors;
-- add CI/static smoke for quoting paths containing spaces;
-- avoid duplicating `lds` command semantics in batch.
+Replace hard-coded:
 
-## Canonical Service Catalog
+```text
+infocyph/tools:latest
+infocyph/runner:latest
+infocyph/nginx:latest
+infocyph/apache:latest
+```
 
-### New `docker/catalog/services.json`
+with:
 
-Create one canonical product catalog consumed by `lds` and mounted/read by `docker-tools`.
+```yaml
+image: ${LDS_TOOLS_IMAGE:-infocyph/tools:0.23.2}
+image: ${LDS_RUNNER_IMAGE:-infocyph/runner:0.5}
+image: ${LDS_NGINX_IMAGE:-infocyph/nginx:0.4.1}
+image: ${LDS_APACHE_IMAGE:-infocyph/apache:0.4.2}
+```
 
-Initial schema should describe at least:
+Do the equivalent for `llm-sm`.
 
-- service/profile key;
+## 6.3 Update command / future dependency bumps
+
+Do not silently mutate release defaults at runtime.
+
+A future QoL command may report newer releases, for example:
+
+```text
+lds update check
+```
+
+but it should not rewrite compatibility pins without explicit user action.
+
+A future CI workflow may test proposed dependency bumps and open a PR, but that is not required to complete this phase.
+
+---
+
+# 7. Batch 3 — Remove static-IP architecture
+
+This is the largest orchestration cleanup before AI/profile work.
+
+## 7.1 `docker/compose/main.yaml`
+
+Keep logical networks:
+
+- `frontend`;
+- `backend`;
+- `datastore`.
+
+Remove:
+
+- hard-coded `172.28.0.0/24`;
+- hard-coded `172.29.0.0/24`;
+- hard-coded `172.30.0.0/24`;
+- explicit gateway declarations.
+
+Target:
+
+```yaml
+networks:
+  frontend:
+    driver: bridge
+  backend:
+    driver: bridge
+  datastore:
+    driver: bridge
+```
+
+Preserve current labels where they are useful for LocalDevStack discovery.
+
+Do not rename networks in the same migration unless necessary.
+
+## 7.2 `docker/compose/companion.yaml`
+
+Remove all `ipv4_address` entries.
+
+Preserve service DNS names:
+
+- `server-tools`;
+- `runner`;
+- `mailpit`.
+
+Retain the network membership actually required by each service.
+
+Do not attach services to every network merely for convenience.
+
+## 7.3 `docker/compose/http.yaml`
+
+Remove fixed Nginx/Apache addresses.
+
+Nginx must route by service name only.
+
+Preserve:
+
+- host `80/443` bindings;
+- vhost volume;
+- cert/root-CA mounts;
+- FPM socket volume;
+- logs;
+- `host.docker.internal:host-gateway` only if a real supported path still requires it.
+
+Normalize Apache restart behavior to `unless-stopped` unless a tested reason requires `always`.
+
+## 7.4 `docker/compose/db.yaml`
+
+Remove every datastore `ipv4_address`.
+
+Keep hostnames/service names as the application contract:
+
+- `redis`;
+- `postgres`;
+- `mysql`;
+- `mongodb`;
+- `mariadb`;
+- `elasticsearch`.
+
+## 7.5 `docker/compose/db-client.yaml`
+
+Remove fixed addresses on both `frontend` and `datastore`.
+
+Admin clients must use service DNS.
+
+## 7.6 `lds vpn-fix`
+
+Characterize the current behavior before removal.
+
+If the command only exists to work around collisions created by LocalDevStack's fixed subnets:
+
+- deprecate it in this release;
+- keep a compatibility message for one release if useful;
+- remove related routing mutation code after tests prove dynamic Docker networks solve the original problem.
+
+If some independent VPN behavior is still useful, rename/re-scope the command to that actual function rather than preserving obsolete subnet assumptions.
+
+## 7.7 Networking acceptance tests
+
+Validate all of these without fixed IPs:
+
+- Nginx -> Tools;
+- Nginx -> Mailpit;
+- Nginx -> DB UIs;
+- Nginx -> Apache;
+- Nginx -> Node app;
+- Nginx -> llm-sm;
+- Tools -> DB/service diagnostics;
+- Tools -> llm-sm;
+- Runner -> PHP/Node sibling execution;
+- DB clients -> databases;
+- Filebeat -> Elasticsearch;
+- generated project vhosts.
+
+---
+
+# 8. Batch 4 — Optional local AI integration
+
+AI should become a first-class optional LocalDevStack capability while remaining absent from the default stack.
+
+## 8.1 New `docker/compose/ai.yaml`
+
+Base service:
+
+```yaml
+services:
+  llm-sm:
+    image: ${LDS_LLM_IMAGE:-infocyph/llm-sm:0.03}
+    restart: unless-stopped
+    profiles: [ai]
+    volumes:
+      - lds_llm:/root/.ollama
+    networks:
+      - frontend
+      - backend
+```
+
+Important rules:
+
+- service key must be exactly `llm-sm`;
+- do not set a fixed IP;
+- do not require `container_name`;
+- do not mount Docker socket;
+- do not expose `11434` to all interfaces;
+- do not add a host port in the base AI file;
+- do not add an automatic repository/workspace mount;
+- do not add cloud fallback.
+
+Why both networks:
+
+- Nginx must reach `llm-sm:11434` for `https://llm.localhost`;
+- Tools must reach `llm-sm:11434` directly for AI consumer commands.
+
+## 8.2 `docker/compose/main.yaml` volume
+
+Add:
+
+```yaml
+lds_llm:
+  name: LLMModels
+```
+
+or a similarly consistent LocalDevStack volume name.
+
+Mount it to:
+
+```text
+/root/.ollama
+```
+
+The volume is authoritative runtime model state.
+
+A fresh volume receives the image-baked `qwen2.5:3b`.
+
+Existing populated volumes must never be silently replaced/reset during upgrades.
+
+## 8.3 CPU / NVIDIA / AMD runtime selection
+
+Do not implement unreliable GPU auto-detection as an orchestration requirement.
+
+Provide explicit runtime modes:
+
+```text
+cpu
+nvidia
+amd
+```
+
+Recommended static overrides:
+
+```text
+docker/compose/ai-nvidia.yaml
+docker/compose/ai-amd.yaml
+```
+
+NVIDIA:
+
+- keep `LDS_LLM_IMAGE`;
+- add GPU access using the Compose mechanism supported by current Docker Desktop/Engine.
+
+AMD:
+
+- use `LDS_LLM_AMD_IMAGE`;
+- expose `/dev/kfd`;
+- expose `/dev/dri`.
+
+Store the selected mode in LocalDevStack env/state.
+
+Do not change image variants automatically because a GPU happens to be detected.
+
+## 8.4 Optional direct host API
+
+Default LocalDevStack access is:
+
+```text
+https://llm.localhost
+```
+
+Do not expose `11434` by default.
+
+If developers explicitly need direct Ollama access, add an optional override such as:
+
+```text
+docker/compose/ai-host-port.yaml
+```
+
+binding only:
+
+```text
+127.0.0.1:${LLM_SM_PORT:-11434}:11434
+```
+
+Never default to `0.0.0.0:11434`.
+
+## 8.5 Nginx integration
+
+No new Nginx image changes are required.
+
+`nginx:0.4.1` already reserves:
+
+```text
+llm.localhost -> llm-sm:11434
+```
+
+and uses lazy Docker DNS resolution plus streaming proxy behavior.
+
+LocalDevStack must validate:
+
+- certificate coverage for `llm.localhost`;
+- HTTP -> HTTPS redirect;
+- `/api/tags`;
+- `/api/generate`;
+- `/api/chat`;
+- OpenAI-compatible `/v1/...`;
+- stream passthrough;
+- expected 502/unavailable behavior when AI profile is disabled, without affecting Nginx startup.
+
+## 8.6 Tools integration
+
+Pass the published Tools AI contract into `server-tools`:
+
+```text
+LDS_AI_ENABLED=auto
+LDS_AI_PROVIDER=ollama
+LDS_AI_URL=http://llm-sm:11434
+LDS_AI_MODEL=qwen2.5:3b
+```
+
+Allow user overrides.
+
+Also pass through supported advanced limits only when the user sets them:
+
+- `LDS_AI_CONNECT_TIMEOUT`;
+- `LDS_AI_PREFLIGHT_TIMEOUT`;
+- `LDS_AI_TIMEOUT`;
+- `LDS_AI_AVAILABILITY_TTL`;
+- `LDS_AI_MAX_CONTEXT_BYTES`;
+- `LDS_AI_MAX_REQUEST_BYTES`;
+- `LDS_AI_MAX_RESPONSE_BYTES`.
+
+Why LocalDevStack should default `LDS_AI_MODEL=qwen2.5:3b`:
+
+- `llm-sm:0.03` ships that model;
+- Tools intentionally reports ambiguity when multiple models are installed and no model is selected;
+- users may pull more models without breaking Tools AI workflows.
+
+Users can change `LDS_AI_MODEL` explicitly.
+
+Do not make Tools pull/remove models.
+
+## 8.7 AI CLI UX
+
+Add a thin LocalDevStack surface without duplicating provider implementations.
+
+Recommended commands:
+
+```text
+lds ai status
+lds ai ask ...
+lds ai explain ...
+lds ai troubleshoot ...
+lds ai review ...
+lds ai repo-review ...
+lds ai graphify ...
+```
+
+Map these to the published Tools commands:
+
+- `askai`;
+- `aiops`.
+
+Recommended provider/model-management pass-through:
+
+```text
+lds llm models
+lds llm ps
+lds llm show [model]
+lds llm pull <model>
+lds llm rm <model>
+lds llm unload [model]
+lds llm run <model> ...
+lds llm chat [model]
+lds llm prompt ...
+lds llm code ...
+lds llm review ...
+lds llm json ...
+lds llm ai-commit ...
+```
+
+These should delegate to the bundled `llm-sm` CLI inside the provider container.
+
+LocalDevStack must not reimplement Ollama/model logic.
+
+## 8.8 Workspace/repository access
+
+Default: no project mount into `llm-sm`.
+
+Tools already has the LocalDevStack project mounted at `/app` and its AI layer applies size/sensitivity/redaction guards.
+
+For direct `llm-sm` repository-aware commands:
+
+- prefer stdin/file transfer where practical;
+- optionally provide a separate read-only workspace override;
+- default the workspace mount to read-only;
+- require explicit opt-in for writable workspace access.
+
+Never automatically mount arbitrary host repositories.
+
+## 8.9 Graphify
+
+Do not install Graphify into `llm-sm` or Tools solely for this integration.
+
+Supported patterns:
+
+- host Graphify -> `https://llm.localhost/v1`;
+- container Graphify on a shared network -> `http://llm-sm:11434/v1`;
+- Tools `aiops graphify --file <output>` -> analyze an explicitly supplied Graphify output file.
+
+Graphify remains an external consumer/tool.
+
+## 8.10 AI admin panel
+
+Do not create a second AI web UI in LocalDevStack.
+
+Use the AI capability already shipped in `tools:0.23.2` and exposed through:
+
+```text
+https://admin.localhost
+```
+
+LocalDevStack's responsibility is to provide correct provider env/networking.
+
+---
+
+# 9. Batch 5 — Profiles, defaults and service metadata
+
+## 9.1 Current duplication
+
+Today profile/service defaults exist in more than one place:
+
+- LocalDevStack `lds`;
+- Tools `profile-chooser`.
+
+Because `tools:0.23.2` is already a published lower-layer contract, LocalDevStack must not require another Tools release to complete this phase.
+
+## 9.2 LocalDevStack canonical host-side catalog
+
+Add a host-side product catalog such as:
+
+```text
+docker/catalog/services.json
+```
+
+Use it for new/rewritten LocalDevStack profile logic.
+
+Schema should support:
+
+- profile key;
 - display name;
-- image/version env variable;
-- default version/value;
-- setup prompt fields/defaults;
-- related admin client profile/service where applicable;
-- convenience route metadata where useful;
-- persistence volume identifier;
-- optional health/dependency metadata only when needed by orchestration.
+- service key;
+- image/version env key;
+- default values;
+- setup prompts;
+- optional admin client;
+- persistence volume;
+- convenience URL;
+- category;
+- whether the service is optional/default;
+- AI runtime metadata where appropriate.
 
-Initial catalog covers:
+Initial entries:
 
 - PostgreSQL;
 - MySQL;
@@ -146,352 +842,1050 @@ Initial catalog covers:
 - MongoDB;
 - Redis;
 - Elasticsearch;
-- optional AI service metadata in a separate capability section or same versioned schema.
+- AI.
 
-Do not put secrets directly in catalog. Default dev credentials may be expressed as defaults but user values live in env state.
+Do not place user secrets in the catalog.
 
-### Remove duplicated profile defaults
+## 9.3 Compatibility with Tools profile chooser
 
-After `docker-tools` supports external catalog:
+Do not block LocalDevStack release on making Tools consume the catalog.
 
-- replace hard-coded `SERVICES`/`PROFILE_ENV` duplication in `lds` with catalog reads;
-- mount catalog into `server-tools`;
-- remove Tools fallback duplication only after compatibility period/tests.
+For this release:
 
-## `bin/` Wrappers
+- LocalDevStack host setup uses its own catalog;
+- Tools `profile-chooser` remains a compatible standalone Tools capability;
+- add a contract test that detects material drift between LocalDevStack defaults and Tools defaults where they overlap.
 
-### `bin/tool-runner`
+A future Tools release may add external-catalog support. That is a later cleanup, not a prerequisite.
 
-- keep common container execution/path/TTY logic centralized;
-- make it the reusable primitive for thin service wrappers where possible;
-- ensure Windows path conversion and UID/GID behavior are tested;
-- propagate exit codes and signals.
+## 9.4 AI profile setup
 
-### `bin/php`
+Extend `lds setup profile` to include optional AI.
 
-- preserve runtime selection/highest-version fallback;
-- keep explicit `--php/-V` selection;
-- preserve ad-hoc execution using the selected runtime image;
-- validate bind mount and user mapping on Linux/macOS/Windows;
-- keep `serve` mode if still useful, but separate it cleanly from normal CLI execution;
-- align Git safe-directory behavior for mounted projects.
+Prompt only relevant AI settings:
 
-### `bin/composer`
+- enable AI yes/no;
+- runtime `cpu|nvidia|amd`;
+- preferred model default `qwen2.5:3b`;
+- optional direct localhost port yes/no.
 
-- reduce duplicated runtime-resolution code by consuming `tool-runner`/shared helper where possible;
-- preserve PHP-version selection and versioned Composer home;
-- test install/update/global operations against mounted project.
+Do not ask users for low-level timeout/byte-limit settings during normal setup.
 
-### `bin/my`
+Advanced variables remain manual env overrides.
 
-- preserve MySQL login/query/export/import helper behavior;
-- resolve service by Compose name/labels, not static IP;
-- keep credentials from environment;
-- validate quoting and database/file paths.
+---
 
-### `bin/maria`
+# 10. Batch 6 — PHP and Node runtime build modernization
 
-Same principles as `bin/my`, using MariaDB client/service contract.
+## 10.1 `docker/dockerfiles/php.Dockerfile`
 
-### `bin/pg`
+Preserve:
 
-- preserve PostgreSQL login/query/dump/restore helpers;
-- DNS service name only;
-- environment-driven credentials;
-- test dump/restore with temporary DB.
+```dockerfile
+ARG PHP_VERSION=8.4
+FROM php:${PHP_VERSION}-fpm-alpine
+```
 
-### `bin/mongo`
+Replace stale Scriptomatic `master` download.
 
-- preserve mongosh/login/import/export helpers;
-- DNS service name only;
-- environment-driven auth;
-- no replica-set assumption in default flow.
+Introduce:
 
-### `bin/redis-cli`
+```dockerfile
+ARG SCRIPTOMATIC_REF=main
+```
 
-- preserve thin Redis CLI behavior;
-- DNS service name and optional auth env;
-- keep wrapper small.
+Fetch:
 
-### `bin/es`
+```text
+https://raw.githubusercontent.com/infocyph/Scriptomatic/${SCRIPTOMATIC_REF}/bash/php-cli-setup.sh
+```
 
-- preserve Elasticsearch API/helper behavior;
-- use service name rather than fixed IP;
-- validate ES 9.x/current compatibility via version-aware requests;
-- no hidden Kibana dependency for core ES commands.
+Pass the same `SCRIPTOMATIC_REF` into the bootstrap so sibling Scriptomatic helpers come from the same revision.
 
-## Docker Compose Files
+Requirements:
 
-### `docker/compose/main.yaml`
+- bounded curl retries/timeouts;
+- verify non-empty script;
+- `bash -n` before execution;
+- retain UID/GID;
+- retain package/extension args;
+- retain PHP profile key;
+- retain non-root developer user;
+- retain FPM entrypoint;
+- retain Composer-home separation.
 
-Major network migration:
+Do not add a direct Toolset download to this Dockerfile. Scriptomatic owns the current Toolset stable installer contract.
 
-- keep logical `frontend`, `backend`, `datastore` bridge networks;
-- remove hard-coded subnets/gateways after integration validation;
-- remove need for fixed container IPv4 values from included files;
-- keep named persistent volumes;
-- add AI model volume only when AI profile integration lands;
-- consider namespacing globally fixed volume/network names if multi-stack coexistence needs it; do not break existing data without migration guidance.
+Default may remain `SCRIPTOMATIC_REF=main`.
 
-### `docker/compose/companion.yaml`
+A LocalDevStack release or user may override it with a full SHA when exact reproducibility is needed.
 
-Services: `server-tools`, `runner`, `mailpit`.
+## 10.2 `docker/dockerfiles/node.Dockerfile`
 
-Plan:
+Apply the equivalent Scriptomatic contract:
 
-- replace static IPv4 declarations with networks/service DNS;
-- move infrastructure image references from hard-coded `:latest` to environment-controlled compatibility-tested versions;
-- mount canonical service catalog into `server-tools` read-only;
-- inventory Docker socket usage for both Tools and Runner;
-- preserve project/config/scheduler/SOPS/SSH/SSL/log mounts;
-- preserve Mailpit persistent data and local TLS;
-- add health/dependency conditions only where they improve deterministic startup without deadlocks.
+```dockerfile
+ARG SCRIPTOMATIC_REF=main
+```
 
-### `docker/compose/http.yaml`
+Preserve:
 
-Services: Nginx + optional Apache.
+- selectable Node version;
+- UID/GID;
+- Linux packages;
+- global Node packages;
+- non-root user;
+- npm/Corepack behavior;
+- Node entrypoint.
 
-Plan:
+## 10.3 Runtime image identity
 
-- remove static IPs;
-- version image refs through LocalDevStack defaults/env;
-- keep Nginx host 80/443 binding configurable;
-- preserve project/vhost/cert/rootCA/FPM socket/log mounts;
-- preserve Apache as internal backend;
-- use service names for dependency/routing;
-- reconsider `restart: always` vs consistent `unless-stopped` behavior for local dev.
+Keep:
 
-### `docker/compose/db.yaml`
+```text
+localdevstack-php:<version/profile>
+localdevstack-node:<version/profile>
+```
 
-Services: Redis, PostgreSQL, MySQL, MongoDB, MariaDB, Elasticsearch.
+Do not publish the combinatorial PHP/Node runtime matrix.
 
-Plan:
+## 10.4 Build caching
 
-- remove all static IPv4 assignments;
-- source default version/env metadata from canonical catalog;
-- retain named volumes;
-- review data-directory mount correctness per current upstream images (especially PostgreSQL version changes);
-- retain healthchecks but correct variable-name mismatches (`POSTGRES_DATABASE` vs `POSTGRES_DB`, etc.);
-- avoid `latest` defaults for compatibility-sensitive DB majors where a stable major is preferable;
-- keep local-development credentials configurable and clearly non-production.
+Avoid rebuilding unchanged local runtime images unnecessarily.
 
-### `docker/compose/db-client.yaml`
+The runtime-image identity/hash should account for inputs that affect the image:
 
-Services: RedisInsight, CloudBeaver, Mongo Express, Kibana, Filebeat.
+- runtime version;
+- Scriptomatic ref;
+- UID/GID;
+- selected extensions/packages/globals;
+- relevant Dockerfile revision.
 
-Plan:
+A later optimization may use labels or a deterministic configuration hash.
 
-- remove static IP assignments;
-- use datastore service DNS;
-- keep profile coupling explicit;
-- version client images where breaking major drift is possible;
-- validate persistent workspace/data volumes;
-- ensure clients tolerate target DB starting later (health/retry rather than immediate failure where possible).
+Do not let caching return a runtime built with different extension/package inputs.
 
-## PHP / Node Runtime Dockerfiles
+---
 
-### `docker/dockerfiles/php.Dockerfile`
+# 11. Batch 7 — Modularize `lds` safely
 
-- keep `ARG PHP_VERSION` + upstream `php:<version>-fpm-alpine` model;
-- add `SCRIPTOMATIC_REF` and `TOOLSET_REF`/related immutable dependency inputs;
-- stop fetching setup script from floating Scriptomatic master;
-- preserve UID/GID, extension/package and profile-key build args;
-- validate image as non-root developer user and PHP-FPM service;
-- keep build local because combinations are user-selected.
+The current `lds` file is over 100 KB.
 
-### `docker/dockerfiles/node.Dockerfile`
+Refactor only after Batches 1–6 have tests.
 
-- keep selectable upstream Node Alpine version;
-- pin Scriptomatic/Toolset helper revisions;
-- preserve UID/GID/packages/globals customization;
-- preserve non-root user;
-- validate npm/corepack and project startup behavior;
-- keep build local.
+## 11.1 Target layout
 
-## Docker Config Files
+```text
+lds
+lib/
+  core.sh
+  platform.sh
+  env.sh
+  compose.sh
+  profiles.sh
+  catalog.sh
+  runtime.sh
+  hosts.sh
+  certificates.sh
+  services.sh
+  ai.sh
+  diagnostics.sh
+  maintenance.sh
+```
 
-### `docker/conf/filebeat.yml`
+Suggested ownership:
 
-- validate against current Filebeat/Elasticsearch major;
-- paths must match mounted LocalDevStack log layout;
-- no fixed IP endpoints.
+### `lds`
 
-### `docker/conf/openssl.cnf`
+Only:
 
-- validate local dev compatibility with generated certificates/current OpenSSL;
-- avoid weakening global TLS unnecessarily;
-- document why overrides exist.
+- bootstrap;
+- global option parsing;
+- command dispatch;
+- help/version entrypoints.
 
-### `docker/conf/pg_hba.conf`
+### `lib/core.sh`
 
-- review trust/auth scope for isolated local Docker network;
-- preserve password auth expectations;
-- no fixed subnet assumptions after network migration.
+- output/error helpers;
+- command requirements;
+- common argument helpers;
+- temporary-file helpers.
 
-### `docker/conf/postgresql.conf`
+### `lib/platform.sh`
 
-- decide whether it remains intentionally unused/commented or should become active;
-- if unused, avoid presenting it as active configuration in docs;
-- if enabled, version-test it.
+- OS/WSL detection;
+- Docker Desktop detection where needed;
+- path conversion helpers;
+- browser/open helpers.
 
-### `docker/conf/www-php.conf`
+### `lib/env.sh`
 
-- validate FPM pool include/listen behavior against generated per-domain pools;
-- ensure user/group/socket permissions align with Nginx/Apache access.
+- release env;
+- user env;
+- dotenv parse/write;
+- precedence;
+- safe quoting.
 
-### `docker/conf/www.conf`
+Never `source` arbitrary dotenv files as shell code.
 
-- classify as reference/upstream-derived vs active file;
-- remove/deprecate if no runtime path consumes it, but only after search/tests.
+### `lib/compose.sh`
 
-## Generated/User Configuration Directories
+- canonical Compose file list;
+- profile resolution;
+- optional overrides;
+- Compose command wrapper;
+- service status/health helpers.
 
-### `configuration/compose/`
+### `lib/catalog.sh`
 
-Continue as generated Compose overrides. Add validation that generated files are valid and stale overrides can be detected/cleaned safely.
+- validate/read `services.json`;
+- list available services;
+- expose setup fields/defaults.
 
-### `configuration/php/php.ini`
+### `lib/profiles.sh`
 
-Remain user override file. Provide documented defaults/examples rather than overwriting user edits during update.
+- setup menu;
+- selected profile persistence;
+- AI runtime selection;
+- profile/env reconciliation.
 
-### `configuration/scheduler/cron-jobs/`
+### `lib/runtime.sh`
 
-Remain user/generated scheduler definitions. Validate filename/permissions/content before Runner consumes them.
+- PHP/Node version resolution;
+- generated Compose fragments;
+- local image naming/build/rebuild.
 
-### `configuration/scheduler/supervisor/`
+### `lib/hosts.sh`
 
-Remain user/generated supervisor definitions. Validate configs before stack restart.
+- domain create/delete;
+- vhost generation calls;
+- reload validation.
 
-### `configuration/sops/config`, `global`, `keys`
+### `lib/certificates.sh`
 
-Keep sensitive/state files ignored. Tighten permissions via setup without committing contents.
+- CA creation/trust;
+- certificate refresh;
+- platform-specific trust store.
 
-### `configuration/ssh/`
+### `lib/services.sh`
 
-Keep optional read-only mount. Never copy private keys into images.
+- start/stop/restart/status/logs/open;
+- convenience service URL mapping.
 
-### `configuration/ssl/`
+### `lib/ai.sh`
 
-Keep generated cert artifacts/state according to the chosen named-volume/bind-mount model. Reconcile docs with actual source of truth.
+Only LocalDevStack orchestration/delegation:
 
-## Logs
+- profile enabled?;
+- compose override selection;
+- `lds ai` -> Tools;
+- `lds llm` -> llm-sm;
+- model/runtime status.
 
-### `logs/`
+No provider implementation.
 
-- keep host-visible logs where that is a deliberate developer feature;
-- avoid `chmod -R 777` if cross-platform/container UID tests show a safer workable model;
-- if permissive mode remains necessary, document local-only rationale;
-- ensure rotation behavior matches Runner configuration.
+### `lib/diagnostics.sh`
 
-## Optional AI Compose Integration
+- doctor;
+- config;
+- health;
+- environment diagnostics.
 
-### New `docker/compose/ai.yaml`
+### `lib/maintenance.sh`
 
-Add only after core networking/catalog changes are stable.
+- clean;
+- disk;
+- events;
+- rebuild;
+- safe destructive confirmations.
 
-Service design:
+## 11.2 Refactor rules
 
-- profile `ai` (or `llm`, decide one canonical public name);
-- default published image `infocyph/llm-sm:<tested-version>` through env variable;
-- AMD selectable through `amd-<version>` tag, not second repository;
-- named volume -> `/root/.ollama`;
-- optional project/workspace mount -> `/workspace`;
-- loopback host port optional/configurable;
-- join network for service-DNS access from other containers;
-- GPU options handled through explicit override/profile rather than auto-detect magic that makes Compose unreliable across hosts.
+- no module performs work just because it is sourced;
+- avoid hidden mutation of global state;
+- keep function-local variables local;
+- do not replace clear shell with framework-like abstractions;
+- preserve exit codes where wrappers rely on them;
+- keep `set -euo pipefail` behavior deliberate;
+- characterization tests must pass after every extraction;
+- one subsystem at a time.
 
-Graphify/editor/other clients remain external consumers of the endpoint.
+---
 
-## Image Version Defaults
+# 12. Batch 7 — `bin/` wrapper cleanup
 
-### New `docker/images.env` or equivalent committed defaults
+## 12.1 `bin/tool-runner`
 
-Define compatibility-tested infrastructure image versions centrally, for example conceptual keys:
+Treat as the common execution primitive.
 
-- `LDS_TOOLS_IMAGE=infocyph/tools:<version>`
-- `LDS_RUNNER_IMAGE=infocyph/runner:<version>`
-- `LDS_NGINX_IMAGE=infocyph/nginx:<version>`
-- `LDS_APACHE_IMAGE=infocyph/apache:<version>`
-- `LDS_LLM_IMAGE=infocyph/llm-sm:<version>` when AI enabled.
+Validate:
 
-User `.env` may override them. A LocalDevStack release should not depend solely on whatever `latest` means that day.
+- TTY forwarding;
+- stdin forwarding;
+- exit-code propagation;
+- path conversion;
+- service-running errors;
+- working-directory selection.
 
-## Documentation Files
+## 12.2 `bin/php`
 
-### `docs/concepts/architecture.rst`
+Preserve:
 
-Update architecture diagram/responsibility boundaries, canonical catalog, optional AI and DNS-based networking.
+- explicit PHP version selection;
+- default/highest configured runtime;
+- normal CLI;
+- current serve behavior where useful;
+- mounted project;
+- non-root execution.
 
-### `docs/concepts/profiles-and-env.rst`
+Add tests for spaces in paths and Git safe-directory behavior.
 
-Document canonical catalog, env override precedence, infrastructure image versions and generated runtime profiles.
+## 12.3 `bin/composer`
 
-### `docs/concepts/storage-layout.rst`
+Reduce duplicated PHP runtime selection where practical.
 
-Reconcile named volumes vs host `configuration/` directories. Clearly distinguish:
+Preserve versioned Composer homes and project mount behavior.
 
-- persisted Docker named volumes;
-- host-generated config;
-- project source mounts;
+## 12.4 DB wrappers
+
+Files:
+
+- `bin/pg`;
+- `bin/my`;
+- `bin/maria`;
+- `bin/mongo`;
+- `bin/redis-cli`;
+- `bin/es`.
+
+Requirements:
+
+- use Compose/service names, not IPs;
+- no assumptions about static subnets;
+- credentials from environment/state;
+- safe argument/file quoting;
+- accurate exit codes;
+- temporary dump/restore integration tests.
+
+## 12.5 New AI wrappers
+
+Prefer adding:
+
+```text
+bin/ai
+bin/llm
+```
+
+or equivalent internal helpers invoked by `lds`.
+
+Keep them thin.
+
+They must not duplicate `askai`, `aiops` or `llm-sm` logic.
+
+---
+
+# 13. Batch 8 — Compose/service hardening
+
+## 13.1 `docker/compose/companion.yaml`
+
+### `server-tools`
+
+Use:
+
+```text
+${LDS_TOOLS_IMAGE:-infocyph/tools:0.23.2}
+```
+
+Preserve:
+
+- project mount;
+- SSL/root CA;
+- generated Nginx/Apache/FPM/Composer state;
+- Git config;
+- scheduler state;
+- SOPS state;
+- optional SSH mount;
 - logs;
-- secrets/SSH;
-- optional AI model volume.
+- Docker socket.
 
-### `docs/quickstart.rst`
+Add AI environment from Section 8.
 
-Update after final CLI flow is stable; keep XAMPP-like beginner path concise.
+Use the Tools-owned healthcheck instead of inventing an external health command.
 
-### `docs/guides/domain-setup.rst`
+### `runner`
 
-Document Docker-DNS routing and domain creation without static IP assumptions.
+Use:
 
-### `docs/guides/tls-and-certificates.rst`
+```text
+${LDS_RUNNER_IMAGE:-infocyph/runner:0.5}
+```
 
-Keep cross-platform trust instructions synchronized with actual `lds certificate` behavior.
+Preserve scheduler/log mounts.
 
-### `docs/guides/secrets-sops-age.rst`
+Runner still has legitimate Docker access because its `pexe`/`dexe` and mounted jobs can execute commands in sibling containers.
 
-Validate against current Tools `senv` contract.
+Do not remove the socket until those use cases are intentionally redesigned.
 
-### `docs/guides/notifications.rst`
+### `mailpit`
 
-Validate notifier contract and clarify optional nature.
+Keep persistence and TLS.
 
-### `.readthedocs.yaml` / `docs/conf.py` / `docs/requirements.txt`
+Validate that its certificate paths are ready before requiring STARTTLS.
 
-Pin/document docs dependencies enough for reproducible docs builds; validate Read the Docs build in CI if useful.
+## 13.2 `docker/compose/http.yaml`
 
-## Static Networking Migration Sequence
+### Nginx
 
-1. Add CI/tests resolving all services by DNS name.
-2. Search all product/support repos for fixed `172.28/29/30` dependencies.
-3. Remove per-service `ipv4_address` declarations from Compose files.
-4. Remove IPAM subnet/gateway blocks from `main.yaml`.
-5. Run PHP/Node/DB/admin/domain/TLS integration tests.
-6. Re-evaluate `lds vpn-fix`:
-   - delete/deprecate if its only purpose was static-subnet conflict;
-   - retain only independently useful VPN behavior with updated docs.
+Use:
 
-## Docker Socket Review Sequence
+```text
+${LDS_NGINX_IMAGE:-infocyph/nginx:0.4.1}
+```
 
-1. Trace every `docker` command in Tools/Runner and admin panel.
-2. Categorize read vs write operations.
-3. Determine if Runner requires socket directly or only specific mounted jobs do.
-4. Determine if Tools requires full socket for domain/profile/admin functionality.
-5. Keep required access for local-dev UX; remove redundant mounts.
-6. Document trust boundary prominently.
+Preserve `80/443`, generated vhosts, certs, FPM sockets and logs.
 
-## Acceptance Criteria
+### Apache
 
-1. Product CI exists and covers CLI/Compose/runtime generation.
-2. `lds` public command surface remains compatible after modularization.
-3. Canonical service catalog is consumed by both LocalDevStack and Tools.
-4. Infrastructure image defaults are compatibility-tested/pinnable instead of unconditional `latest`.
-5. PHP and Node remain dynamically customizable local builds.
-6. All core service communication works through Docker DNS without fixed IPv4 assignments.
-7. Local domain/TLS flows work on supported host classes.
-8. DB/cache/mail/admin clients persist data appropriately.
-9. Runner/scheduler/supervisor workflows remain functional.
-10. Docker socket mounts are justified and minimized.
-11. Optional `llm-sm` profile works with persistent models and published images only.
-12. Documentation matches actual networking/storage/runtime behavior.
+Use:
+
+```text
+${LDS_APACHE_IMAGE:-infocyph/apache:0.4.2}
+```
+
+Keep optional.
+
+Use `unless-stopped` unless testing proves `always` is required.
+
+## 13.3 `docker/compose/db.yaml`
+
+### Redis
+
+Keep persistent `/data`.
+
+Review whether `redis/redis-stack-server:latest` remains desirable as a default or should use a compatibility-tested major/tag.
+
+Do not change data format in the same release without migration guidance.
+
+### PostgreSQL
+
+Reconcile variable naming.
+
+Current service sets:
+
+```text
+POSTGRES_DB=${POSTGRES_DATABASE:-postgres}
+```
+
+but the healthcheck references `POSTGRES_DB` through Compose interpolation rather than the resulting container env.
+
+Use one canonical LocalDevStack variable and test it.
+
+Validate the selected official Postgres image's current data directory contract before changing the volume mount.
+
+### MySQL/MariaDB/MongoDB
+
+Keep explicit local-dev credential variables.
+
+Review moving `latest` defaults separately from the infrastructure-image migration.
+
+Do not unexpectedly major-upgrade a user's database by changing defaults without documentation.
+
+### Elasticsearch
+
+Keep Elasticsearch/Kibana versions aligned.
+
+Validate Filebeat compatibility with the same stack version.
+
+## 13.4 `docker/compose/db-client.yaml`
+
+Preserve:
+
+- RedisInsight;
+- CloudBeaver;
+- Mongo Express;
+- Kibana;
+- Filebeat.
+
+Improve startup dependencies only when meaningful:
+
+- prefer service health/retry behavior;
+- avoid dependency chains that deadlock optional profiles.
+
+---
+
+# 14. Docker socket trust boundary
+
+Both Tools and Runner currently require powerful Docker access for real LocalDevStack functionality.
+
+Do not remove the socket merely to make a security checklist look better.
+
+Document the actual boundary:
+
+```text
+/var/run/docker.sock == effective host Docker control
+```
+
+## Tools reasons
+
+Tools/admin functionality includes container/service inspection and management.
+
+## Runner reasons
+
+Runner helpers and user scheduler definitions may execute into sibling containers.
+
+## Plan
+
+1. inventory exact Docker commands used;
+2. classify read/write/destructive operations;
+3. retain required socket mounts;
+4. ensure `llm-sm` never receives the socket;
+5. do not mount socket into ordinary databases/admin clients;
+6. document that LocalDevStack is trusted local developer infrastructure.
+
+A socket proxy is not required unless a future design demonstrates a useful permission reduction without breaking the product.
+
+---
+
+# 15. Docker config files
+
+## `docker/conf/filebeat.yml`
+
+Validate:
+
+- current Elasticsearch/Filebeat version alignment;
+- log paths;
+- service DNS endpoint;
+- no static IP reference.
+
+## `docker/conf/openssl.cnf`
+
+Validate current OpenSSL compatibility.
+
+Do not weaken TLS globally just to support old clients unless a supported LocalDevStack flow requires it.
+
+## `docker/conf/pg_hba.conf`
+
+Remove any fixed-subnet assumptions.
+
+Keep local Docker-network auth appropriately scoped.
+
+## `docker/conf/postgresql.conf`
+
+Currently optional/commented.
+
+Decide one of:
+
+- intentionally supported and tested; or
+- clearly documented as inactive reference config.
+
+Do not leave ambiguous pseudo-active config.
+
+## `docker/conf/www-php.conf`
+
+Validate generated FPM pool/socket integration.
+
+## `docker/conf/www.conf`
+
+Determine whether it is actively consumed.
+
+If unused, mark/deprecate/remove only after search and runtime tests.
+
+---
+
+# 16. Generated/user-owned configuration
+
+## `configuration/compose/`
+
+Continue to hold generated user/project Compose fragments.
+
+Add safe stale-artifact detection.
+
+Never blindly delete files not known to LocalDevStack.
+
+## `configuration/php/`
+
+Preserve user-edited PHP configuration.
+
+Updates must not overwrite user customizations.
+
+## `configuration/scheduler/cron-jobs/`
+
+Validate generated files before Runner consumes them.
+
+Account for Windows CRLF.
+
+## `configuration/scheduler/supervisor/`
+
+Validate Supervisor syntax before stack restart where possible.
+
+## SOPS directories
+
+Paths:
+
+- `configuration/sops/config`;
+- `configuration/sops/global`;
+- `configuration/sops/keys`.
+
+Keep ignored/sensitive.
+
+Ensure setup permissions remain restrictive.
+
+## `configuration/ssh/`
+
+Keep optional and read-only.
+
+Never bake keys into images.
+
+## `configuration/ssl/`
+
+Reconcile actual host-visible state with named certificate volumes.
+
+Documentation must identify which paths are authoritative.
+
+---
+
+# 17. Logs and rotation
+
+Keep host-visible logs because they are useful in a workstation stack.
+
+Validate compatibility with `runner:0.5` logrotate paths.
+
+Review directory permissions.
+
+Avoid broad `777` changes when a narrower cross-platform permission model works.
+
+If permissive permissions are still required for Windows/macOS/Linux interoperability, document the local-development rationale.
+
+Add a smoke that:
+
+1. writes a test log;
+2. Runner sees it;
+3. rotation succeeds;
+4. application continues writing.
+
+---
+
+# 18. Environment and precedence contract
+
+Define one documented precedence order.
+
+Recommended:
+
+1. built-in product fallback;
+2. tracked `docker/release.env`;
+3. user `docker/.env`;
+4. command-scoped explicit environment overrides.
+
+Never shell-source untrusted dotenv content.
+
+Separate classes of settings:
+
+## Product/release
+
+- infrastructure image refs;
+- default feature compatibility versions.
+
+## User stack
+
+- selected profiles;
+- DB credentials;
+- ports;
+- timezone;
+- project directory;
+- runtime selections.
+
+## AI
+
+- enabled/profile;
+- runtime variant;
+- model;
+- optional host port;
+- advanced Tools limits.
+
+## Generated runtime
+
+- PHP packages/extensions;
+- Node globals/packages;
+- UID/GID;
+- generated project profiles.
+
+`lds config` should be able to show effective non-secret configuration and redact secrets.
+
+---
+
+# 19. Cross-platform requirements
+
+## Windows / Git Bash
+
+Preserve `lds.bat`.
+
+Tests must cover:
+
+- Git executable discovery;
+- Git Bash discovery;
+- spaces in repo/project paths;
+- `cygpath` conversion;
+- Docker Desktop unavailable/running errors;
+- working-directory preservation;
+- CRLF-sensitive generated files.
+
+## WSL
+
+Avoid assuming Docker socket path/platform behavior that conflicts with Docker Desktop integration.
+
+## macOS
+
+Account for bind-mount UID behavior and browser trust-store commands.
+
+## Linux
+
+Preserve UID/GID mapping and native Docker behavior.
+
+Avoid root-owned host project files after normal `lds` commands.
+
+---
+
+# 20. QoL improvements that belong in this phase
+
+Implement only after core compatibility is stable.
+
+## `lds status`
+
+One concise product view:
+
+- core services;
+- selected profiles;
+- health;
+- domains;
+- URLs;
+- AI enabled/provider status.
+
+## `lds urls`
+
+Print known convenience URLs:
+
+```text
+https://admin.localhost
+https://webmail.localhost
+https://db.localhost
+https://ri.localhost
+https://me.localhost
+https://kibana.localhost
+https://llm.localhost   # when AI enabled
+```
+
+Only show profile-dependent URLs when relevant.
+
+## `lds open <service>`
+
+Open a known local service in the host browser using existing platform helpers.
+
+## `lds doctor`
+
+Check:
+
+- Docker;
+- Compose;
+- expected networks;
+- volume access;
+- certificate state;
+- port conflicts;
+- image availability;
+- selected service health;
+- DNS/service resolution;
+- optional AI provider status.
+
+Doctor should diagnose, not mutate, unless the user explicitly chooses a fix action.
+
+## `lds images`
+
+Show effective infrastructure image compatibility versions.
+
+This is useful when troubleshooting a mixed/overridden stack.
+
+---
+
+# 21. Documentation rewrite
+
+LocalDevStack documentation should now describe the product users actually have.
+
+## `README.md`
+
+Lead with:
+
+> Docker-based XAMPP alternative for PHP and Node.js local development.
+
+First screen should explain:
+
+- local domains;
+- HTTPS;
+- PHP/Node versions;
+- databases;
+- admin tools;
+- mail;
+- background workers;
+- optional local AI.
+
+Keep internal architecture below quickstart.
+
+## `docs/concepts/architecture.rst`
+
+Update responsibility map with the exact image split and optional AI provider.
+
+## `docs/concepts/profiles-and-env.rst`
+
+Document:
+
+- release env vs user env;
+- profile selection;
+- runtime variant;
+- AI profile;
+- override precedence.
+
+## `docs/concepts/storage-layout.rst`
+
+Clearly separate:
+
+- Docker named volumes;
+- host configuration;
+- host logs;
+- project bind mounts;
+- secrets;
+- AI model volume.
+
+## `docs/quickstart.rst`
+
+Target beginner flow:
+
+```text
+lds setup init
+lds setup permissions
+lds setup profile
+lds setup domain
+lds up
+```
+
+Use the actual final command names after implementation.
+
+## `docs/guides/domain-setup.rst`
+
+Remove static-IP mental model.
+
+Explain Docker DNS routing.
+
+## `docs/guides/tls-and-certificates.rst`
+
+Ensure `llm.localhost` and convenience-host certificate behavior is covered.
+
+## New `docs/guides/local-ai.rst`
+
+Cover:
+
+- enabling AI;
+- CPU/NVIDIA/AMD;
+- `https://llm.localhost`;
+- `lds ai`;
+- `lds llm`;
+- model persistence;
+- selecting a different model;
+- direct host port opt-in;
+- privacy boundaries;
+- optional workspace access;
+- Graphify connection.
+
+## Existing SOPS/notification docs
+
+Revalidate against `tools:0.23.2`.
+
+---
+
+# 22. Migration/backward compatibility
+
+The first integrated LocalDevStack release must handle existing installations deliberately.
+
+## Existing databases/volumes
+
+Do not rename volumes in this release.
+
+## Existing Nginx vhost volume
+
+Older volumes may contain upstream `default.conf` artifacts.
+
+Use the Nginx 0.4.1 documented cleanup/migration behavior and test an upgraded volume.
+
+## Existing fixed networks
+
+Compose recreation may replace old fixed networks.
+
+Document that containers may be recreated while named-volume data remains.
+
+Do not run destructive `docker compose down -v` during migration.
+
+## Existing `docker/.env`
+
+Preserve user values.
+
+New release defaults must not overwrite it.
+
+## Existing generated runtime images
+
+Detect/rebuild only when relevant inputs changed.
+
+## Existing users without AI
+
+Their stack should not pull `llm-sm`, create the model volume or consume GPU resources unless AI is selected.
+
+---
+
+# 23. Release-readiness matrix
+
+A LocalDevStack release candidate is not ready until these pass.
+
+## Core
+
+- clean install;
+- existing-install upgrade;
+- `lds help`;
+- setup init;
+- setup permissions;
+- setup profiles;
+- domain create/delete;
+- trusted HTTPS;
+- Nginx core routing;
+- Tools admin;
+- Mailpit;
+- Runner.
+
+## PHP
+
+At least:
+
+- one current PHP runtime build;
+- Composer;
+- FPM through Nginx;
+- FPM through Apache path if supported;
+- custom extension/package fixture.
+
+## Node
+
+At least:
+
+- one current Node runtime build;
+- npm/npx;
+- Node proxy;
+- WebSocket/HMR fixture.
+
+## Databases
+
+Smoke:
+
+- PostgreSQL;
+- MySQL;
+- MariaDB;
+- MongoDB;
+- Redis;
+- Elasticsearch.
+
+Include admin clients where practical.
+
+## AI
+
+With fake provider on normal CI:
+
+- Tools provider;
+- `askai`;
+- `aiops`;
+- Nginx LLM route;
+- streaming.
+
+With real provider on manual/release gate when feasible:
+
+- `infocyph/llm-sm:0.03`;
+- baked `qwen2.5:3b`;
+- persistent model volume;
+- Tools generation;
+- Nginx `llm.localhost`.
+
+## Platforms
+
+At minimum:
+
+- Linux full integration;
+- Windows bridge/path validation;
+- explicit documentation/manual verification for macOS/WSL if CI environment does not support full Docker Desktop tests.
+
+---
+
+# 24. Must-ship vs follow-up
+
+## Must ship
+
+- product CI;
+- explicit published infrastructure versions;
+- static-IP removal;
+- core Compose validation;
+- AI profile/provider integration;
+- persistent LLM model volume;
+- Tools AI env wiring;
+- PHP/Node Scriptomatic `main` migration;
+- safe `lds` modularization of touched areas;
+- DB health/env correctness fixes discovered by CI;
+- updated docs;
+- release/upgrade smoke.
+
+## Follow-up allowed
+
+These do not block the LocalDevStack integration release unless implementation reveals a direct dependency:
+
+- multi-instance container/volume namespacing;
+- automatic dependency-update PRs;
+- Docker socket proxy;
+- Graphify installation;
+- browser AI UI beyond Tools admin panel;
+- automatic GPU detection;
+- automatic model downloads beyond the baked model;
+- production-hardening changes unrelated to local development;
+- rewriting the CLI in another language.
+
+---
+
+# 25. Definition of completion
+
+This LocalDevStack phase is complete when all of the following are true:
+
+1. LocalDevStack consumes the published compatibility matrix by explicit default.
+2. No core LocalDevStack service requires a hard-coded `172.28/29/30` address.
+3. `lds` still presents the existing public workflow while internals are better separated and tested.
+4. PHP and Node remain locally customizable runtime builds.
+5. Scriptomatic consumption no longer uses stale `master` references.
+6. Tools, Runner, Nginx and Apache integrate using their published health/runtime contracts.
+7. Local domains/TLS work through service-name routing.
+8. Databases and admin clients work through Docker DNS.
+9. Mailpit remains persistent and TLS-capable.
+10. Runner cron/Supervisor/logrotate workflows still work.
+11. AI can be omitted completely with no degradation to the default product.
+12. When AI is enabled, `llm-sm` persists models and is reachable internally at `http://llm-sm:11434`.
+13. `https://llm.localhost` works through Nginx streaming proxy behavior.
+14. Tools `askai`, `aiops` and AI-enabled `gitx` use the separate LLM provider.
+15. No LocalDevStack component embeds a second Ollama runtime.
+16. No AI component auto-executes model-generated commands.
+17. Existing user volumes and env overrides survive upgrade.
+18. Docker socket exposure is documented and limited to components that actually require it.
+19. Product docs match the implemented storage, network, version and AI behavior.
+20. A clean supported workstation can go from clone/setup to a working HTTPS PHP or Node local domain using the documented flow.
+
+---
+
+# 26. First implementation checkpoint
+
+Before any broad refactor, the first implementation PR/batch should contain only:
+
+1. permanent LocalDevStack CI foundation;
+2. tracked compatibility image defaults;
+3. Compose references switched from infrastructure `:latest` to those defaults;
+4. characterization tests around current `lds`;
+5. no static-IP removal yet;
+6. no `lds` modularization yet.
+
+Once that is green, proceed to the networking migration.
+
+This gives every later change a reliable regression boundary.
