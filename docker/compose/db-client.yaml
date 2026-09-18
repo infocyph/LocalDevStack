@@ -78,7 +78,8 @@ services:
     user: root
     profiles: [filebeat]
     depends_on:
-      - elasticsearch
+      elasticsearch:
+        condition: service_healthy
     volumes:
       - lds_fbeat:/usr/share/filebeat/data
       - ../conf/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
