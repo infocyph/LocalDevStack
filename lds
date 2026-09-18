@@ -876,7 +876,7 @@ main() {
 
   # Offline-safe read-only commands do not require a running Docker daemon.
   case "$cmd" in
-  images | urls)
+  images | urls | doctor)
     ;;
   config)
     [[ "${1:-}" == "env-used" ]] || need docker
