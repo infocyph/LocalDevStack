@@ -2053,3 +2053,131 @@ These remain future work rather than release blockers:
 - Graphify installation/management;
 - additional browser AI UI;
 - automatic model downloads beyond the provider defaults.
+
+
+---
+
+# Post-implementation cross-image audit — 2026-09-18
+
+Audit window: approximately **2026-09-16 13:53 Asia/Dhaka through 2026-09-18**.
+
+Compared LocalDevStack against the current related releases/main contracts:
+
+- Tools **0.23.2**
+- Runner **0.5**
+- Nginx **0.4.1**
+- Apache **0.4.2**
+- LLM-SM **0.03**
+- Toolset **2.0**
+- Scriptomatic current `main`
+
+The final published/check runs for those release heads are successful.
+
+## Feature-parity result
+
+No legacy LocalDevStack command/service/storage feature was removed:
+
+- all **60** old public/support `lds` functions still exist after modularization;
+- all **9** old `bin/*` wrappers remain;
+- all **16** old Compose services remain;
+- all **19** old named volumes remain.
+
+New runtime additions are additive:
+
+- `llm-sm`;
+- `LLMModels`;
+- `ToolsState`;
+- AI/QoL/diagnostic commands.
+
+## Cross-image issues found and corrected
+
+### Tools durable state
+
+Tools 0.23.2 owns mutable state under `/etc/share/state` for host-manager/env-store,
+profile/runtime state, monitor history and alert acknowledgement state.
+
+LocalDevStack now persists that directory through the global named volume:
+
+```text
+ToolsState -> /etc/share/state
+```
+
+This prevents Tools control-plane state from disappearing when `server-tools` is recreated.
+
+### Root CA export bridge
+
+Tools exports the public CA to:
+
+```text
+configuration/ssl/rootCA.pem
+```
+
+Unix and Windows LocalDevStack certificate-install paths now use that current export,
+with `configuration/rootCA/rootCA.pem` retained only as a legacy read fallback.
+
+### TLS export permissions
+
+Tools deliberately exports opt-in user P12 material with mode `0600`.
+`lds setup permissions` now preserves restrictive modes for P12/PFX/key artifacts
+instead of widening all files under `configuration/ssl` to group-readable mode.
+
+### Tools profile visibility
+
+`COMPOSE_PROFILES` is now passed into `server-tools` so the current Tools status/Admin
+diagnostic layer can report LocalDevStack's active profile selection.
+
+### Moving-image drift
+
+Because LocalDevStack intentionally follows moving image aliases, the compatibility
+workflow now runs weekly even when LocalDevStack source has not changed.
+
+A scheduled/manual runtime-build smoke also builds the current selected PHP and Node
+versions from Tools' runtime catalog against Scriptomatic `main` and verifies the
+runtime plus Toolset helper surface.
+
+## Apache compatibility decision
+
+Apache 0.4.2 is architecturally an optional backend, and the LocalDevStack CLI already
+tracks `APACHE_ACTIVE` / `APACHE_DELETE` state.
+
+However, the new Tools Admin Panel Host Manager can create/edit Apache hosts directly
+and currently does not control LocalDevStack's host-side `COMPOSE_PROFILES` lifecycle.
+
+Therefore Apache remains an always-created compatibility service in this release.
+Making the container profile-only before adding a proper Admin Panel↔LocalDevStack
+profile bridge would regress Admin Panel-created Apache hosts.
+
+This is a non-blocking follow-up, not a release defect.
+
+## LLM-SM capability boundaries
+
+The current LLM-SM 0.03 image is **linux/amd64 only**. LocalDevStack remains usable on
+arm64 with the `ai` profile disabled.
+
+LocalDevStack intentionally does not mount a repository/workspace into `llm-sm` by
+default. Direct model/API/chat/stdin workflows are supported. Repository-aware analysis
+is supported through the Tools consumer layer (`lds ai review`, `repo-review`).
+
+The upstream optional workspace override is not automatically enabled because doing so
+would weaken the no-repository-ingestion default and still requires explicit Git
+safe-directory/identity decisions for writable repository operations.
+
+## Lower-layer compatibility notes
+
+- Tools' own feature-parity contract preserves its pre-hardening CLI/Admin surface.
+- Tools' template ABI explicitly targets Nginx 0.4.1, Apache 0.4.2 and Runner 0.5.
+- Runner 0.5 has a LocalDevStack-shaped integration smoke.
+- Nginx routes use lazy Docker DNS and do not require optional profile services to exist
+  at Nginx startup.
+- Scriptomatic still installs the same PHP/Node runtime Toolset helper surface
+  (`gitx` + `chromacat`); acquisition changed to the checksum-verified latest-stable
+  Toolset release installer.
+- The PHP template's historical `GID:-root` fallback predates this audit window.
+  Supported LocalDevStack setup writes a numeric UID/GID before runtime generation, so
+  it is not a current LocalDevStack release blocker.
+
+## Readiness conclusion
+
+After the corrections above, there is no identified legacy feature loss or current
+cross-image release blocker. The remaining items are explicit optional/future capability
+work rather than regressions.
