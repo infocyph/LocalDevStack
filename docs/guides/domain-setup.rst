@@ -69,7 +69,7 @@ TLS
 ---
 
 When HTTPS is selected, Tools refreshes the shared LocalDevStack certificate set. The
-certificate SAN set always includes localhost, *.localhost, 127.0.0.1, and ::1 in
+certificate SAN set always includes localhost, \*.localhost, 127.0.0.1, and ::1 in
 addition to generated domains/service-derived hosts.
 
 This means convenience hosts such as admin.localhost, webmail.localhost, and
