@@ -12,14 +12,14 @@ assert_file_contains "$ROOT/lds" 'ENV_MAIN="$DIR/.env"'
 assert_file_contains "$ROOT/lds" 'ENV_DOCKER="$CFG/.env"'
 assert_file_contains "$ROOT/lds" 'ENV_RELEASE="$CFG/release.env"'
 assert_file_contains "$ROOT/lds" 'COMPOSE_FILE="$CFG/compose/main.yaml"'
-assert_file_contains "$ROOT/lds" 'local -a env_files=(--env-file "$ENV_RELEASE")'
-assert_file_contains "$ROOT/lds" 'env_files+=(--env-file "$ENV_DOCKER")'
-assert_file_contains "$ROOT/lds" '"${env_files[@]}"'
-assert_file_contains "$ROOT/lds" 'var=COMPOSE_PROFILES'
+assert_file_contains "$ROOT/lib/compose.sh" 'local -a env_files=(--env-file "$ENV_RELEASE")'
+assert_file_contains "$ROOT/lib/compose.sh" 'env_files+=(--env-file "$ENV_DOCKER")'
+assert_file_contains "$ROOT/lib/compose.sh" '"${env_files[@]}"'
+assert_file_contains "$ROOT/lib/hosts.sh" 'var=COMPOSE_PROFILES'
 assert_file_contains "$ROOT/lds" 'compose_control_value()'
 assert_file_contains "$ROOT/lds" 'dotenv_value()'
-assert_file_contains "$ROOT/lds" 'LDS_AI_RUNTIME cpu'
-assert_file_contains "$ROOT/lds" 'LDS_LLM_HOST_PORT 0'
+assert_file_contains "$ROOT/lib/compose.sh" 'LDS_AI_RUNTIME cpu'
+assert_file_contains "$ROOT/lib/compose.sh" 'LDS_LLM_HOST_PORT 0'
 pass "environment file and precedence wiring"
 
 git -C "$ROOT" check-ignore -q docker/.env || fail "docker/.env must remain ignored user state"
@@ -43,21 +43,21 @@ for entry in "${expected[@]}"; do
 done
 pass "moving latest image manifest"
 
-assert_file_contains "$ROOT/lds" 'CATALOG_FILE="$CFG/catalog/services.psv"'
-assert_file_contains "$ROOT/lds" 'load_service_catalog()'
-assert_file_contains "$ROOT/lds" 'load_service_catalog'
+assert_file_contains "$ROOT/lib/profiles.sh" 'CATALOG_FILE="$CFG/catalog/services.psv"'
+assert_file_contains "$ROOT/lib/profiles.sh" 'load_service_catalog()'
+assert_file_contains "$ROOT/lib/profiles.sh" 'load_service_catalog'
 pass "profile setup loads the tracked host catalog"
 
-assert_file_contains "$ROOT/lds" 'cmd_ai()'
-assert_file_contains "$ROOT/lds" 'cmd_llm()'
-assert_file_contains "$ROOT/lds" '_tools_exec_argv()'
+assert_file_contains "$ROOT/lib/ai.sh" 'cmd_ai()'
+assert_file_contains "$ROOT/lib/ai.sh" 'cmd_llm()'
+assert_file_contains "$ROOT/lib/ai.sh" '_tools_exec_argv()'
 assert_file_contains "$ROOT/lds" 'ai) cmd_ai "$@"'
 assert_file_contains "$ROOT/lds" 'llm) cmd_llm "$@"'
 pass "AI/LLM CLI routing contract"
 
-assert_file_contains "$ROOT/lds" 'dc_cmd build --build-arg "SCRIPTOMATIC_REF=$scriptomatic_ref"'
-if grep -Fq 'dc_build --no-cache' "$ROOT/lds"; then
+assert_file_contains "$ROOT/lib/compose.sh" 'dc_cmd build --build-arg "SCRIPTOMATIC_REF=$scriptomatic_ref"'
+if grep -R -Fq 'dc_build --no-cache' "$ROOT/lds" "$ROOT/lib"; then
   fail "runtime rebuild path must preserve Docker build cache"
 fi
-assert_file_contains "$ROOT/lds" 'dc_build --pull "$svc"'
+assert_file_contains "$ROOT/lib/services.sh" 'dc_build --pull "$svc"'
 pass "runtime rebuilds preserve cache while refreshing selected bases"
