@@ -74,3 +74,25 @@ while IFS='|' read -r key profile _display _service_key version_env defaults _pr
   fi
 done <"$catalog"
 pass "LocalDevStack catalog matches latest Tools non-version profile contract"
+
+
+docker run --rm --entrypoint sh "${release[LDS_TOOLS_IMAGE]}" -lc '
+  test -x /usr/local/bin/mkhost
+  test -s /etc/share/runtime-versions.json
+  jq -e ".php.active | type == \"array\" and length > 0" /etc/share/runtime-versions.json >/dev/null
+  jq -e ".node.active | type == \"array\" and length > 0" /etc/share/runtime-versions.json >/dev/null
+  grep -Fq "RUNTIME_VERSIONS_DB" /usr/local/bin/mkhost
+'
+pass "latest Tools preserves interactive PHP/Node runtime version catalog"
+
+php_template="$(
+  docker run --rm --entrypoint cat "${release[LDS_TOOLS_IMAGE]}" /etc/docker-templates/php.compose.yaml
+)"
+node_template="$(
+  docker run --rm --entrypoint cat "${release[LDS_TOOLS_IMAGE]}" /etc/docker-templates/node.compose.yaml
+)"
+assert_contains "$php_template" 'PHP_VERSION: {{PHP_VERSION}}'
+assert_contains "$php_template" 'image: localdevstack-php:{{PHP_VERSION}}'
+assert_contains "$node_template" 'NODE_VERSION: {{NODE_VERSION}}'
+assert_contains "$node_template" 'image: localdevstack-node:{{NODE_VERSION}}'
+pass "selected runtime versions remain build/image identity inputs"
