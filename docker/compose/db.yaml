@@ -37,18 +37,16 @@ services:
       - lds_pg:/var/lib/postgresql
       - ../../logs/postgresql:/var/log/postgresql
       - ../conf/pg_hba.conf:/etc/postgresql/pg_hba.conf
-#      - ../conf/postgresql.conf:/etc/postgresql/postgresql.conf
     command:
       [
         "postgres",
         "-c", "hba_file=/etc/postgresql/pg_hba.conf",
-#        "-c", "config_file=/etc/postgresql/postgresql.conf",
       ]
     healthcheck:
       test:
         [
           "CMD-SHELL",
-          "PGPASSWORD=${POSTGRES_PASSWORD:-postgres} pg_isready -U ${POSTGRES_USER:-postgres} -h localhost -d ${POSTGRES_DB:-postgres}"
+          "PGPASSWORD=\"${POSTGRES_PASSWORD}\" pg_isready -U \"${POSTGRES_USER}\" -h 127.0.0.1 -d \"${POSTGRES_DB}\""
         ]
       interval: 30s
       timeout: 10s
@@ -70,7 +68,7 @@ services:
       - lds_my:/var/lib/mysql
       - ../../logs/mysql:/var/log/mysql
     healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h127.0.0.1 -u root -p${MYSQL_ROOT_PASSWORD:-12345}"]
+      test: ["CMD-SHELL", "mysqladmin ping -h127.0.0.1 -u root -p\"${MYSQL_ROOT_PASSWORD}\""]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -92,7 +90,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "mongosh \"mongodb://${MONGODB_ROOT_USERNAME:-root}:${MONGODB_ROOT_PASSWORD:-12345}@localhost:${MONGODB_PORT:-27017}/admin\" --eval \"db.adminCommand('ping')\" --quiet || exit 1"
+          "mongosh --host 127.0.0.1 --username \"${MONGO_INITDB_ROOT_USERNAME}\" --password \"${MONGO_INITDB_ROOT_PASSWORD}\" --authenticationDatabase admin --eval \"db.adminCommand('ping')\" --quiet || exit 1"
         ]
       interval: 30s
       timeout: 10s
@@ -114,7 +112,7 @@ services:
       - lds_maria:/var/lib/mysql
       - ../../logs/mariadb:/var/log/mysql
     healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p${MARIADB_ROOT_PASSWORD:-12345}"]
+      test: ["CMD-SHELL", "mysqladmin ping -h127.0.0.1 -u root -p\"${MARIADB_ROOT_PASSWORD}\""]
       interval: 30s
       timeout: 10s
       retries: 3
