@@ -78,10 +78,10 @@ assert_contains "$resolved" "server-tools:"
 assert_contains "$resolved" "nginx:"
 assert_contains "$resolved" "mysql:"
 assert_contains "$resolved" "cloudbeaver:"
-assert_contains "$resolved" "image: infocyph/tools:0.23.2"
-assert_contains "$resolved" "image: infocyph/runner:0.5"
-assert_contains "$resolved" "image: infocyph/nginx:0.4.1"
-assert_contains "$resolved" "image: infocyph/apache:0.4.2"
+assert_contains "$resolved" "image: infocyph/tools:latest"
+assert_contains "$resolved" "image: infocyph/runner:latest"
+assert_contains "$resolved" "image: infocyph/nginx:latest"
+assert_contains "$resolved" "image: infocyph/apache:latest"
 if grep -Eq 'ipv4_address:|172\\.28\\.0\\.|172\\.29\\.0\\.|172\\.30\\.0\\.' <<<"$resolved"; then
   fail "resolved Compose config still contains fixed LocalDevStack addresses"
 fi
@@ -116,7 +116,7 @@ python3 -c '
 import json,sys
 d=json.load(sys.stdin)
 s=d["services"]["llm-sm"]
-assert s["image"] == "infocyph/llm-sm:0.03"
+assert s["image"] == "infocyph/llm-sm:latest"
 assert "container_name" not in s
 assert not s.get("ports")
 assert set(s["networks"]) == {"frontend","backend"}
@@ -135,7 +135,7 @@ amd_json="$(docker compose --project-directory "$ROOT" -f "$ROOT/docker/compose/
 python3 -c '
 import json,sys
 s=json.load(sys.stdin)["services"]["llm-sm"]
-assert s["image"] == "infocyph/llm-sm:amd-0.03"
+assert s["image"] == "infocyph/llm-sm:amd-latest"
 devices=" ".join(str(x) for x in s.get("devices", []))
 assert "/dev/kfd" in devices and "/dev/dri" in devices
 ' <<<"$amd_json"
