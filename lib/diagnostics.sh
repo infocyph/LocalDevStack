@@ -302,3 +302,210 @@ cmd_support_trace() {
   printf "\n%bDone.%b If this still looks wrong, run: lds diag tls %s\n" "$GREEN" "$NC" "$dom"
 }
 
+
+
+###############################################################################
+# PRODUCT CONFIG / IMAGES / DOCTOR
+###############################################################################
+
+_redact_effective_config() {
+  sed -E \
+    -e 's/^([[:space:]]*[A-Z0-9_]*(PASSWORD|SECRET|TOKEN|PRIVATE_KEY|API_KEY|ACCESS_KEY)[A-Z0-9_]*:[[:space:]]*).*$/\1"***REDACTED***"/' \
+    -e 's/^([[:space:]]*(ME_CONFIG_MONGODB_URL|DATABASE_URL):[[:space:]]*).*$/\1"***REDACTED***"/' \
+    -e 's/("[A-Z0-9_]*(PASSWORD|SECRET|TOKEN|PRIVATE_KEY|API_KEY|ACCESS_KEY)[A-Z0-9_]*"[[:space:]]*:[[:space:]]*)"[^"]*"/\1"***REDACTED***"/g' \
+    -e 's/("(ME_CONFIG_MONGODB_URL|DATABASE_URL)"[[:space:]]*:[[:space:]]*)"[^"]*"/\1"***REDACTED***"/g'
+}
+
+_env_key_list() {
+  local file="${1:-}" source="${2:-}"
+  [[ -r "$file" ]] || return 0
+  awk -F= -v source="$source" '
+    /^[[:space:]]*#/ || /^[[:space:]]*$/ { next }
+    /^[A-Za-z_][A-Za-z0-9_]*=/ { print source "\t" $1 }
+  ' "$file"
+}
+
+_validate_scheduler_text() {
+  local file failed=0
+  while IFS= read -r file; do
+    [[ -f "$file" ]] || continue
+    if grep -Iq . "$file" && grep -q $'\r$' "$file"; then
+      printf '%b[fail]%b CRLF scheduler file: %s\n' "$RED" "$NC" "$file" >&2
+      failed=1
+    fi
+  done < <(find "$DIR/configuration/scheduler" -type f ! -name '.gitignore' -print 2>/dev/null | sort)
+  return "$failed"
+}
+
+cmd_config() {
+  local sub="${1:-show}"
+  shift || true
+
+  case "${sub,,}" in
+  show | "")
+    local format="" raw=0
+    while [[ "${1:-}" ]]; do
+      case "$1" in
+      --json) format=json; shift ;;
+      --raw) raw=1; shift ;;
+      *) die "config show [--json] [--raw]" ;;
+      esac
+    done
+
+    local -a args=(config)
+    [[ "$format" == json ]] && args+=(--format json)
+    if ((raw)); then
+      warn "Printing raw effective configuration; secret values may be visible."
+      docker_compose "${args[@]}"
+    else
+      docker_compose "${args[@]}" | _redact_effective_config
+    fi
+    ;;
+  services)
+    docker_compose config --services
+    ;;
+  profiles)
+    docker_compose config --profiles
+    ;;
+  env-used)
+    {
+      _env_key_list "$ENV_RELEASE" release
+      _env_key_list "$ENV_DOCKER" user
+    } | LC_ALL=C sort -k2,2 -k1,1
+    ;;
+  validate)
+    docker_compose config --quiet
+    _validate_scheduler_text || die "Scheduler files contain CRLF; convert them to LF before Runner consumes them."
+
+    local runner
+    runner="$(docker_compose ps -q runner 2>/dev/null | sed -n '1p' || true)"
+    if [[ -n "$runner" ]] && docker inspect -f '{{.State.Running}}' "$runner" 2>/dev/null | grep -qx true; then
+      docker exec "$runner" supervisord -t -c /etc/supervisor/supervisord.conf >/dev/null
+      ok "Compose and mounted Supervisor configuration validate."
+    else
+      ok "Compose configuration validates."
+      warn "Runner is not running; Supervisor syntax check skipped."
+    fi
+
+    local -a fragments=()
+    mapfile -t fragments < <(find "$EXTRAS_DIR" -maxdepth 1 -type f \( -name '*.yaml' -o -name '*.yml' \) -print 2>/dev/null | sort)
+    if (("${#fragments[@]}" > 0)); then
+      printf '%bGenerated Compose fragments:%b\n' "$CYAN" "$NC"
+      printf '  %s\n' "${fragments[@]}"
+    fi
+    ;;
+  *)
+    die "config <show|services|profiles|env-used|validate>"
+    ;;
+  esac
+}
+
+cmd_images() {
+  local elastic
+  elastic="$(compose_control_value ELASTICSEARCH_VERSION 9.5.3)"
+
+  printf '%-16s %s\n' "Tools" "$(compose_control_value LDS_TOOLS_IMAGE infocyph/tools:latest)"
+  printf '%-16s %s\n' "Runner" "$(compose_control_value LDS_RUNNER_IMAGE infocyph/runner:latest)"
+  printf '%-16s %s\n' "Nginx" "$(compose_control_value LDS_NGINX_IMAGE infocyph/nginx:latest)"
+  printf '%-16s %s\n' "Apache" "$(compose_control_value LDS_APACHE_IMAGE infocyph/apache:latest)"
+  printf '%-16s %s\n' "LLM" "$(compose_control_value LDS_LLM_IMAGE infocyph/llm-sm:latest)"
+  printf '%-16s %s\n' "LLM AMD" "$(compose_control_value LDS_LLM_AMD_IMAGE infocyph/llm-sm:amd-latest)"
+  printf '%-16s postgres:%s\n' "PostgreSQL" "$(compose_control_value POSTGRES_VERSION alpine)"
+  printf '%-16s mysql:%s\n' "MySQL" "$(compose_control_value MYSQL_VERSION latest)"
+  printf '%-16s mariadb:%s\n' "MariaDB" "$(compose_control_value MARIADB_VERSION latest)"
+  printf '%-16s mongo:%s\n' "MongoDB" "$(compose_control_value MONGODB_VERSION latest)"
+  printf '%-16s redis/redis-stack-server:%s\n' "Redis" "$(compose_control_value REDIS_VERSION latest)"
+  printf '%-16s elasticsearch:%s\n' "Elasticsearch" "$elastic"
+  printf '%-16s kibana:%s\n' "Kibana" "$elastic"
+  printf '%-16s docker.elastic.co/beats/filebeat:%s\n' "Filebeat" "$elastic"
+  printf '%-16s %s\n' "PHP runtimes" "localdevstack-php:<selected-version> (Alpine)"
+  printf '%-16s %s\n' "Node runtimes" "localdevstack-node:<selected-version> (Alpine)"
+}
+
+_doctor_ok() { printf '%b[ok]%b   %s\n' "$GREEN" "$NC" "$*"; }
+_doctor_warn() { printf '%b[warn]%b %s\n' "$YELLOW" "$NC" "$*"; }
+_doctor_fail() { printf '%b[fail]%b %s\n' "$RED" "$NC" "$*" >&2; }
+
+cmd_doctor() {
+  local failures=0 warnings=0 project ctr status name
+  project="$(lds_project)"
+
+  if ! has_bin docker; then
+    _doctor_fail "Docker CLI is not installed."
+    return 1
+  fi
+  _doctor_ok "Docker CLI: $(docker --version 2>/dev/null || printf unknown)"
+
+  if ! docker info >/dev/null 2>&1; then
+    _doctor_fail "Docker daemon is unavailable."
+    return 1
+  fi
+  _doctor_ok "Docker daemon is reachable."
+
+  if docker compose version >/dev/null 2>&1 || has_bin docker-compose; then
+    _doctor_ok "Docker Compose is available."
+  else
+    _doctor_fail "Docker Compose is unavailable."
+    failures=$((failures + 1))
+  fi
+
+  if docker_compose config --quiet >/dev/null 2>&1; then
+    _doctor_ok "Effective Compose configuration validates."
+  else
+    _doctor_fail "Effective Compose configuration is invalid."
+    failures=$((failures + 1))
+  fi
+
+  printf '%bProfiles:%b %s\n' "$CYAN" "$NC" "$(_enabled_profiles_csv | sed 's/^$/<none>/')"
+
+  for name in Frontend Backend DataStore; do
+    if docker network inspect "$name" >/dev/null 2>&1; then
+      _doctor_ok "Network present: $name"
+    else
+      _doctor_warn "Network not created yet: $name"
+      warnings=$((warnings + 1))
+    fi
+  done
+
+  ctr="$(_project_tools_container_running || true)"
+  if [[ -n "$ctr" ]]; then
+    _doctor_ok "Tools container is running: $ctr"
+    if docker exec "$ctr" sh -ec 'test -s /etc/mkcert/lds-server.pem && test -s /etc/mkcert/lds-server-key.pem' >/dev/null 2>&1; then
+      _doctor_ok "Shared TLS certificate/key are present."
+    else
+      _doctor_warn "Shared TLS certificate/key are not ready."
+      warnings=$((warnings + 1))
+    fi
+  else
+    _doctor_warn "Tools container is not running."
+    warnings=$((warnings + 1))
+  fi
+
+  while IFS='|' read -r name status; do
+    [[ -n "$name" ]] || continue
+    if [[ "$status" == *"(unhealthy)"* ]]; then
+      _doctor_fail "$name: $status"
+      failures=$((failures + 1))
+    else
+      _doctor_ok "$name: $status"
+    fi
+  done < <(
+    docker ps \
+      --filter "label=com.docker.compose.project=$project" \
+      --format '{{.Names}}|{{.Status}}' 2>/dev/null || true
+  )
+
+  if profile_enabled ai; then
+    local llm
+    llm="$(docker_compose ps -q llm-sm 2>/dev/null | sed -n '1p' || true)"
+    if [[ -n "$llm" ]] && docker inspect -f '{{.State.Running}}' "$llm" 2>/dev/null | grep -qx true; then
+      _doctor_ok "AI provider container is running."
+    else
+      _doctor_warn "AI profile is selected but llm-sm is not running."
+      warnings=$((warnings + 1))
+    fi
+  fi
+
+  printf '%bDoctor summary:%b %d failure(s), %d warning(s)\n' "$CYAN" "$NC" "$failures" "$warnings"
+  ((failures == 0))
+}
