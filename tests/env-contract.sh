@@ -36,6 +36,7 @@ expected=(
   'LDS_APACHE_IMAGE=infocyph/apache:latest'
   'LDS_LLM_IMAGE=infocyph/llm-sm:latest'
   'LDS_LLM_AMD_IMAGE=infocyph/llm-sm:amd-latest'
+  'SCRIPTOMATIC_REF=main'
 )
 for entry in "${expected[@]}"; do
   assert_file_contains "$release_env" "$entry"
@@ -53,3 +54,10 @@ assert_file_contains "$ROOT/lds" '_tools_exec_argv()'
 assert_file_contains "$ROOT/lds" 'ai) cmd_ai "$@"'
 assert_file_contains "$ROOT/lds" 'llm) cmd_llm "$@"'
 pass "AI/LLM CLI routing contract"
+
+assert_file_contains "$ROOT/lds" 'dc_cmd build --build-arg "SCRIPTOMATIC_REF=$scriptomatic_ref"'
+if grep -Fq 'dc_build --no-cache' "$ROOT/lds"; then
+  fail "runtime rebuild path must preserve Docker build cache"
+fi
+assert_file_contains "$ROOT/lds" 'dc_build --pull "$svc"'
+pass "runtime rebuilds preserve cache while refreshing selected bases"
