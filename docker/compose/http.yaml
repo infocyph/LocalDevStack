@@ -27,6 +27,7 @@ services:
     hostname: apache
     image: ${LDS_APACHE_IMAGE:-infocyph/apache:latest}
     restart: unless-stopped
+    profiles: [apache]
     environment:
       - TZ=${TZ:-}
     volumes:
