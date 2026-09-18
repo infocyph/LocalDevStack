@@ -3,6 +3,8 @@
 !configuration
 !data/.gitignore
 !docker/compose
+!docker/catalog/
+!docker/catalog/**
 !docker/conf
 !docker/dockerfiles
 !docker/release.env
