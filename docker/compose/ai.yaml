@@ -1,0 +1,10 @@
+services:
+  llm-sm:
+    image: ${LDS_LLM_IMAGE:-infocyph/llm-sm:0.03}
+    restart: unless-stopped
+    profiles: [ai]
+    volumes:
+      - lds_llm:/root/.ollama
+    networks:
+      - frontend
+      - backend
