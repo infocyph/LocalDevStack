@@ -21,9 +21,6 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-    networks:
-      datastore:
-        ipv4_address: 172.30.0.100
 
   postgres:
     <<: *db-service
@@ -56,9 +53,6 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
-    networks:
-      datastore:
-        ipv4_address: 172.30.0.101
 
   mysql:
     <<: *db-service
@@ -80,9 +74,6 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-    networks:
-      datastore:
-        ipv4_address: 172.30.0.102
 
   mongodb:
     <<: *db-service
@@ -106,9 +97,6 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-    networks:
-      datastore:
-        ipv4_address: 172.30.0.103
 
   mariadb:
     <<: *db-service
@@ -130,9 +118,6 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-    networks:
-      datastore:
-        ipv4_address: 172.30.0.104
 
   elasticsearch:
     <<: *db-service
@@ -154,6 +139,3 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-    networks:
-      datastore:
-        ipv4_address: 172.30.0.105
