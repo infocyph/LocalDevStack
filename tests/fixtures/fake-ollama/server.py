@@ -14,6 +14,10 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
+        if self.path == "/api/version":
+            self._json(200, {"version": "0.0.0-ci"})
+            return
+
         if self.path == "/api/tags":
             self._json(
                 200,
