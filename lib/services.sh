@@ -301,16 +301,59 @@ cmd_logs() {
   fi
 }
 
+_enabled_profiles_csv() {
+  compose_control_value COMPOSE_PROFILES ""
+}
+
+profile_enabled() {
+  local wanted="${1:-}" csv p
+  [[ -n "$wanted" ]] || return 1
+  csv="$(_enabled_profiles_csv)"
+  IFS=',' read -r -a __lds_profiles <<<"$csv"
+  for p in "${__lds_profiles[@]}"; do
+    p="${p//[[:space:]]/}"
+    [[ "$p" == "$wanted" ]] && return 0
+  done
+  return 1
+}
+
+cmd_urls() {
+  local -A seen=()
+  local url key profile
+
+  _print_url() {
+    local value="${1:-}"
+    [[ -n "$value" ]] || return 0
+    [[ -z "${seen[$value]:-}" ]] || return 0
+    seen["$value"]=1
+    printf '%s\n' "$value"
+  }
+
+  _print_url "https://admin.localhost"
+  _print_url "https://webmail.localhost"
+
+  for key in "${SERVICE_ORDER[@]}"; do
+    profile="${SERVICES[$key]:-}"
+    url="${SERVICE_URL[$key]:-}"
+    [[ -n "$profile" && -n "$url" ]] || continue
+    profile_enabled "$profile" || continue
+    _print_url "$url"
+  done
+}
+
 cmd_open() {
   local target="${1:-}"
-  [[ -n "$target" ]] || die "open <mail|db|redis|kibana|domain>"
+  [[ -n "$target" ]] || die "open <admin|mail|db|redis|mongo|kibana|ai|domain>"
   local url=""
   case "${target,,}" in
+  http://* | https://*) url="$target" ;;
+  admin | tools) url="https://admin.localhost" ;;
   mail | mailpit | webmail) url="https://webmail.localhost" ;;
   db | cloudbeaver) url="https://db.localhost" ;;
-  redis | redisinsight | redis-insight | rds) url="http://ri.localhost" ;;
-  mongo | me | mongoexpress | mongo-express) url="http://me.localhost" ;;
-  kibana | kbn) url="http://kibana.localhost" ;;
+  redis | redisinsight | redis-insight | rds) url="https://ri.localhost" ;;
+  mongo | me | mongoexpress | mongo-express) url="https://me.localhost" ;;
+  kibana | kbn) url="https://kibana.localhost" ;;
+  ai | llm | llm-sm) url="https://llm.localhost" ;;
   *)
     url="https://${target}"
     ;;
