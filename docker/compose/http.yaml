@@ -16,11 +16,8 @@ services:
       - lds_ssl_roots:/etc/share/rootCA:ro
       - lds_fpm_sock:/run/php-fpm:ro
       - ../../logs/nginx:/var/log/nginx
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     networks:
-      frontend:
-        ipv4_address: 172.28.0.10
+      - frontend
     depends_on:
       - server-tools
 
@@ -28,7 +25,7 @@ services:
     container_name: APACHE
     hostname: apache
     image: ${LDS_APACHE_IMAGE:-infocyph/apache:0.4.2}
-    restart: always
+    restart: unless-stopped
     environment:
       - TZ=${TZ:-}
     volumes:
@@ -41,5 +38,4 @@ services:
     depends_on:
       - nginx
     networks:
-      frontend:
-        ipv4_address: 172.28.0.11
+      - frontend
