@@ -42,10 +42,10 @@ for entry in "${expected[@]}"; do
 done
 pass "published compatibility manifest"
 
-for key in POSTGRESQL MYSQL MARIADB ELASTICSEARCH MONGODB REDIS; do
-  grep -Fq "[$key]=" "$ROOT/lds" || fail "missing profile catalog entry: $key"
-done
-pass "current profile catalog entries"
+assert_file_contains "$ROOT/lds" 'CATALOG_FILE="$CFG/catalog/services.psv"'
+assert_file_contains "$ROOT/lds" 'load_service_catalog()'
+assert_file_contains "$ROOT/lds" 'load_service_catalog'
+pass "profile setup loads the tracked host catalog"
 
 assert_file_contains "$ROOT/lds" 'cmd_ai()'
 assert_file_contains "$ROOT/lds" 'cmd_llm()'
