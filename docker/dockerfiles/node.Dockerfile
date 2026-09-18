@@ -1,5 +1,6 @@
 ARG NODE_VERSION=current
 FROM node:${NODE_VERSION}-alpine
+ARG NODE_VERSION
 
 LABEL org.opencontainers.image.source="https://github.com/infocyph/LocalDevStack"
 LABEL org.opencontainers.image.description="NodeJS Alpine"
