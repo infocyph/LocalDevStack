@@ -1,33 +1,107 @@
 Architecture
 ============
 
-LocalDevStack is composed of:
+LocalDevStack is split into small, purpose-specific layers.
 
-- The **orchestrator**: ``lds`` / ``lds.bat`` (selects profiles, runs Compose, common workflows)
-- The **HTTP layer**: Nginx (front proxy) and optionally Apache (backend HTTP) depending on your stack choice
-- The **runtimes**: PHP (FPM) and Node (and future stacks)
-- The **control plane**: the **server-tools** image (domain/vhost generation, TLS automation, secrets helpers)
-- The **runner**: supervisord + cron + logrotate and helper exec wrappers
+Core Components
+---------------
 
-Key idea
---------
+lds / lds.bat
+   Host-side orchestrator for setup, profiles, Compose, diagnostics, runtime rebuilds,
+   domains, TLS, and convenience commands.
 
-Instead of a monolithic "one container does everything" model, LocalDevStack uses:
+Nginx
+   Front door for local HTTP/HTTPS traffic. It routes PHP-FPM, optional Apache,
+   Node applications, admin UIs, Mailpit, and llm.localhost.
 
-- Compose profiles to enable only what you need
-- Generated configuration artifacts (vhosts, certificates) persisted on the host
-- Stable container names/hostnames to keep local routing predictable
+Apache
+   Optional HTTP backend for projects that explicitly choose the Apache path.
 
-How containers cooperate
-------------------------
+PHP / Node runtimes
+   Locally built, version-specific runtime images. The domain wizard preserves the
+   selected PHP/Node version and uses Alpine variants.
 
-1. You generate vhost configs (via ``lds setup domain``).
-2. The Tools container can scan all vhosts and generate certificates.
-3. Nginx loads hosts and routes requests either:
+Tools
+   Trusted control plane for vhost generation, certificates, admin UI, secrets,
+   Git helpers, monitoring, and AI-consumer commands.
 
-   - directly to PHP-FPM (fastcgi) or
-   - to Apache (reverse proxy) when Apache mode is enabled or
-   - to a Node service (reverse proxy).
+Runner
+   Background execution layer for Supervisor, cron, and log rotation.
 
-4. The Runner handles background services (cron/logrotate) and gives you a consistent place for helper utilities.
-5. You also get following services: EMail, DB, Caching
+llm-sm
+   Optional local AI provider. It is enabled only through the ai profile and is
+   separate from Tools.
+
+Networking
+----------
+
+LocalDevStack keeps three logical networks::
+
+   Frontend
+   Backend
+   DataStore
+
+Docker assigns their address ranges dynamically. Core services do not depend on
+hard-coded 172.28/29/30 addresses.
+
+Service-to-service communication uses Docker DNS names such as::
+
+   server-tools
+   runner
+   mailpit
+   nginx
+   apache
+   postgres
+   mysql
+   mariadb
+   mongodb
+   redis
+   elasticsearch
+   llm-sm
+
+The legacy lds vpn-fix workflow is deprecated because LocalDevStack no longer owns
+fixed private subnets.
+
+Runtime Flow
+------------
+
+A normal web-domain flow is:
+
+1. lds setup domain delegates domain/runtime generation to Tools.
+2. Tools writes HTTP vhosts into persistent named volumes.
+3. Tools writes runtime Compose fragments under configuration/compose/.
+4. Nginx routes by Docker service name or PHP-FPM socket.
+5. Selected PHP/Node runtime images are built only for the chosen versions.
+
+For optional AI:
+
+1. the ai profile starts llm-sm;
+2. Tools consumes http://llm-sm:11434 internally;
+3. Nginx exposes https://llm.localhost;
+4. lds ai delegates operational AI to Tools;
+5. lds llm delegates provider/model management to llm-sm.
+
+Trust Boundaries
+----------------
+
+server-tools and runner intentionally receive /var/run/docker.sock because their
+supported workflows control sibling containers. Docker socket access is equivalent
+to powerful host Docker control.
+
+The Docker socket is not mounted into:
+
+- llm-sm;
+- databases;
+- database admin clients;
+- Nginx/Apache;
+- ordinary runtime services.
+
+llm-sm also receives no project/repository mount by default. AI output is not
+automatically executed as shell, SQL, or code.
+
+Persistence
+-----------
+
+Runtime-generated vhosts, certificate material, databases, Mailpit state, runtime
+sockets/pools, and AI models use named volumes. Host-editable/generated configuration,
+logs, SOPS state, optional SSH material, and public TLS exports remain under the repository.
