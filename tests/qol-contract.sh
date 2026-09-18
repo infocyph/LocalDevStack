@@ -71,7 +71,8 @@ fi
 assert_contains "$redacted" "***REDACTED***"
 pass "config show redacts effective secrets by default"
 
-bundle="$(mktemp --suffix=.zip)"
+bundle_dir="$(mktemp -d)"
+bundle="$bundle_dir/bundle.zip"
 "$ROOT/lds" support bundle --redact "$bundle" >/dev/null
 python3 - "$bundle" "supersecret-ci-value" <<'PY'
 import sys, zipfile
@@ -82,7 +83,7 @@ with zipfile.ZipFile(path) as z:
         if secret.encode() in data:
             raise SystemExit(f"support bundle leaked secret in {name}")
 PY
-rm -f "$bundle"
+rm -rf "$bundle_dir"
 pass "support bundle redacts interpolated secrets"
 
 default_bundle_dir="$(mktemp -d)"
