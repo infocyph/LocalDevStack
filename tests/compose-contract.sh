@@ -59,6 +59,19 @@ render mongodb --profile mongodb
 render redis --profile redis
 render elasticsearch --profile elasticsearch
 render elasticsearch-filebeat --profile elasticsearch --profile filebeat
+render ai --profile ai
+docker compose --project-directory "$ROOT" \
+  -f "$ROOT/docker/compose/main.yaml" \
+  -f "$ROOT/docker/compose/ai-nvidia.yaml" \
+  --env-file "$release_env" --env-file "$user_env" --profile ai config --quiet
+docker compose --project-directory "$ROOT" \
+  -f "$ROOT/docker/compose/main.yaml" \
+  -f "$ROOT/docker/compose/ai-amd.yaml" \
+  --env-file "$release_env" --env-file "$user_env" --profile ai config --quiet
+docker compose --project-directory "$ROOT" \
+  -f "$ROOT/docker/compose/main.yaml" \
+  -f "$ROOT/docker/compose/ai-host-port.yaml" \
+  --env-file "$release_env" --env-file "$user_env" --profile ai config --quiet
 
 resolved="$("${compose[@]}" --profile mysql config)"
 assert_contains "$resolved" "server-tools:"
@@ -93,3 +106,52 @@ pass "shell override wins over user and release env files"
 # explicit rather than silently changing it in the compatibility batch.
 assert_contains "$resolved" "apache:"
 pass "current Apache compose presence characterized"
+
+core_json="$("${compose[@]}" config --format json)"
+python3 -c 'import json,sys; d=json.load(sys.stdin); assert "llm-sm" not in d.get("services", {})' <<<"$core_json"
+pass "AI provider remains outside the default profile"
+
+ai_json="$("${compose[@]}" --profile ai config --format json)"
+python3 -c '
+import json,sys
+d=json.load(sys.stdin)
+s=d["services"]["llm-sm"]
+assert s["image"] == "infocyph/llm-sm:0.03"
+assert "container_name" not in s
+assert not s.get("ports")
+assert set(s["networks"]) == {"frontend","backend"}
+targets={v["target"] for v in s["volumes"]}
+assert targets == {"/root/.ollama"}
+assert d["volumes"]["lds_llm"]["name"] == "LLMModels"
+tools=d["services"]["server-tools"]["environment"]
+assert tools["LDS_AI_ENABLED"] == "auto"
+assert tools["LDS_AI_PROVIDER"] == "ollama"
+assert tools["LDS_AI_URL"] == "http://llm-sm:11434"
+assert tools["LDS_AI_MODEL"] == "qwen2.5:3b"
+' <<<"$ai_json"
+pass "base AI profile is internal-only and deterministic"
+
+amd_json="$(docker compose --project-directory "$ROOT" -f "$ROOT/docker/compose/main.yaml" -f "$ROOT/docker/compose/ai-amd.yaml" --env-file "$release_env" --env-file "$user_env" --profile ai config --format json)"
+python3 -c '
+import json,sys
+s=json.load(sys.stdin)["services"]["llm-sm"]
+assert s["image"] == "infocyph/llm-sm:amd-0.03"
+devices=" ".join(str(x) for x in s.get("devices", []))
+assert "/dev/kfd" in devices and "/dev/dri" in devices
+' <<<"$amd_json"
+pass "AMD AI override"
+
+nvidia_yaml="$(docker compose --project-directory "$ROOT" -f "$ROOT/docker/compose/main.yaml" -f "$ROOT/docker/compose/ai-nvidia.yaml" --env-file "$release_env" --env-file "$user_env" --profile ai config)"
+assert_contains "$nvidia_yaml" "gpus:"
+pass "NVIDIA AI override"
+
+host_json="$(docker compose --project-directory "$ROOT" -f "$ROOT/docker/compose/main.yaml" -f "$ROOT/docker/compose/ai-host-port.yaml" --env-file "$release_env" --env-file "$user_env" --profile ai config --format json)"
+python3 -c '
+import json,sys
+ports=json.load(sys.stdin)["services"]["llm-sm"]["ports"]
+assert len(ports) == 1
+p=ports[0]
+assert p["host_ip"] == "127.0.0.1"
+assert int(p["target"]) == 11434 and int(p["published"]) == 11434
+' <<<"$host_json"
+pass "direct Ollama port is explicit loopback-only"
