@@ -69,7 +69,13 @@ assert_contains "$resolved" "image: infocyph/tools:0.23.2"
 assert_contains "$resolved" "image: infocyph/runner:0.5"
 assert_contains "$resolved" "image: infocyph/nginx:0.4.1"
 assert_contains "$resolved" "image: infocyph/apache:0.4.2"
-pass "release compatibility defaults resolve"
+if grep -Eq 'ipv4_address:|172\\.28\\.0\\.|172\\.29\\.0\\.|172\\.30\\.0\\.' <<<"$resolved"; then
+  fail "resolved Compose config still contains fixed LocalDevStack addresses"
+fi
+assert_contains "$resolved" "name: Frontend"
+assert_contains "$resolved" "name: Backend"
+assert_contains "$resolved" "name: DataStore"
+pass "release compatibility defaults and dynamic networks resolve"
 
 printf '%s\n' 'LDS_TOOLS_IMAGE=example.invalid/tools:user-override' >>"$user_env"
 user_override="$("${compose[@]}" config)"
