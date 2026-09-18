@@ -51,6 +51,9 @@ jobs:
       - name: Networking characterization
         run: tests/networking-contract.sh
 
+      - name: Wrapper contract
+        run: tests/wrappers-contract.sh
+
   compose:
     name: Compose contract
     runs-on: ubuntu-latest
