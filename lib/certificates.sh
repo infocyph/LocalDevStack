@@ -46,6 +46,21 @@ env_init() {
 CA_BASENAME="localdevstack-rootca"
 CA_NICK="LocalDevStack Root CA"
 
+host_root_ca_path() {
+  local current="$DIR/configuration/ssl/rootCA.pem"
+  local legacy="$DIR/configuration/rootCA/rootCA.pem"
+
+  if [[ -r "$current" ]]; then
+    printf '%s' "$current"
+    return 0
+  fi
+  if [[ -r "$legacy" ]]; then
+    printf '%s' "$legacy"
+    return 0
+  fi
+  return 1
+}
+
 detect_os_family() {
   # Output: "id|like"
   # Must never fail under set -e
@@ -144,8 +159,9 @@ install_ca_nss_user() {
 install_ca_windows() {
   need_windows_tools
 
-  local src_ca="$DIR/configuration/rootCA/rootCA.pem"
-  [[ -r "$src_ca" ]] || die "certificate not found: $src_ca"
+  local src_ca
+  src_ca="$(host_root_ca_path || true)"
+  [[ -n "$src_ca" ]] || die "certificate not found: expected configuration/ssl/rootCA.pem (legacy: configuration/rootCA/rootCA.pem)"
 
   local win_ca
   win_ca="$(cygpath -w "$src_ca")"
@@ -257,8 +273,9 @@ install_ca() {
 uninstall_ca_windows() {
   need_windows_tools
 
-  local src_ca="$DIR/configuration/rootCA/rootCA.pem"
-  [[ -r "$src_ca" ]] || die "certificate not found: $src_ca"
+  local src_ca
+  src_ca="$(host_root_ca_path || true)"
+  [[ -n "$src_ca" ]] || die "certificate not found: expected configuration/ssl/rootCA.pem (legacy: configuration/rootCA/rootCA.pem)"
 
   local win_ca
   win_ca="$(cygpath -w "$src_ca")"
