@@ -569,7 +569,7 @@ cmd_support() {
 #   --full   : include more logs/inspect output (can be large)
 cmd_bundle() {
   local mode="redact"
-  local out="${1:-}"
+  local out=""
   while [[ "${1:-}" ]]; do
     case "$1" in
     --redact)

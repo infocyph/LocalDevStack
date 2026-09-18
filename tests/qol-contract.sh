@@ -85,6 +85,16 @@ PY
 rm -f "$bundle"
 pass "support bundle redacts interpolated secrets"
 
+default_bundle_dir="$(mktemp -d)"
+(
+  cd "$default_bundle_dir"
+  "$ROOT/lds" support bundle --redact >/dev/null
+)
+default_bundle="$(find "$default_bundle_dir" -maxdepth 1 -type f -name 'lds_bundle_*.zip' -print -quit)"
+[[ -n "$default_bundle" ]] || fail "support bundle option-only invocation did not create a default zip"
+rm -rf "$default_bundle_dir"
+pass "support bundle option-only invocation uses a generated filename"
+
 help="$("$ROOT/lds" help)"
 assert_contains "$help" "doctor"
 assert_contains "$help" "images"
