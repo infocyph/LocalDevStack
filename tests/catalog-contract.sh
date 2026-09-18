@@ -20,6 +20,8 @@ while IFS='|' read -r key profile display service_key version_env defaults promp
   [[ -n "$service_key" ]] || fail "catalog row missing service key: $key"
   [[ -n "$version_env" ]] || fail "catalog row missing version env: $key"
   [[ -n "$category" ]] || fail "catalog row missing category: $key"
+  [[ -z "$admin_client" || "$admin_client" =~ ^[a-z0-9-]+$ ]] ||
+    fail "catalog admin client invalid: $key"
   [[ "$optional" =~ ^[01]$ ]] || fail "catalog optional flag invalid: $key"
   [[ "$default_enabled" =~ ^[01]$ ]] || fail "catalog default_enabled flag invalid: $key"
   [[ -z "${seen_keys[$key]:-}" ]] || fail "duplicate catalog key: $key"
