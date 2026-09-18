@@ -1,6 +1,6 @@
 services:
   llm-sm:
-    image: ${LDS_LLM_IMAGE:-infocyph/llm-sm:0.03}
+    image: ${LDS_LLM_IMAGE:-infocyph/llm-sm:latest}
     restart: unless-stopped
     profiles: [ai]
     volumes:
