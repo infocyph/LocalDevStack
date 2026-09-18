@@ -40,7 +40,7 @@ jobs:
         run: tests/env-contract.sh
 
       - name: Catalog contract
-        run: tests/catalog-contract.sh
+        run: bash tests/catalog-contract.sh
 
       - name: PHP runtime contract
         run: tests/runtime-php-contract.sh
