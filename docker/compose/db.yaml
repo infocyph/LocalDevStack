@@ -43,11 +43,7 @@ services:
         "-c", "hba_file=/etc/postgresql/pg_hba.conf",
       ]
     healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "pg_isready -h 127.0.0.1"${POSTGRES_USER}\" -h 127.0.0.1 -d \"${POSTGRES_DB}\""
-        ]
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -87,11 +83,7 @@ services:
       - lds_mongo:/data/db
       - ../../logs/mongodb:/var/log/mongodb
     healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "mongosh --host 127.0.0.1 --quiet --eval \"db.adminCommand(\'ping\')\" || exit 1"
-        ]
+      test: ["CMD", "mongosh", "--host", "127.0.0.1", "--quiet", "--eval", "db.adminCommand('ping')"]
       interval: 30s
       timeout: 10s
       retries: 3
