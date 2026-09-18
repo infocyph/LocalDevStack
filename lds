@@ -598,9 +598,6 @@ cmd_bundle() {
   local base="lds_bundle_${project}_${ts}"
   [[ -n "$out" ]] || out="$PWD/${base}.zip"
 
-  cleanup_bundle() { rm -rf "$tmp" 2>/dev/null || true; }
-  trap cleanup_bundle RETURN
-
   {
     echo "project=$project"
     echo "dir=$DIR"
@@ -682,7 +679,11 @@ cmd_bundle() {
   fi
 
   # pack
-  (cd "$tmp" && zip -qr "$out" .) || die "Failed to write bundle: $out"
+  if ! (cd "$tmp" && zip -qr "$out" .); then
+    rm -rf "$tmp" 2>/dev/null || true
+    die "Failed to write bundle: $out"
+  fi
+  rm -rf "$tmp" 2>/dev/null || true
   ok "Bundle created: $out"
 }
 
