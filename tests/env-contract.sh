@@ -114,7 +114,14 @@ ai_env_tmp="$(mktemp -d)"
   ENV_RELEASE="$ROOT/docker/release.env"
   ENV_DOCKER="$ai_env_tmp/docker.env"
   YELLOW="" NC=""
-  die() { printf "die: %s\n" "$*" >&2; exit 1; }
+  die() { printf "die: %s
+" "$*" >&2; exit 1; }
+  dotenv_value() {
+    local file="$1" key="$2" line
+    line="$(grep -E "^${key}=" "$file" 2>/dev/null | tail -n1 || true)"
+    [[ -n "$line" ]] || return 1
+    printf "%s" "${line#*=}"
+  }
   compose_control_value() {
     local key="$1" fallback="${2:-}" value=""
     if [[ -n "${!key+x}" ]]; then printf "%s" "${!key}"; return 0; fi

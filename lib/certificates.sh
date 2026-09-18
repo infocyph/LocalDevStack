@@ -434,7 +434,7 @@ add_required_env() {
   update_env "$ENV_DOCKER" WORKING_DIR "$DIR"
 
   local ai_runtime
-  ai_runtime="$(dotenv_value "$ENV_DOCKER" LDS_AI_RUNTIME 2>/dev/null || true)"
+  ai_runtime="$(compose_control_value LDS_AI_RUNTIME "")"
   if [[ -z "$ai_runtime" ]]; then
     ai_runtime="$(detect_ai_runtime)"
     update_env "$ENV_DOCKER" LDS_AI_RUNTIME "$ai_runtime"
