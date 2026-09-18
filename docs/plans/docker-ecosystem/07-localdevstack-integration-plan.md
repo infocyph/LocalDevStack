@@ -1893,13 +1893,13 @@ This gives every later change a reliable regression boundary.
 
 ---
 
-# Appendix — User-directed latest-tag policy override (2026-09-18)
+# Appendix — User-directed Alpine-first moving-tag policy override (2026-09-18)
 
 This section is an explicit product-direction override and supersedes earlier image-pinning recommendations in this plan wherever they conflict.
 
 ## Image default policy
 
-Use moving `latest` tags wherever the upstream image family publishes/supports them.
+Prefer the moving Alpine variant when the same image family publishes/supports one; otherwise use its normal moving latest tag.
 
 LocalDevStack release defaults:
 
@@ -1912,7 +1912,7 @@ LDS_LLM_IMAGE=infocyph/llm-sm:latest
 LDS_LLM_AMD_IMAGE=infocyph/llm-sm:amd-latest
 ```
 
-Other runtime defaults should likewise use `latest` where supported, including PostgreSQL, MySQL, MariaDB, MongoDB, Redis/Redis Insight, CloudBeaver, Mongo Express and Mailpit.
+Other runtime defaults follow the same rule. PostgreSQL uses `postgres:alpine`; MySQL, MariaDB, MongoDB, Redis Stack/Redis Insight, CloudBeaver, Mongo Express and Mailpit use their normal moving latest tags because the selected image family does not provide a suitable moving Alpine alias for this stack.
 
 ## Elastic exception
 
@@ -1921,7 +1921,7 @@ Elasticsearch and Kibana explicitly do not support a `latest` tag, and the Elast
 Keep Elasticsearch, Kibana and Filebeat on one aligned current-stable version. At implementation time this is:
 
 ```text
-9.5.4
+9.5.3
 ```
 
 When this Elastic exception is advanced, update all three together and update the LocalDevStack catalog/contract tests in the same change.
@@ -1930,7 +1930,7 @@ When this Elastic exception is advanced, update all three together and update th
 
 User values in `docker/.env` and command-scoped shell environment still override these defaults.
 
-The latest-tag policy changes default image selection only; it does not weaken:
+The Alpine-first moving-tag policy changes default image selection only; it does not weaken:
 
 - profile isolation;
 - AI trust boundaries;
