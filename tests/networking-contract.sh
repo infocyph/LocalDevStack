@@ -45,10 +45,10 @@ fi
 assert_file_contains "$http" 'restart: unless-stopped'
 pass "HTTP network/restart cleanup"
 
-assert_file_contains "$ROOT/lds" 'migrate_legacy_networks()'
-assert_file_contains "$ROOT/lds" 'docker_compose down --remove-orphans'
-assert_file_contains "$ROOT/lds" 'com.infocyph.network-schema'
-assert_file_contains "$ROOT/lds" 'cmd_vpn_fix()'
+assert_file_contains "$ROOT/lib/services.sh" 'migrate_legacy_networks()'
+assert_file_contains "$ROOT/lib/services.sh" 'docker_compose down --remove-orphans'
+assert_file_contains "$ROOT/lib/services.sh" 'com.infocyph.network-schema'
+assert_file_contains "$ROOT/lib/services.sh" 'cmd_vpn_fix()'
 assert_file_contains "$ROOT/lds" 'vpn-fix) cmd_vpn_fix "$@"'
-assert_file_contains "$ROOT/lds" 'migrate_legacy_networks'
+assert_file_contains "$ROOT/lib/services.sh" 'migrate_legacy_networks'
 pass "safe legacy-network migration and vpn-fix deprecation"
