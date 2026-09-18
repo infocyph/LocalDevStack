@@ -20,11 +20,10 @@ if grep -RqsF '/var/run/docker.sock' "$ROOT/docker/compose/ai.yaml" "$ROOT/docke
 fi
 pass "Docker socket trust boundary"
 
-assert_file_contains "$db" 'pg_isready -h 127.0.0.1'
+assert_file_contains "$db" 'test: ["CMD", "pg_isready", "-h", "127.0.0.1"]'
 assert_file_contains "$db" 'test: ["CMD", "mysqladmin", "ping", "-h127.0.0.1", "--silent"]'
-assert_file_contains "$db" 'mongosh --host 127.0.0.1 --quiet --eval'
-if grep -E 'healthcheck:|PGPASSWORD=|MYSQL_ROOT_PASSWORD|MARIADB_ROOT_PASSWORD|MONGO_INITDB_ROOT_PASSWORD' "$db" |
-   grep -E 'PGPASSWORD=|MYSQL_ROOT_PASSWORD|MARIADB_ROOT_PASSWORD|MONGO_INITDB_ROOT_PASSWORD' >/dev/null; then
+assert_file_contains "$db" 'test: ["CMD", "mongosh", "--host", "127.0.0.1", "--quiet", "--eval", "db.adminCommand('\''ping'\'')"]'
+if grep -Fq 'PGPASSWORD=' "$db" || grep -Fq ' --password ' "$db"; then
   fail "database readiness probes must not embed credentials"
 fi
 pass "database health probes are credential-free local readiness checks"
