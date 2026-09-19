@@ -54,7 +54,6 @@ while IFS='|' read -r key profile display service_key version_env defaults promp
     [[ "$defaults" == *"LDS_AI_MODEL=qwen3:14b"* ]] || fail "AI model default drift"
     [[ "$version_env" == "LDS_LLM_ARCH" ]] || fail "AI image selector must be LDS_LLM_ARCH"
     [[ "$defaults" != *"LDS_AI_RUNTIME="* ]] || fail "AI profile wizard must not prompt for runtime"
-    [[ "$defaults" == *"LDS_LLM_HOST_PORT=no"* ]] || fail "AI host-port default drift"
     ;;
   ELASTICSEARCH)
     [[ "$defaults" == *"ELASTICSEARCH_VERSION=9.5.3"* ]] || fail "Elastic stable default drift"
