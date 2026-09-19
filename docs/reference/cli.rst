@@ -212,14 +212,11 @@ It performs ``extract --backend ollama --no-cluster`` followed by
 
 By default it derives:
 
-- ``OLLAMA_BASE_URL`` from the actual loopback-published ``llm-ollama`` port;
+- ``OLLAMA_BASE_URL=http://llm-ollama.localhost:11434/v1``, routed through Nginx;
 - ``OLLAMA_MODEL`` from ``LDS_AI_MODEL``;
 - ``GRAPHIFY_API_TIMEOUT`` from ``LDS_AI_TIMEOUT``.
 
-The host port must already be applied with::
-
-   lds llm host-port on
-   lds up -d llm-ollama
+The stack and AI profile must be running; there is no separate host-port setup step.
 
 An explicitly supplied ``OLLAMA_BASE_URL`` overrides the default
 ``http://llm-ollama.localhost:11434/v1`` endpoint.
