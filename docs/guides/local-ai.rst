@@ -93,6 +93,10 @@ The tracked provider service exists only in::
 
    docker/compose/companion.yaml
 
+The Compose service key/hostname is ``llm-sm`` and the fixed container name remains
+``LLM_SM`` for LocalDevStack single-stack compatibility. Internal consumers must continue
+to route through ``llm-sm`` rather than depending on the container name.
+
 and is included through::
 
    docker/compose/main.yaml
