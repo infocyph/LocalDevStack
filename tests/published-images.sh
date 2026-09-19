@@ -35,7 +35,7 @@ for image in "$tools_image" "$runner_image"; do
 done
 pass "Tools and Runner publish healthchecks"
 
-grep -Fq 'image: infocyph/llm-sm:${LDS_LLM_ARCH}' "$ROOT/docker/compose/companion.yaml" ||
+grep -Fq 'image: infocyph/llm-ollama:${LDS_LLM_ARCH}' "$ROOT/docker/compose/companion.yaml" ||
   fail "LLM service must use the single LDS_LLM_ARCH selector"
 grep -Fq "amd) printf '%s' amd-latest" "$ROOT/lib/platform.sh" ||
   fail "AMD runtime must map to amd-latest"
