@@ -55,10 +55,11 @@ cmd_graphify() {
   [[ $# -eq 0 ]] || shift
   [[ -e "$target" ]] || die "Graphify target does not exist: $target"
 
-  local base_url timeout model graphify_bin arg next_is_model=0 next_is_timeout=0
+  local base_url timeout model api_key graphify_bin arg next_is_model=0 next_is_timeout=0
   base_url="${OLLAMA_BASE_URL:-$(_graphify_local_base_url)}"
   timeout="${GRAPHIFY_API_TIMEOUT:-$(compose_control_value LDS_AI_TIMEOUT 1800)}"
   model="${OLLAMA_MODEL:-$(compose_control_value LDS_AI_MODEL qwen2.5:3b)}"
+  api_key="${OLLAMA_API_KEY:-local}"
 
   # Keep explicit model/timeout overrides consistent across extraction and clustering.
   for arg in "$@"; do
@@ -94,11 +95,13 @@ cmd_graphify() {
   graphify_bin="$(bin_path graphify)"
 
   OLLAMA_BASE_URL="$base_url" \
+  OLLAMA_API_KEY="$api_key" \
   OLLAMA_MODEL="$model" \
   GRAPHIFY_API_TIMEOUT="$timeout" \
     "$graphify_bin" extract "$target" --backend ollama --no-cluster "$@"
 
   OLLAMA_BASE_URL="$base_url" \
+  OLLAMA_API_KEY="$api_key" \
   OLLAMA_MODEL="$model" \
   GRAPHIFY_API_TIMEOUT="$timeout" \
     "$graphify_bin" cluster-only "$target" --backend ollama
