@@ -360,33 +360,33 @@ Never commit real certificates, private keys, SOPS keys or user secrets.
 
 ---
 
-# 6. Batch 2 — Compatibility image defaults
+# 6. Batch 2 — Release defaults and image policy
 
-## 6.1 New tracked `docker/release.env`
+## 6.1 Tracked `docker/release.env`
 
-Create a committed compatibility manifest.
-
-Initial values:
+The implemented release manifest contains only defaults that genuinely vary independently
+of the fixed product Compose definitions. Current tracked value:
 
 ```text
-LDS_TOOLS_IMAGE=infocyph/tools:0.23.2
-LDS_RUNNER_IMAGE=infocyph/runner:0.5
-LDS_NGINX_IMAGE=infocyph/nginx:0.4.1
-LDS_APACHE_IMAGE=infocyph/apache:0.4.2
-LDS_LLM_IMAGE=infocyph/llm-sm:0.03
-LDS_LLM_AMD_IMAGE=infocyph/llm-sm:amd-0.03
+SCRIPTOMATIC_REF=main
 ```
+
+Tools, Runner, Nginx and Apache are declared directly as their moving `:latest` product
+images. The LLM service is declared directly as
+`infocyph/llm-sm:${LDS_LLM_ARCH}`, where `LDS_LLM_ARCH` is derived from the effective
+AI runtime (`latest` for CPU/NVIDIA, `amd-latest` for AMD/ROCm).
+
+Do not add `LDS_TOOLS_IMAGE`, `LDS_RUNNER_IMAGE`, `LDS_NGINX_IMAGE`,
+`LDS_APACHE_IMAGE`, `LDS_LLM_IMAGE`, or `LDS_LLM_AMD_IMAGE` indirection.
 
 Rules:
 
-- this file is owned by the LocalDevStack release;
-- user overrides belong in `docker/.env`;
-- user overrides always win;
-- `lds` should load release defaults before user overrides;
+- `docker/release.env` is release-owned;
+- user LocalDevStack overrides belong in `docker/.env`;
+- command-scoped shell values retain the highest interpolation precedence;
 - do not copy release defaults into a user file on every update;
-- upgrades should not overwrite user values.
-
-The exact implementation may use repeated Compose `--env-file` flags or controlled export/merge logic in `lds`, but precedence must be deterministic and covered by tests.
+- upgrades should not overwrite user values;
+- precedence must remain deterministic and covered by tests.
 
 ## 6.2 Compose image references
 
@@ -2166,8 +2166,8 @@ This is a non-blocking follow-up, not a release defect.
 
 ## LLM-SM capability boundaries
 
-The current LLM-SM 0.03 image is **linux/amd64 only**. LocalDevStack remains usable on
-arm64 with the `ai` profile disabled.
+The current published LLM-SM image contract is **linux/amd64 only**. LocalDevStack
+remains usable on arm64 with the `ai` profile disabled.
 
 LocalDevStack intentionally does not mount a repository/workspace into `llm-sm` by
 default. Direct model/API/chat/stdin workflows are supported. Repository-aware analysis
