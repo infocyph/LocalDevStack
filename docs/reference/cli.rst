@@ -219,6 +219,15 @@ LLM Provider
    lds llm ollama ...
    lds llm api ...
    lds llm version
+   lds llm help
+
+These commands execute the bundled provider CLI through LocalDevStack's Compose wrapper.
+Do not replace them with bare ``docker compose exec llm-sm ...`` from the repository
+root; LocalDevStack has no root ``compose.yml``.
+
+``LDS_AI_MODEL`` is forwarded to the provider as ``LLM_SM_MODEL``, so
+``lds ai`` and ``lds llm`` share the configured default model. Provider input,
+attachment, PDF and Ollama runtime knobs are documented in :doc:`../guides/local-ai`.
 
 Runtime selection::
 
@@ -230,6 +239,8 @@ Direct host-port control::
    lds llm host-port status
    lds llm host-port on
    lds llm host-port off
+
+The loopback port defaults to 11434 and can be changed with ``LLM_SM_PORT``.
 
 Rebuild
 -------
