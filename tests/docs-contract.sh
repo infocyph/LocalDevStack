@@ -60,31 +60,31 @@ assert_file_contains "$storage" 'SSLKeys / SSLRootCA'
 assert_file_contains "$storage" 'ToolsState'
 pass "docs distinguish persistent runtime/control state and public TLS exports"
 
-assert_file_contains "$ai" 'http://llm-sm:11434'
-assert_file_contains "$ai" 'https://llm.localhost'
+assert_file_contains "$ai" 'http://llm-ollama:11434'
+assert_file_contains "$ai" 'https://llm-ollama.localhost'
 assert_file_contains "$ai" '127.0.0.1:11434'
 assert_file_contains "$ai" 'no Docker socket'
 assert_file_contains "$ai" 'no project/repository bind mount'
 assert_file_contains "$ai" 'automatically execute model-generated shell commands'
 assert_file_contains "$ai" 'linux/amd64 only'
-assert_file_contains "$ai" 'does not mount the project/repository into llm-sm by default'
-assert_file_contains "$ai" 'infocyph/llm-sm:${LDS_LLM_ARCH}'
+assert_file_contains "$ai" 'does not mount the project/repository into llm-ollama by default'
+assert_file_contains "$ai" 'infocyph/llm-ollama:${LDS_LLM_ARCH}'
 assert_file_contains "$ai" 'LDS_LLM_ARCH=amd-latest'
 assert_file_contains "$ai" 'LDS_AI_MODEL=qwen3:14b'
-assert_file_contains "$ai" 'LLM_SM_ATTACHMENT_MAX_BYTES=16777216'
-assert_file_contains "$ai" 'LLM_SM_PDF_MAX_PAGES=24'
+assert_file_contains "$ai" 'LLM_OLLAMA_ATTACHMENT_MAX_BYTES=16777216'
+assert_file_contains "$ai" 'LLM_OLLAMA_PDF_MAX_PAGES=24'
 assert_file_contains "$ai" 'docker/compose/companion.yaml'
 assert_file_contains "$ai" 'docker/.runtime/'
 assert_file_contains "$ai" 'There are no tracked ``ai.yaml``, ``ai-nvidia.yaml``, ``ai-amd.yaml`` or'
 assert_file_contains "$ai" 'Always invoke provider commands through ``lds llm``'
-assert_file_contains "$ai" 'docker compose exec llm-sm'
-assert_file_contains "$profiles" 'LLM_SM_ALLOW_LARGE_INPUT=0'
+assert_file_contains "$ai" 'docker compose exec llm-ollama'
+assert_file_contains "$profiles" 'LLM_OLLAMA_ALLOW_LARGE_INPUT=0'
 assert_file_contains "$profiles" 'LDS_LLM_ARCH'
 assert_file_contains "$readme" 'lds llm ask "Explain dependency injection briefly"'
-assert_file_contains "$readme" 'LLM_SM_ATTACHMENTS_MAX_BYTES'
+assert_file_contains "$readme" 'LLM_OLLAMA_ATTACHMENTS_MAX_BYTES'
 pass "local AI trust boundary, Compose ownership, provider options and invocation limits are documented"
 
-for stale in   'Scriptomatic/master'   'infocyph/tools:0.23.2'   'infocyph/runner:0.5'   'infocyph/nginx:0.4.1'   'infocyph/apache:0.4.2'   'infocyph/llm-sm:0.03'; do
+for stale in   'Scriptomatic/master'   'infocyph/tools:0.23.2'   'infocyph/runner:0.5'   'infocyph/nginx:0.4.1'   'infocyph/apache:0.4.2'   'infocyph/llm-ollama:0.03'; do
   if grep -RqsF "$stale" "$ROOT/README.md" "$ROOT/docs" --exclude-dir=plans; then
     fail "user-facing docs contain stale compatibility reference: $stale"
   fi
