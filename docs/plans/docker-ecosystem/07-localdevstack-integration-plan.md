@@ -802,11 +802,18 @@ Do not install Graphify into `llm-sm` or Tools solely for this integration.
 
 Supported patterns:
 
-- host Graphify -> `https://llm.localhost/v1`;
+- `lds graphify [path] [extract-options...]` -> host Graphify workflow against the
+  loopback-published provider, using `LDS_AI_MODEL` and `LDS_AI_TIMEOUT` by default;
+- explicit host Graphify may use `https://llm.localhost/v1` or an overridden
+  `OLLAMA_BASE_URL`;
 - container Graphify on a shared network -> `http://llm-sm:11434/v1`;
 - Tools `aiops graphify --file <output>` -> analyze an explicitly supplied Graphify output file.
 
-Graphify remains an external consumer/tool.
+The `lds graphify` workflow runs `extract --backend ollama --no-cluster` followed by
+`cluster-only <same-path> --backend ollama` so the requested two-phase flow clusters
+once rather than re-clustering immediately after the extraction command's default
+clustering pass. Graphify remains a host/external consumer and is not installed into
+`llm-sm` or Tools.
 
 ## 8.10 AI admin panel
 
