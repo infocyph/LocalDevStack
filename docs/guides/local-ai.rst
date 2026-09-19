@@ -39,11 +39,15 @@ The single provider service uses::
 
    image: infocyph/llm-sm:${LDS_LLM_ARCH}
 
-The persisted mapping is:
+The derived image mapping is:
 
 - ``cpu`` -> ``LDS_LLM_ARCH=latest``;
 - ``nvidia`` -> ``LDS_LLM_ARCH=latest`` plus the NVIDIA GPU overlay;
 - ``amd`` -> ``LDS_LLM_ARCH=amd-latest`` plus the AMD device overlay.
+
+``LDS_LLM_ARCH`` is derived from the selected runtime for each Compose invocation. It is
+not an independent image-version selector. ``lds llm runtime ...`` persists the explicit
+runtime choice and its matching derived tag for compatibility/inspection.
 
 Override detection explicitly when required::
 
@@ -81,6 +85,31 @@ Show/disable it with::
    lds llm host-port off
 
 The port can be changed through ``LLM_SM_PORT`` when direct host access is enabled.
+
+Compose Ownership
+-----------------
+
+The tracked provider service exists only in::
+
+   docker/compose/companion.yaml
+
+and is included through::
+
+   docker/compose/main.yaml
+
+There are no tracked ``ai.yaml``, ``ai-nvidia.yaml``, ``ai-amd.yaml`` or
+``ai-host-port.yaml`` files.
+
+When runtime-specific Compose data is required, ``lds`` creates a temporary fragment
+under ``docker/.runtime/`` for the current command only:
+
+- NVIDIA -> ``gpus: all``;
+- AMD/ROCm -> ``/dev/kfd`` and ``/dev/dri``;
+- direct host API -> ``127.0.0.1:${LLM_SM_PORT:-11434}:11434``.
+
+The fragment is removed after the Compose command. ``configuration/compose/`` remains
+the normal extras/generated-runtime area and is not the location of built-in LLM
+runtime variants.
 
 AI vs LLM Commands
 ------------------
@@ -143,15 +172,54 @@ Pull a model explicitly::
 
    lds llm pull <model>
 
-Then set ``LDS_AI_MODEL`` in ``docker/.env`` if Tools should use that model by default.
-A command-scoped shell value remains the highest-precedence override.
+Then set ``LDS_AI_MODEL`` in ``docker/.env`` if it should become the default for both
+Tools AI commands and ``lds llm`` provider commands. LocalDevStack forwards that value to
+the provider as ``LLM_SM_MODEL``. A command-scoped shell value remains the
+highest-precedence LocalDevStack override.
 
 The provider CLI does not silently download a missing model for an unrelated command.
+
+Provider Settings
+-----------------
+
+These provider settings can be placed in ``docker/.env`` and are forwarded to
+``llm-sm``::
+
+   LLM_SM_SYSTEM=
+   LLM_SM_INPUT_WARN_BYTES=1048576
+   LLM_SM_INPUT_MAX_BYTES=0
+   LLM_SM_ATTACHMENT_MAX_BYTES=16777216
+   LLM_SM_ATTACHMENTS_MAX_BYTES=33554432
+   LLM_SM_ATTACHMENT_MAX_COUNT=16
+   LLM_SM_PDF_MAX_PAGES=24
+   LLM_SM_PDF_DPI=120
+   LLM_SM_ALLOW_LARGE_INPUT=0
+   OLLAMA_NUM_PARALLEL=1
+   OLLAMA_MAX_LOADED_MODELS=1
+   OLLAMA_KEEP_ALIVE=5m
+   OLLAMA_NO_CLOUD=1
+
+``LLM_SM_INPUT_MAX_BYTES=0`` disables only the hard text/diff ceiling. Attachment and
+PDF-vision limits remain active unless their own value is set to ``0``.
+``LLM_SM_ALLOW_LARGE_INPUT=1`` is the explicit escape hatch for a deliberate request.
+
+Consumer settings are separate. The following values configure the Tools AI layer, not
+the provider runtime::
+
+   LDS_AI_CONNECT_TIMEOUT
+   LDS_AI_PREFLIGHT_TIMEOUT
+   LDS_AI_TIMEOUT
+   LDS_AI_AVAILABILITY_TTL
+   LDS_AI_MAX_CONTEXT_BYTES
+   LDS_AI_MAX_REQUEST_BYTES
+   LDS_AI_MAX_RESPONSE_BYTES
 
 Privacy and Trust Boundaries
 ----------------------------
 
-The base ``llm-sm`` service lives in ``docker/compose/companion.yaml`` and is gated by the ``ai`` profile. There are no tracked ``ai-*.yaml`` files. When NVIDIA, AMD/ROCm, or direct loopback access is selected, ``lds`` writes a small temporary Compose fragment under ``docker/.runtime/``, uses it for that Compose invocation, and removes it immediately afterward.
+The base ``llm-sm`` service lives in ``docker/compose/companion.yaml`` and is gated by
+the ``ai`` profile. Runtime-specific hardware/port additions are ephemeral as described
+above; no separate tracked AI Compose variants exist.
 
 By default, ``llm-sm`` receives:
 
