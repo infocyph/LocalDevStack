@@ -167,6 +167,9 @@ assert tools["LDS_AI_ENABLED"] == "auto"
 assert tools["LDS_AI_PROVIDER"] == "ollama"
 assert tools["LDS_AI_URL"] == "http://llm-sm:11434"
 assert tools["LDS_AI_MODEL"] == "qwen2.5:3b"
+assert tools["LDS_AI_TIMEOUT"] == "1800"
+nginx=d["services"]["nginx"]["environment"]
+assert nginx["LLM_PROXY_TIMEOUT_SECONDS"] == "1800"
 ' <<<"$ai_json"
 pass "companion-owned AI profile is internal-only and deterministic"
 
