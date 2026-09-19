@@ -161,40 +161,53 @@ No LocalDevStack-driven change expected.
 
 ## LocalDevStack Integration Contract
 
-LocalDevStack should add an optional `llm`/`ai` profile that consumes the published image.
+This lower-layer plan is implemented through the authoritative LocalDevStack integration
+plan in `07-localdevstack-integration-plan.md`.
 
-Suggested variables:
+LocalDevStack consumes the published provider through the optional `ai` profile. It does
+not rebuild `docker-llm-sm` locally and does not consume this repository's standalone
+Compose files.
 
-- `LLM_SM_IMAGE=infocyph/llm-sm:latest` or pinned release;
-- `LLM_SM_MODEL=<model>` only when overriding image default/use selection;
-- `LLM_SM_VOLUME=<named-volume>`;
-- optional GPU mode selection: CPU/NVIDIA standard tag vs AMD tag;
-- optional workspace mount path.
+Current LocalDevStack controls:
+
+- `LDS_AI_MODEL` selects the shared Tools/provider default model and is forwarded as
+  `LLM_SM_MODEL`;
+- `LDS_AI_RUNTIME` selects `cpu`, `nvidia`, or `amd` when explicitly configured;
+- `LDS_LLM_ARCH` is derived from the effective runtime (`latest` for CPU/NVIDIA,
+  `amd-latest` for AMD/ROCm);
+- `LDS_LLM_HOST_PORT` controls optional direct loopback exposure;
+- `LLM_SM_PORT` controls that loopback host port;
+- provider input/PDF/Ollama tuning values are forwarded from LocalDevStack
+  `docker/.env`.
+
+Compose ownership:
+
+- one tracked `llm-sm` service in `docker/compose/companion.yaml`;
+- no tracked `ai.yaml`, `ai-nvidia.yaml`, `ai-amd.yaml`, or
+  `ai-host-port.yaml`;
+- NVIDIA, AMD/ROCm, and host-port additions are generated temporarily under
+  `docker/.runtime/` by `lds`.
 
 Persistence:
 
-- mount named volume to `/root/.ollama`;
-- preserve user-pulled models across container recreation/upgrades.
+- LocalDevStack's `LLMModels` named volume mounts at `/root/.ollama`;
+- user-pulled models survive container recreation/upgrades.
 
 Workspace:
 
-- optional `${PROJECT_DIR}` or selected project path -> `/workspace`;
-- working directory `/workspace` where repo-aware commands are desired;
-- mount must be declared at container creation time;
-- do not require workspace mount for normal inference/API use.
+- LocalDevStack intentionally does not mount a project/repository into `llm-sm` by
+  default;
+- repository-aware analysis normally uses the Tools consumer layer;
+- provider stdin flows remain available without weakening the default trust boundary.
 
 Networking:
 
-- join the appropriate LocalDevStack internal network by service name;
-- expose `11434` to host only if local host tools (Graphify/editor integrations/etc.) need it;
-- if exposed, default host binding should remain loopback-oriented for a local dev stack;
-- other containers should use service DNS, e.g. `http://llm-sm:11434`.
+- internal consumers use `http://llm-sm:11434`;
+- Nginx exposes `https://llm.localhost`;
+- direct host `11434`-style access is opt-in and loopback-only.
 
-Graphify/client integration:
-
-- point client to Ollama/OpenAI-compatible endpoint exposed by `llm-sm`;
-- keep `qwen2.5:3b` usable as the default small model;
-- allow users to pull/select larger models without changing LocalDevStack image definitions.
+User/provider commands are invoked through `lds llm ...`, not a bare
+`docker compose exec` from the LocalDevStack repository root.
 
 ## Acceptance Criteria
 
@@ -204,6 +217,6 @@ Graphify/client integration:
 4. Named volume persists pulled models across container recreation.
 5. Other LocalDevStack containers can reach Ollama by service DNS.
 6. Host clients can reach it through an explicitly configured loopback port when enabled.
-7. `docker exec <container> llm-sm ...` works under LocalDevStack.
-8. Mounted project repo supports `llm-sm ai-commit` without host installation.
+7. `lds llm ...` delegates to the bundled provider CLI through LocalDevStack's Compose wrapper.
+8. No project/repository bind mount is required for normal provider operation.
 9. No Graphify/LocalDevStack-specific package is added to the image solely for integration.
