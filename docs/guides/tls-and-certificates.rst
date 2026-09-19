@@ -60,7 +60,7 @@ The wildcard covers built-in endpoints such as:
 - ``ri.localhost``;
 - ``me.localhost``;
 - ``kibana.localhost``;
-- ``llm.localhost``.
+- ``llm-ollama.localhost``.
 
 Install the Root CA
 -------------------
