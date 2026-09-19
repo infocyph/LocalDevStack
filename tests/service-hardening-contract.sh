@@ -75,7 +75,7 @@ pass "all CA install paths use current export with legacy fallback"
 assert_file_contains "$companion" 'COMPOSE_PROFILES=${COMPOSE_PROFILES:-}'
 pass "Tools profile visibility follows LocalDevStack profile selection"
 
-if awk '/^  llm-sm:/ { in_llm=1; next } in_llm && /^  [a-zA-Z0-9_-]+:/ { in_llm=0 } in_llm { print }' "$companion" | grep -Eq '/var/run/docker.sock|PROJECT_DIR|/app'; then
-  fail "llm-sm must not receive Docker socket or project mounts"
+if awk '/^  llm-ollama:/ { in_llm=1; next } in_llm && /^  [a-zA-Z0-9_-]+:/ { in_llm=0 } in_llm { print }' "$companion" | grep -Eq '/var/run/docker.sock|PROJECT_DIR|/app'; then
+  fail "llm-ollama must not receive Docker socket or project mounts"
 fi
-pass "companion-owned llm-sm keeps the AI trust boundary"
+pass "companion-owned llm-ollama keeps the AI trust boundary"
