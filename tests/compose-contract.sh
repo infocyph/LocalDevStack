@@ -129,6 +129,20 @@ assert set(s["networks"]) == {"frontend","backend"}
 targets={v["target"] for v in s["volumes"]}
 assert targets == {"/root/.ollama"}
 assert d["volumes"]["lds_llm"]["name"] == "LLMModels"
+env=s["environment"]
+assert env["LLM_SM_MODEL"] == "qwen2.5:3b"
+assert env["LLM_SM_INPUT_WARN_BYTES"] == "1048576"
+assert env["LLM_SM_INPUT_MAX_BYTES"] == "0"
+assert env["LLM_SM_ATTACHMENT_MAX_BYTES"] == "16777216"
+assert env["LLM_SM_ATTACHMENTS_MAX_BYTES"] == "33554432"
+assert env["LLM_SM_ATTACHMENT_MAX_COUNT"] == "16"
+assert env["LLM_SM_PDF_MAX_PAGES"] == "24"
+assert env["LLM_SM_PDF_DPI"] == "120"
+assert env["LLM_SM_ALLOW_LARGE_INPUT"] == "0"
+assert env["OLLAMA_NUM_PARALLEL"] == "1"
+assert env["OLLAMA_MAX_LOADED_MODELS"] == "1"
+assert env["OLLAMA_KEEP_ALIVE"] == "5m"
+assert env["OLLAMA_NO_CLOUD"] == "1"
 tools=d["services"]["server-tools"]["environment"]
 assert tools["LDS_AI_ENABLED"] == "auto"
 assert tools["LDS_AI_PROVIDER"] == "ollama"
