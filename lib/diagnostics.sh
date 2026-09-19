@@ -430,7 +430,7 @@ cmd_images() {
   ai_runtime="$(compose_control_value LDS_AI_RUNTIME "")"
   [[ -n "$ai_runtime" ]] || ai_runtime="$(detect_ai_runtime)"
   llm_arch="$(llm_arch_for_runtime "$ai_runtime")"
-  printf '%-16s %s\n' "LLM" "infocyph/llm-sm:$llm_arch"
+  printf '%-16s %s\n' "LLM" "infocyph/llm-ollama:$llm_arch"
   printf '%-16s %s\n' "LLM runtime" "$ai_runtime"
   printf '%-16s postgres:%s\n' "PostgreSQL" "$(compose_control_value POSTGRES_VERSION alpine)"
   printf '%-16s mysql:%s\n' "MySQL" "$(compose_control_value MYSQL_VERSION latest)"
@@ -519,11 +519,11 @@ cmd_doctor() {
 
   if profile_enabled ai; then
     local llm
-    llm="$(docker_compose ps -q llm-sm 2>/dev/null | sed -n '1p' || true)"
+    llm="$(docker_compose ps -q llm-ollama 2>/dev/null | sed -n '1p' || true)"
     if [[ -n "$llm" ]] && docker inspect -f '{{.State.Running}}' "$llm" 2>/dev/null | grep -qx true; then
       _doctor_ok "AI provider container is running."
     else
-      _doctor_warn "AI profile is selected but llm-sm is not running."
+      _doctor_warn "AI profile is selected but llm-ollama is not running."
       warnings=$((warnings + 1))
     fi
   fi
