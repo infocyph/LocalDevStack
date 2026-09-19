@@ -296,7 +296,7 @@ Provider configuration placed in `docker/.env` is forwarded to `llm-sm` where ap
 | `LLM_SM_INPUT_MAX_BYTES` | `0` | Text/diff hard ceiling; `0` disables it |
 | `LLM_SM_ATTACHMENT_MAX_BYTES` | `16777216` | Per attachment/source-file ceiling |
 | `LLM_SM_ATTACHMENTS_MAX_BYTES` | `33554432` | Aggregate attachment ceiling |
-| `LLM_SM_ATTACHMENT_MAX_COUNT` | `16` | Attachment-count ceiling |
+| `LLM_SM_ATTACHMENT_MAX_COUNT` | `16` | Source-attachment count ceiling |
 | `LLM_SM_PDF_MAX_PAGES` | `24` | PDF-vision page ceiling |
 | `LLM_SM_PDF_DPI` | `120` | PDF-vision render DPI |
 | `LLM_SM_ALLOW_LARGE_INPUT` | `0` | Deliberate bypass for configured provider limits |
