@@ -17,7 +17,7 @@ trap cleanup EXIT
 
 docker network create "$network" >/dev/null
 docker build -q -t "$image" "$ROOT/tests/fixtures/fake-ollama" >/dev/null
-docker run -d --name "$container" --network "$network" --network-alias llm-sm "$image" >/dev/null
+docker run -d --name "$container" --network "$network" --network-alias llm-ollama "$image" >/dev/null
 
 for _ in {1..20}; do
   if docker exec "$container" python -c 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:11434/api/tags", timeout=1).read()' >/dev/null 2>&1; then
@@ -44,7 +44,7 @@ pass "fake Ollama tags/generate/OpenAI-compatible contracts"
 
 docker pull infocyph/tools:latest >/dev/null
 provider_status="$(
-  docker run --rm --network "$network"     --entrypoint askai     -e LDS_AI_ENABLED=1     -e LDS_AI_PROVIDER=ollama     -e LDS_AI_URL=http://llm-sm:11434     -e LDS_AI_MODEL=qwen3:14b     infocyph/tools:latest --status
+  docker run --rm --network "$network"     --entrypoint askai     -e LDS_AI_ENABLED=1     -e LDS_AI_PROVIDER=ollama     -e LDS_AI_URL=http://llm-ollama:11434     -e LDS_AI_MODEL=qwen3:14b     infocyph/tools:latest --status
 )"
 assert_contains "$provider_status" "available=1"
 assert_contains "$provider_status" "model=qwen3:14b"
@@ -57,11 +57,11 @@ fi
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'image: infocyph/llm-ollama:${LDS_LLM_ARCH}'
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'profiles: [ai]'
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'lds_llm:/root/.ollama'
-assert_file_contains "$ROOT/docker/compose/companion.yaml" 'container_name: LLM_SM'
-assert_file_contains "$ROOT/docker/compose/companion.yaml" 'LLM_SM_MODEL=${LDS_AI_MODEL:-qwen3:14b}'
+assert_file_contains "$ROOT/docker/compose/companion.yaml" 'container_name: LLM_OLLAMA'
+assert_file_contains "$ROOT/docker/compose/companion.yaml" 'LLM_OLLAMA_MODEL=${LDS_AI_MODEL:-qwen3:14b}'
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'OLLAMA_IGPU_ENABLE=${LDS_AI_IGPU_ENABLE:-0}'
-assert_file_contains "$ROOT/docker/compose/companion.yaml" 'LLM_SM_ATTACHMENT_MAX_BYTES=${LLM_SM_ATTACHMENT_MAX_BYTES:-16777216}'
-assert_file_contains "$ROOT/docker/compose/companion.yaml" 'LLM_SM_PDF_MAX_PAGES=${LLM_SM_PDF_MAX_PAGES:-24}'
+assert_file_contains "$ROOT/docker/compose/companion.yaml" 'LLM_OLLAMA_ATTACHMENT_MAX_BYTES=${LLM_OLLAMA_ATTACHMENT_MAX_BYTES:-16777216}'
+assert_file_contains "$ROOT/docker/compose/companion.yaml" 'LLM_OLLAMA_PDF_MAX_PAGES=${LLM_OLLAMA_PDF_MAX_PAGES:-24}'
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'LDS_AI_CONNECT_TIMEOUT=${LDS_AI_CONNECT_TIMEOUT:-2}'
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'LDS_AI_PREFLIGHT_TIMEOUT=${LDS_AI_PREFLIGHT_TIMEOUT:-5}'
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'LDS_AI_TIMEOUT=${LDS_AI_TIMEOUT:-1800}'
