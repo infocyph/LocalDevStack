@@ -692,13 +692,19 @@ Allow user overrides.
 
 Also pass through supported advanced limits only when the user sets them:
 
-- `LDS_AI_CONNECT_TIMEOUT`;
-- `LDS_AI_PREFLIGHT_TIMEOUT`;
-- `LDS_AI_TIMEOUT`;
-- `LDS_AI_AVAILABILITY_TTL`;
-- `LDS_AI_MAX_CONTEXT_BYTES`;
-- `LDS_AI_MAX_REQUEST_BYTES`;
-- `LDS_AI_MAX_RESPONSE_BYTES`.
+- `LDS_AI_CONNECT_TIMEOUT=2`;
+- `LDS_AI_PREFLIGHT_TIMEOUT=5`;
+- `LDS_AI_TIMEOUT=1800`;
+- `LDS_AI_AVAILABILITY_TTL=5`;
+- `LDS_AI_MAX_CONTEXT_BYTES=524288`;
+- `LDS_AI_MAX_REQUEST_BYTES=1048576`;
+- `LDS_AI_MAX_RESPONSE_BYTES=2097152`.
+
+Keep connection and preflight bounds short, but give generation/analysis a 30-minute
+default. Forward `LDS_AI_TIMEOUT` to the Nginx container as
+`LLM_PROXY_TIMEOUT_SECONDS` so the dedicated `llm.localhost` route has the same
+long-running request budget. Do not reintroduce a shorter independent UI/process timeout
+for Admin AI analysis.
 
 Why LocalDevStack should default `LDS_AI_MODEL=qwen2.5:3b`:
 
