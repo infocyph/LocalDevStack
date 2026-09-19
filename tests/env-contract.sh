@@ -98,8 +98,14 @@ pass "CLI project identity follows the Compose project contract"
   [[ "$(llm_arch_for_runtime cpu)" == "latest" ]] || fail "CPU LLM tag drift"
   [[ "$(llm_arch_for_runtime nvidia)" == "latest" ]] || fail "NVIDIA LLM tag drift"
   [[ "$(llm_arch_for_runtime amd)" == "amd-latest" ]] || fail "AMD LLM tag drift"
+  host_cpu_is_amd() { return 0; }
+  [[ "$(ai_igpu_default_for_runtime amd)" == "1" ]] || fail "AMD CPU + AMD runtime must enable iGPU"
+  [[ "$(ai_igpu_default_for_runtime cpu)" == "0" ]] || fail "CPU runtime must not enable iGPU"
+  [[ "$(ai_igpu_default_for_runtime nvidia)" == "0" ]] || fail "NVIDIA runtime must not enable AMD iGPU"
+  host_cpu_is_amd() { return 1; }
+  [[ "$(ai_igpu_default_for_runtime amd)" == "0" ]] || fail "non-AMD CPU must not auto-enable iGPU"
 )
-pass "LLM runtime maps to the single LDS_LLM_ARCH tag selector"
+pass "LLM runtime maps image tags and AMD CPU iGPU defaults deterministically"
 
 ai_env_tmp="$(mktemp -d)"
 (
@@ -130,15 +136,19 @@ ai_env_tmp="$(mktemp -d)"
   source "$ROOT/lib/platform.sh"
   source "$ROOT/lib/certificates.sh"
   detect_ai_runtime() { printf "%s" amd; }
+  host_cpu_is_amd() { return 0; }
   add_required_env
   grep -Fxq "LDS_AI_RUNTIME=amd" "$ENV_DOCKER" || fail "detected AI runtime was not persisted"
   grep -Fxq "LDS_LLM_ARCH=amd-latest" "$ENV_DOCKER" || fail "detected AMD tag was not persisted"
+  grep -Fxq "LDS_AI_IGPU_ENABLE=1" "$ENV_DOCKER" || fail "AMD CPU iGPU preference was not persisted"
 
   update_env "$ENV_DOCKER" LDS_AI_RUNTIME nvidia
+  update_env "$ENV_DOCKER" LDS_AI_IGPU_ENABLE 0
   detect_ai_runtime() { printf "%s" amd; }
   add_required_env
   grep -Fxq "LDS_AI_RUNTIME=nvidia" "$ENV_DOCKER" || fail "explicit runtime must win over detection"
   grep -Fxq "LDS_LLM_ARCH=latest" "$ENV_DOCKER" || fail "NVIDIA runtime must use standard latest tag"
+  grep -Fxq "LDS_AI_IGPU_ENABLE=0" "$ENV_DOCKER" || fail "explicit iGPU preference must be preserved"
 )
 rm -rf "$ai_env_tmp"
 pass "setup bootstrap persists detection without overriding an explicit runtime"
