@@ -2,7 +2,7 @@ Local AI
 ========
 
 LocalDevStack can run a local Ollama-compatible provider as an optional profile.
-``llm-sm`` owns the provider/runtime; Tools remains the higher-level AI consumer and
+``llm-ollama`` owns the provider/runtime; Tools remains the higher-level AI consumer and
 never embeds a second Ollama runtime.
 
 Enable AI
@@ -18,7 +18,7 @@ The default consumer contract is::
 
    LDS_AI_ENABLED=auto
    LDS_AI_PROVIDER=ollama
-   LDS_AI_URL=http://llm-sm:11434
+   LDS_AI_URL=http://llm-ollama:11434
    LDS_AI_MODEL=qwen3:14b
 
 The explicit model default avoids ambiguity when multiple models are installed in the
@@ -62,11 +62,11 @@ Access
 
 Internal provider endpoint::
 
-   http://llm-sm:11434
+   http://llm-ollama:11434
 
 User-facing HTTPS endpoint::
 
-   https://llm.localhost
+   https://llm-ollama.localhost
 
 Internal Docker consumers should use the service endpoint directly rather than routing
 through Nginx.
@@ -84,7 +84,7 @@ Show/disable it with::
    lds llm host-port status
    lds llm host-port off
 
-The port can be changed through ``LLM_SM_PORT`` when direct host access is enabled.
+The port can be changed through ``LLM_OLLAMA_PORT`` when direct host access is enabled.
 
 Compose Ownership
 -----------------
@@ -93,9 +93,9 @@ The tracked provider service exists only in::
 
    docker/compose/companion.yaml
 
-The Compose service key/hostname is ``llm-sm`` and the fixed container name remains
-``LLM_SM`` for LocalDevStack single-stack compatibility. Internal consumers must continue
-to route through ``llm-sm`` rather than depending on the container name.
+The Compose service key/hostname is ``llm-ollama`` and the fixed container name remains
+``LLM_OLLAMA`` for LocalDevStack single-stack compatibility. Internal consumers must continue
+to route through ``llm-ollama`` rather than depending on the container name.
 
 and is included through::
 
@@ -109,7 +109,7 @@ under ``docker/.runtime/`` for the current command only:
 
 - NVIDIA -> ``gpus: all``;
 - AMD/ROCm -> ``/dev/kfd`` and ``/dev/dri``;
-- direct host API -> ``127.0.0.1:${LLM_SM_PORT:-11434}:11434``.
+- direct host API -> ``127.0.0.1:${LLM_OLLAMA_PORT:-11434}:11434``.
 
 The fragment is removed after the Compose command. ``configuration/compose/`` remains
 the normal extras/generated-runtime area and is not the location of built-in LLM
@@ -154,8 +154,8 @@ the provider image.
 Always invoke provider commands through ``lds llm`` inside LocalDevStack. The repository
 does not expose a root ``compose.yml`` because ``lds`` assembles the effective Compose
 project from the tracked main file, env layers, optional extras, and runtime-specific
-temporary overrides. A bare ``docker compose exec llm-sm ...`` from the LocalDevStack
-repository root therefore fails at the host Compose layer before ``llm-sm`` runs.
+temporary overrides. A bare ``docker compose exec llm-ollama ...`` from the LocalDevStack
+repository root therefore fails at the host Compose layer before ``llm-ollama`` runs.
 
 Model Persistence
 -----------------
@@ -178,7 +178,7 @@ Pull a model explicitly::
 
 Then set ``LDS_AI_MODEL`` in ``docker/.env`` if it should become the default for both
 Tools AI commands and ``lds llm`` provider commands. LocalDevStack forwards that value to
-the provider as ``LLM_SM_MODEL``. A command-scoped shell value remains the
+the provider as ``LLM_OLLAMA_MODEL``. A command-scoped shell value remains the
 highest-precedence LocalDevStack override.
 
 The provider CLI does not silently download a missing model for an unrelated command.
@@ -187,17 +187,17 @@ Provider Settings
 -----------------
 
 These provider settings can be placed in ``docker/.env`` and are forwarded to
-``llm-sm``::
+``llm-ollama``::
 
-   LLM_SM_SYSTEM=
-   LLM_SM_INPUT_WARN_BYTES=1048576
-   LLM_SM_INPUT_MAX_BYTES=0
-   LLM_SM_ATTACHMENT_MAX_BYTES=16777216
-   LLM_SM_ATTACHMENTS_MAX_BYTES=33554432
-   LLM_SM_ATTACHMENT_MAX_COUNT=16
-   LLM_SM_PDF_MAX_PAGES=24
-   LLM_SM_PDF_DPI=120
-   LLM_SM_ALLOW_LARGE_INPUT=0
+   LLM_OLLAMA_SYSTEM=
+   LLM_OLLAMA_INPUT_WARN_BYTES=1048576
+   LLM_OLLAMA_INPUT_MAX_BYTES=0
+   LLM_OLLAMA_ATTACHMENT_MAX_BYTES=16777216
+   LLM_OLLAMA_ATTACHMENTS_MAX_BYTES=33554432
+   LLM_OLLAMA_ATTACHMENT_MAX_COUNT=16
+   LLM_OLLAMA_PDF_MAX_PAGES=24
+   LLM_OLLAMA_PDF_DPI=120
+   LLM_OLLAMA_ALLOW_LARGE_INPUT=0
    LDS_AI_IGPU_ENABLE=1   # auto-persisted for AMD CPU + AMD runtime; otherwise 0
    OLLAMA_NUM_PARALLEL=1
    OLLAMA_MAX_LOADED_MODELS=1
@@ -206,9 +206,9 @@ These provider settings can be placed in ``docker/.env`` and are forwarded to
 
 ``LDS_AI_IGPU_ENABLE`` is forwarded as ``OLLAMA_IGPU_ENABLE``. The automatic value is ``1`` only for an AMD CPU with the AMD runtime selected; users may override the persisted value deliberately.
 
-``LLM_SM_INPUT_MAX_BYTES=0`` disables only the hard text/diff ceiling. Attachment and
+``LLM_OLLAMA_INPUT_MAX_BYTES=0`` disables only the hard text/diff ceiling. Attachment and
 PDF-vision limits remain active unless their own value is set to ``0``.
-``LLM_SM_ALLOW_LARGE_INPUT=1`` is the explicit escape hatch for a deliberate request.
+``LLM_OLLAMA_ALLOW_LARGE_INPUT=1`` is the explicit escape hatch for a deliberate request.
 
 Consumer settings are separate. The following values configure the Tools AI layer, not
 the provider runtime::
@@ -225,16 +225,16 @@ Connection and provider/model preflight remain deliberately short. Generation an
 analysis use a separate 30-minute default because first model load, CPU inference, and
 larger local prompts can legitimately take much longer. LocalDevStack also forwards
 ``LDS_AI_TIMEOUT`` to Nginx as ``LLM_PROXY_TIMEOUT_SECONDS`` for the dedicated
-``llm.localhost`` route so the edge proxy does not terminate a valid generation earlier.
+``llm-ollama.localhost`` route so the edge proxy does not terminate a valid generation earlier.
 
 Privacy and Trust Boundaries
 ----------------------------
 
-The base ``llm-sm`` service lives in ``docker/compose/companion.yaml`` and is gated by
+The base ``llm-ollama`` service lives in ``docker/compose/companion.yaml`` and is gated by
 the ``ai`` profile. Runtime-specific hardware/port additions are ephemeral as described
 above; no separate tracked AI Compose variants exist.
 
-By default, ``llm-sm`` receives:
+By default, ``llm-ollama`` receives:
 
 - no Docker socket;
 - no project/repository bind mount;
@@ -254,7 +254,7 @@ LocalDevStack does not:
 Repository Context
 ------------------
 
-LocalDevStack intentionally does not mount the project/repository into llm-sm by default.
+LocalDevStack intentionally does not mount the project/repository into llm-ollama by default.
 
 Repository-aware analysis should normally use the Tools consumer layer::
 
@@ -263,7 +263,7 @@ Repository-aware analysis should normally use the Tools consumer layer::
    lds ai graphify ...
 
 For direct provider commands, file/PDF/image paths must exist inside the provider
-container. The upstream ``llm-sm`` CLI also supports stdin-based flows such as
+container. The upstream ``llm-ollama`` CLI also supports stdin-based flows such as
 ``ai-commit --diff-stdin`` when explicitly invoked.
 
 Graphify
@@ -283,7 +283,7 @@ model from ``LDS_AI_MODEL``, derives ``GRAPHIFY_API_TIMEOUT`` from
 Enable and apply the direct provider port before the default workflow::
 
    lds llm host-port on
-   lds up -d llm-sm
+   lds up -d llm-ollama
    lds graphify
 
 Internally the workflow runs extraction with ``--backend ollama --no-cluster`` and,
@@ -301,7 +301,7 @@ suppresses Graphify's Ollama-backend warning. An explicitly supplied
 ``OLLAMA_API_KEY`` is preserved.
 
 A one-off ``--model`` or ``--api-timeout`` option is propagated to the clustering
-phase through the corresponding Graphify environment value. ``llm-sm`` remains only
+phase through the corresponding Graphify environment value. ``llm-ollama`` remains only
 the model provider and still receives no repository bind mount.
 
 Diagnostics
@@ -313,12 +313,12 @@ Diagnostics
    lds llm models
    lds doctor
    lds urls
-   lds logs llm-sm
+   lds logs llm-ollama
 
 Platform Availability
 ---------------------
 
-The current published ``llm-sm`` standard and AMD images have a linux/amd64 only
+The current published ``llm-ollama`` standard and AMD images have a linux/amd64 only
 platform contract.
 
 LocalDevStack itself can still be used on arm64 with the ``ai`` profile disabled. Native
