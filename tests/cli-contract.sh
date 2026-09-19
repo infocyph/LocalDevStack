@@ -51,7 +51,7 @@ chmod +x "$tmpbin/graphify"
 
 PATH="$tmpbin:$PATH" \
 OLLAMA_BASE_URL=http://127.0.0.1:11434/v1 \
-LDS_AI_MODEL=qwen2.5:3b \
+LDS_AI_MODEL=qwen3:14b \
 LDS_AI_TIMEOUT=1800 \
 GRAPHIFY_TEST_LOG="$graphify_log" \
   "$ROOT/lds" graphify . --model test-model --api-timeout 42 --mode deep >/dev/null
