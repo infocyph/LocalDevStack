@@ -767,6 +767,9 @@ cmd_help() {
 ## AI consumer
 - `lds ai status|ask|explain|troubleshoot|review|repo-review|graphify ...`
 
+## Host Graphify workflow
+- `lds graphify [path] [graphify-extract-options...]`
+
 ## LLM provider
 - `lds llm models|ps|show|pull|rm|unload|run|ask|chat|prompt|code|review|json|ai-commit|ollama|api|version ...`
 - `lds llm runtime [cpu|nvidia|amd]`
@@ -844,6 +847,7 @@ ${CYAN}Tools / Secrets:${NC}
 
 ${CYAN}AI:${NC}
   ai status|ask|explain|troubleshoot|review|repo-review|graphify
+  graphify [path] [graphify-extract-options...]
   llm models|ps|show|pull|rm|unload|run|ask|chat|prompt|code|review|json|ai-commit|ollama|api|version
   llm runtime [cpu|nvidia|amd]
   llm host-port <status|on|off>
