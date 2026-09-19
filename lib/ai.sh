@@ -30,13 +30,19 @@ cmd_ai() {
 }
 
 _graphify_local_base_url() {
-  local ctr
-  ctr="$(docker_compose ps -q llm-ollama 2>/dev/null | sed -n '1p' || true)"
-  [[ -n "$ctr" ]] ||
-    die "llm-ollama is not running. Enable the ai profile and start the stack first."
+  local provider_ctr nginx_ctr
 
-  docker inspect -f '{{.State.Running}}' "$ctr" 2>/dev/null | grep -qx true ||
+  provider_ctr="$(docker_compose ps -q llm-ollama 2>/dev/null | sed -n '1p' || true)"
+  [[ -n "$provider_ctr" ]] ||
+    die "llm-ollama is not running. Enable the ai profile and start the stack first."
+  docker inspect -f '{{.State.Running}}' "$provider_ctr" 2>/dev/null | grep -qx true ||
     die "llm-ollama container exists but is not running."
+
+  nginx_ctr="$(docker_compose ps -q nginx 2>/dev/null | sed -n '1p' || true)"
+  [[ -n "$nginx_ctr" ]] ||
+    die "nginx is not running. Start the LocalDevStack edge before using Graphify."
+  docker inspect -f '{{.State.Running}}' "$nginx_ctr" 2>/dev/null | grep -qx true ||
+    die "nginx container exists but is not running."
 
   printf '%s' 'http://llm-ollama.localhost:11434/v1'
 }
