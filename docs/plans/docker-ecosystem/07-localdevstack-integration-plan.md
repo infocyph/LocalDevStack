@@ -2098,7 +2098,7 @@ Compared LocalDevStack against the current related releases/main contracts:
 - Runner **0.5**
 - Nginx **0.4.1**
 - Apache **0.4.2**
-- LLM-SM **current stable**
+- LLM-Ollama **current stable**
 - Toolset **2.0**
 - Scriptomatic current `main`
 
@@ -2180,9 +2180,9 @@ profile bridge would regress Admin Panel-created Apache hosts.
 
 This is a non-blocking follow-up, not a release defect.
 
-## LLM-SM capability boundaries
+## LLM-Ollama capability boundaries
 
-The current published LLM-SM image contract is **linux/amd64 only**. LocalDevStack
+The current published LLM-Ollama image contract is **linux/amd64 only**. LocalDevStack
 remains usable on arm64 with the `ai` profile disabled.
 
 LocalDevStack intentionally does not mount a repository/workspace into `llm-ollama` by
