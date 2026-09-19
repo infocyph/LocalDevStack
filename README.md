@@ -284,7 +284,9 @@ lds up -d llm-sm
 lds graphify
 ```
 
-You may override `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, or `GRAPHIFY_API_TIMEOUT` for a one-off run. A CLI `--model` or `--api-timeout` override is kept consistent across both Graphify phases.
+`lds graphify` also sets `OLLAMA_API_KEY=local` when no key is supplied. Ollama does not require authentication for this local loopback endpoint; the non-empty placeholder only satisfies Graphify's Ollama-backend warning check. An explicitly supplied `OLLAMA_API_KEY` is preserved.
+
+You may override `OLLAMA_BASE_URL`, `OLLAMA_API_KEY`, `OLLAMA_MODEL`, or `GRAPHIFY_API_TIMEOUT` for a one-off run. A CLI `--model` or `--api-timeout` override is kept consistent across both Graphify phases.
 
 The LocalDevStack LLM Compose layout is intentionally small:
 
