@@ -153,7 +153,7 @@ The provider is one ``llm-sm`` service declared in
 ``docker/compose/companion.yaml`` and enabled only by the ``ai`` profile. The service
 keeps ``container_name: LLM_SM`` for current single-stack compatibility, while all
 internal routing continues to use the Compose service/hostname ``llm-sm``. Its image
-is ``infocyph/llm-sm:${LDS_LLM_ARCH}``: CPU/NVIDIA resolve to ``latest`` and
+is ``infocyph/llm-ollama:${LDS_LLM_ARCH}``: CPU/NVIDIA resolve to ``latest`` and
 AMD/ROCm resolves to ``amd-latest``. ``LDS_LLM_ARCH`` is derived from the effective
 runtime rather than maintained as an independent version selector.
 
