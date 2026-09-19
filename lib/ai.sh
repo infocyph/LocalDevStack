@@ -94,17 +94,15 @@ cmd_graphify() {
 
   graphify_bin="$(bin_path graphify)"
 
-  OLLAMA_BASE_URL="$base_url" \
-  OLLAMA_API_KEY="$api_key" \
-  OLLAMA_MODEL="$model" \
-  GRAPHIFY_API_TIMEOUT="$timeout" \
-    "$graphify_bin" extract "$target" --backend ollama --no-cluster "$@"
+  (
+    export OLLAMA_BASE_URL="$base_url"
+    export OLLAMA_API_KEY="$api_key"
+    export OLLAMA_MODEL="$model"
+    export GRAPHIFY_API_TIMEOUT="$timeout"
 
-  OLLAMA_BASE_URL="$base_url" \
-  OLLAMA_API_KEY="$api_key" \
-  OLLAMA_MODEL="$model" \
-  GRAPHIFY_API_TIMEOUT="$timeout" \
-    "$graphify_bin" cluster-only "$target" --backend ollama
+    "$graphify_bin" extract "$target" --backend ollama --no-cluster "$@" &&
+      "$graphify_bin" cluster-only "$target" --backend ollama
+  )
 }
 
 _llm_exec() {
