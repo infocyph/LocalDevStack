@@ -29,6 +29,74 @@ cmd_ai() {
   esac
 }
 
+_graphify_local_base_url() {
+  local ctr published host_port
+  ctr="$(docker_compose ps -q llm-sm 2>/dev/null | sed -n '1p' || true)"
+  [[ -n "$ctr" ]] ||
+    die "llm-sm is not running. Enable the ai profile and start the stack first."
+
+  docker inspect -f '{{.State.Running}}' "$ctr" 2>/dev/null | grep -qx true ||
+    die "llm-sm container exists but is not running."
+
+  published="$(
+    docker inspect -f '{{with (index .NetworkSettings.Ports "11434/tcp")}}{{(index . 0).HostPort}}{{end}}' "$ctr" 2>/dev/null || true
+  )"
+  [[ "$published" =~ ^[0-9]+$ ]] ||
+    die "Graphify needs the llm-sm loopback API. Run: lds llm host-port on && lds up -d llm-sm"
+
+  host_port="$published"
+  printf 'http://127.0.0.1:%s/v1' "$host_port"
+}
+
+cmd_graphify() {
+  need_bin graphify "install the Graphify CLI on the host first"
+
+  local target="${1:-.}"
+  [[ $# -eq 0 ]] || shift
+  [[ -e "$target" ]] || die "Graphify target does not exist: $target"
+
+  local base_url timeout model graphify_bin arg next_is_model=0
+  base_url="${OLLAMA_BASE_URL:-$(_graphify_local_base_url)}"
+  timeout="${GRAPHIFY_API_TIMEOUT:-$(compose_control_value LDS_AI_TIMEOUT 1800)}"
+  model="${OLLAMA_MODEL:-$(compose_control_value LDS_AI_MODEL qwen2.5:3b)}"
+
+  [[ "$timeout" =~ ^[0-9]+$ ]] && ((timeout >= 1)) ||
+    die "GRAPHIFY_API_TIMEOUT must be a positive integer"
+
+  # Keep an explicit --model override consistent across extraction and clustering.
+  for arg in "$@"; do
+    if ((next_is_model)); then
+      model="$arg"
+      next_is_model=0
+      continue
+    fi
+    case "$arg" in
+    --model) next_is_model=1 ;;
+    --model=*) model="${arg#--model=}" ;;
+    --backend | --backend=*)
+      die "lds graphify owns --backend=ollama; do not pass --backend"
+      ;;
+    --no-cluster)
+      die "lds graphify already separates extraction and clustering; do not pass --no-cluster"
+      ;;
+    esac
+  done
+  ((next_is_model == 0)) || die "--model requires a value"
+  [[ -n "$model" ]] || die "Graphify model cannot be empty"
+
+  graphify_bin="$(bin_path graphify)"
+
+  OLLAMA_BASE_URL="$base_url" \
+  OLLAMA_MODEL="$model" \
+  GRAPHIFY_API_TIMEOUT="$timeout" \
+    "$graphify_bin" extract "$target" --backend ollama --no-cluster "$@"
+
+  OLLAMA_BASE_URL="$base_url" \
+  OLLAMA_MODEL="$model" \
+  GRAPHIFY_API_TIMEOUT="$timeout" \
+    "$graphify_bin" cluster-only "$target" --backend ollama
+}
+
 _llm_exec() {
   local ctr
   ctr="$(docker_compose ps -q llm-sm 2>/dev/null | sed -n '1p' || true)"
