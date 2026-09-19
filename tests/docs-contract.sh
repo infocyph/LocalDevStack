@@ -71,10 +71,18 @@ assert_file_contains "$ai" 'does not mount the project/repository into llm-sm by
 assert_file_contains "$ai" 'infocyph/llm-sm:${LDS_LLM_ARCH}'
 assert_file_contains "$ai" 'LDS_LLM_ARCH=amd-latest'
 assert_file_contains "$ai" 'LDS_AI_MODEL=qwen2.5:3b'
+assert_file_contains "$ai" 'LLM_SM_ATTACHMENT_MAX_BYTES=16777216'
+assert_file_contains "$ai" 'LLM_SM_PDF_MAX_PAGES=24'
+assert_file_contains "$ai" 'docker/compose/companion.yaml'
+assert_file_contains "$ai" 'docker/.runtime/'
+assert_file_contains "$ai" 'There are no tracked ``ai.yaml``, ``ai-nvidia.yaml``, ``ai-amd.yaml`` or'
 assert_file_contains "$ai" 'Always invoke provider commands through ``lds llm``'
 assert_file_contains "$ai" 'docker compose exec llm-sm'
+assert_file_contains "$profiles" 'LLM_SM_ALLOW_LARGE_INPUT=0'
+assert_file_contains "$profiles" 'LDS_LLM_ARCH'
 assert_file_contains "$readme" 'lds llm ask "Explain dependency injection briefly"'
-pass "local AI trust boundary, platform, workspace and invocation limits are documented"
+assert_file_contains "$readme" 'LLM_SM_ATTACHMENTS_MAX_BYTES'
+pass "local AI trust boundary, Compose ownership, provider options and invocation limits are documented"
 
 for stale in   'Scriptomatic/master'   'infocyph/tools:0.23.2'   'infocyph/runner:0.5'   'infocyph/nginx:0.4.1'   'infocyph/apache:0.4.2'   'infocyph/llm-sm:0.03'; do
   if grep -RqsF "$stale" "$ROOT/README.md" "$ROOT/docs" --exclude-dir=plans; then
@@ -118,5 +126,5 @@ for stale in LDS_TOOLS_IMAGE LDS_RUNNER_IMAGE LDS_NGINX_IMAGE LDS_APACHE_IMAGE; 
     fail "user-facing docs expose obsolete fixed-image variable: $stale"
   fi
 done
-assert_file_contains "$ai" 'There are no tracked ``ai-*.yaml`` files'
+assert_file_contains "$ai" 'no separate tracked AI Compose variants exist'
 pass "docs reflect fixed infrastructure images and ephemeral AI overrides"
