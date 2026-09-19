@@ -127,7 +127,7 @@ python3 -c '
 import json,sys
 d=json.load(sys.stdin)
 assert "apache" in d.get("services", {})
-assert "llm-sm" not in d.get("services", {})
+assert "llm-ollama" not in d.get("services", {})
 assert d["volumes"]["lds_tools_state"]["name"] == "ToolsState"
 tools=d["services"]["server-tools"]
 targets={v["target"] for v in tools["volumes"]}
@@ -139,25 +139,25 @@ ai_json="$("${compose[@]}" --profile ai config --format json)"
 python3 -c '
 import json,sys
 d=json.load(sys.stdin)
-s=d["services"]["llm-sm"]
+s=d["services"]["llm-ollama"]
 assert s["image"] == "infocyph/llm-ollama:latest"
-assert s["container_name"] == "LLM_SM"
+assert s["container_name"] == "LLM_OLLAMA"
 assert not s.get("ports")
 assert set(s["networks"]) == {"frontend","backend"}
 targets={v["target"] for v in s["volumes"]}
 assert targets == {"/root/.ollama"}
 assert d["volumes"]["lds_llm"]["name"] == "LLMModels"
 env=s["environment"]
-assert env["LLM_SM_MODEL"] == "qwen3:14b"
-assert env["LLM_SM_SYSTEM"] == ""
-assert env["LLM_SM_INPUT_WARN_BYTES"] == "1048576"
-assert env["LLM_SM_INPUT_MAX_BYTES"] == "0"
-assert env["LLM_SM_ATTACHMENT_MAX_BYTES"] == "16777216"
-assert env["LLM_SM_ATTACHMENTS_MAX_BYTES"] == "33554432"
-assert env["LLM_SM_ATTACHMENT_MAX_COUNT"] == "16"
-assert env["LLM_SM_PDF_MAX_PAGES"] == "24"
-assert env["LLM_SM_PDF_DPI"] == "120"
-assert env["LLM_SM_ALLOW_LARGE_INPUT"] == "0"
+assert env["LLM_OLLAMA_MODEL"] == "qwen3:14b"
+assert env["LLM_OLLAMA_SYSTEM"] == ""
+assert env["LLM_OLLAMA_INPUT_WARN_BYTES"] == "1048576"
+assert env["LLM_OLLAMA_INPUT_MAX_BYTES"] == "0"
+assert env["LLM_OLLAMA_ATTACHMENT_MAX_BYTES"] == "16777216"
+assert env["LLM_OLLAMA_ATTACHMENTS_MAX_BYTES"] == "33554432"
+assert env["LLM_OLLAMA_ATTACHMENT_MAX_COUNT"] == "16"
+assert env["LLM_OLLAMA_PDF_MAX_PAGES"] == "24"
+assert env["LLM_OLLAMA_PDF_DPI"] == "120"
+assert env["LLM_OLLAMA_ALLOW_LARGE_INPUT"] == "0"
 assert env["OLLAMA_NUM_PARALLEL"] == "1"
 assert env["OLLAMA_MAX_LOADED_MODELS"] == "1"
 assert env["OLLAMA_KEEP_ALIVE"] == "5m"
@@ -166,7 +166,7 @@ assert env["OLLAMA_IGPU_ENABLE"] == "0"
 tools=d["services"]["server-tools"]["environment"]
 assert tools["LDS_AI_ENABLED"] == "auto"
 assert tools["LDS_AI_PROVIDER"] == "ollama"
-assert tools["LDS_AI_URL"] == "http://llm-sm:11434"
+assert tools["LDS_AI_URL"] == "http://llm-ollama:11434"
 assert tools["LDS_AI_MODEL"] == "qwen3:14b"
 assert tools["LDS_AI_CONNECT_TIMEOUT"] == "2"
 assert tools["LDS_AI_PREFLIGHT_TIMEOUT"] == "5"
@@ -180,15 +180,15 @@ assert nginx["LLM_PROXY_TIMEOUT_SECONDS"] == "1800"
 ' <<<"$ai_json"
 pass "companion-owned AI profile is internal-only and deterministic"
 
-printf '%s\n' 'LDS_AI_MODEL=qwen2.5:1.5b' 'LLM_SM_PDF_MAX_PAGES=12' 'LLM_SM_SYSTEM=Answer briefly.' 'LDS_AI_TIMEOUT=2400' 'LDS_AI_IGPU_ENABLE=1' >>"$user_env"
+printf '%s\n' 'LDS_AI_MODEL=qwen2.5:1.5b' 'LLM_OLLAMA_PDF_MAX_PAGES=12' 'LLM_OLLAMA_SYSTEM=Answer briefly.' 'LDS_AI_TIMEOUT=2400' 'LDS_AI_IGPU_ENABLE=1' >>"$user_env"
 ai_override_json="$("${compose[@]}" --profile ai config --format json)"
 python3 -c '
 import json,sys
 d=json.load(sys.stdin)
-llm=d["services"]["llm-sm"]["environment"]
-assert llm["LLM_SM_MODEL"] == "qwen2.5:1.5b"
-assert llm["LLM_SM_PDF_MAX_PAGES"] == "12"
-assert llm["LLM_SM_SYSTEM"] == "Answer briefly."
+llm=d["services"]["llm-ollama"]["environment"]
+assert llm["LLM_OLLAMA_MODEL"] == "qwen2.5:1.5b"
+assert llm["LLM_OLLAMA_PDF_MAX_PAGES"] == "12"
+assert llm["LLM_OLLAMA_SYSTEM"] == "Answer briefly."
 assert llm["OLLAMA_IGPU_ENABLE"] == "1"
 tools=d["services"]["server-tools"]["environment"]
 assert tools["LDS_AI_TIMEOUT"] == "2400"
@@ -200,7 +200,7 @@ pass "LocalDevStack forwards configured provider and generation-timeout options"
 amd_json="$(COMPOSE_PROFILES=ai LDS_AI_RUNTIME=amd "$ROOT/lds" --quiet config show --json --raw 2>/dev/null | sed -n '/^[[:space:]]*{/,$p')"
 python3 -c '
 import json,sys
-s=json.load(sys.stdin)["services"]["llm-sm"]
+s=json.load(sys.stdin)["services"]["llm-ollama"]
 assert s["image"] == "infocyph/llm-ollama:amd-latest"
 devices=" ".join(str(x) for x in s.get("devices", []))
 assert "/dev/kfd" in devices and "/dev/dri" in devices
@@ -210,7 +210,7 @@ pass "AMD AI runtime is generated dynamically"
 nvidia_json="$(COMPOSE_PROFILES=ai LDS_AI_RUNTIME=nvidia "$ROOT/lds" --quiet config show --json --raw 2>/dev/null | sed -n '/^[[:space:]]*{/,$p')"
 python3 -c '
 import json,sys
-s=json.load(sys.stdin)["services"]["llm-sm"]
+s=json.load(sys.stdin)["services"]["llm-ollama"]
 assert s["image"] == "infocyph/llm-ollama:latest"
 assert s.get("gpus")
 ' <<<"$nvidia_json"
@@ -219,7 +219,7 @@ pass "NVIDIA AI runtime is generated dynamically"
 host_json="$(COMPOSE_PROFILES=ai LDS_AI_RUNTIME=cpu LDS_LLM_HOST_PORT=1 "$ROOT/lds" --quiet config show --json --raw 2>/dev/null | sed -n '/^[[:space:]]*{/,$p')"
 python3 -c '
 import json,sys
-ports=json.load(sys.stdin)["services"]["llm-sm"]["ports"]
+ports=json.load(sys.stdin)["services"]["llm-ollama"]["ports"]
 assert len(ports) == 1
 p=ports[0]
 assert p["host_ip"] == "127.0.0.1"
