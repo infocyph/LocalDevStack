@@ -131,6 +131,7 @@ assert targets == {"/root/.ollama"}
 assert d["volumes"]["lds_llm"]["name"] == "LLMModels"
 env=s["environment"]
 assert env["LLM_SM_MODEL"] == "qwen2.5:3b"
+assert env["LLM_SM_SYSTEM"] == ""
 assert env["LLM_SM_INPUT_WARN_BYTES"] == "1048576"
 assert env["LLM_SM_INPUT_MAX_BYTES"] == "0"
 assert env["LLM_SM_ATTACHMENT_MAX_BYTES"] == "16777216"
@@ -150,6 +151,18 @@ assert tools["LDS_AI_URL"] == "http://llm-sm:11434"
 assert tools["LDS_AI_MODEL"] == "qwen2.5:3b"
 ' <<<"$ai_json"
 pass "companion-owned AI profile is internal-only and deterministic"
+
+printf '%s\n' 'LDS_AI_MODEL=qwen2.5:1.5b' 'LLM_SM_PDF_MAX_PAGES=12' 'LLM_SM_SYSTEM=Answer briefly.' >>"$user_env"
+ai_override_json="$("${compose[@]}" --profile ai config --format json)"
+python3 -c '
+import json,sys
+s=json.load(sys.stdin)["services"]["llm-sm"]
+env=s["environment"]
+assert env["LLM_SM_MODEL"] == "qwen2.5:1.5b"
+assert env["LLM_SM_PDF_MAX_PAGES"] == "12"
+assert env["LLM_SM_SYSTEM"] == "Answer briefly."
+' <<<"$ai_override_json"
+pass "LocalDevStack forwards configured model and provider options into llm-sm"
 
 amd_json="$(COMPOSE_PROFILES=ai LDS_AI_RUNTIME=amd "$ROOT/lds" --quiet config show --json --raw 2>/dev/null | sed -n '/^[[:space:]]*{/,$p')"
 python3 -c '
