@@ -101,7 +101,7 @@ Service-to-service traffic uses Docker DNS names such as::
    mongodb
    redis
    elasticsearch
-   llm-sm
+   llm-ollama
 
 The historical ``lds vpn-fix`` command remains only as a deprecated compatibility
 message because LocalDevStack no longer owns fixed bridge subnets.
@@ -143,16 +143,16 @@ AI Flow
 
 When the ``ai`` profile is enabled:
 
-1. ``llm-sm`` provides the Ollama runtime and persistent model store;
-2. Tools consumes ``http://llm-sm:11434`` internally;
-3. Nginx exposes ``https://llm.localhost`` to the user;
+1. ``llm-ollama`` provides the Ollama runtime and persistent model store;
+2. Tools consumes ``http://llm-ollama:11434`` internally;
+3. Nginx exposes ``https://llm-ollama.localhost`` to the user;
 4. ``lds ai`` delegates higher-level/operational AI to Tools;
-5. ``lds llm`` delegates model/runtime operations to the bundled ``llm-sm`` CLI.
+5. ``lds llm`` delegates model/runtime operations to the bundled ``llm-ollama`` CLI.
 
-The provider is one ``llm-sm`` service declared in
+The provider is one ``llm-ollama`` service declared in
 ``docker/compose/companion.yaml`` and enabled only by the ``ai`` profile. The service
-keeps ``container_name: LLM_SM`` for current single-stack compatibility, while all
-internal routing continues to use the Compose service/hostname ``llm-sm``. Its image
+keeps ``container_name: LLM_OLLAMA`` for current single-stack compatibility, while all
+internal routing continues to use the Compose service/hostname ``llm-ollama``. Its image
 is ``infocyph/llm-ollama:${LDS_LLM_ARCH}``: CPU/NVIDIA resolve to ``latest`` and
 AMD/ROCm resolves to ``amd-latest``. ``LDS_LLM_ARCH`` is derived from the effective
 runtime rather than maintained as an independent version selector.
@@ -160,7 +160,7 @@ runtime rather than maintained as an independent version selector.
 No AI-specific Compose files are tracked. ``lds`` generates a temporary fragment under
 ``docker/.runtime/`` only when NVIDIA GPU access, AMD device mappings, or loopback
 host-port exposure is required, then removes it after the Compose command. The service
-also forwards the configured ``LDS_AI_MODEL`` to the provider as ``LLM_SM_MODEL`` and
+also forwards the configured ``LDS_AI_MODEL`` to the provider as ``LLM_OLLAMA_MODEL`` and
 passes the documented provider safety/tuning settings from ``docker/.env``. For AMD
 runtime on an AMD CPU, LocalDevStack persists ``LDS_AI_IGPU_ENABLE=1`` and forwards it
 as ``OLLAMA_IGPU_ENABLE=1`` so Ollama admits the integrated Radeon GPU.
@@ -195,7 +195,7 @@ equivalent to powerful host Docker control.
 
 The Docker socket is not mounted into:
 
-- ``llm-sm``;
+- ``llm-ollama``;
 - databases;
 - database admin clients;
 - Nginx or Apache;
@@ -204,7 +204,7 @@ The Docker socket is not mounted into:
 The separate ad-hoc ``lds run --sock`` option is an explicit opt-in and should be used
 only with trusted Dockerfiles/code.
 
-``llm-sm`` also receives no project/repository mount by default. AI output is not
+``llm-ollama`` also receives no project/repository mount by default. AI output is not
 automatically executed as shell, SQL, or code.
 
 Persistence
