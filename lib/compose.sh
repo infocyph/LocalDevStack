@@ -64,9 +64,9 @@ docker_compose() {
   *) die "Invalid LDS_LLM_HOST_PORT: $ai_host_port (expected 0|1)" ;;
   esac
 
-  llm_port="$(compose_control_value LLM_SM_PORT 11434)"
+  llm_port="$(compose_control_value LLM_OLLAMA_PORT 11434)"
   [[ "$llm_port" =~ ^[0-9]+$ ]] && ((llm_port >= 1 && llm_port <= 65535)) ||
-    die "Invalid LLM_SM_PORT: $llm_port (expected 1-65535)"
+    die "Invalid LLM_OLLAMA_PORT: $llm_port (expected 1-65535)"
 
   if [[ "$ai_runtime" != "cpu" || "$ai_host_port_enabled" == "1" ]]; then
     mkdir -p "$CFG/.runtime"
@@ -74,7 +74,7 @@ docker_compose() {
       die "Unable to create temporary AI Compose override"
 
     {
-      printf '%s\n' 'services:' '  llm-sm:'
+      printf '%s\n' 'services:' '  llm-ollama:'
       case "$ai_runtime" in
       nvidia)
         printf '%s\n' '    gpus: all'
