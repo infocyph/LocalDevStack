@@ -260,6 +260,10 @@ Runtime selection::
    lds llm runtime
    lds llm runtime <cpu|nvidia|amd>
 
+The runtime command keeps the derived image tag in sync and also refreshes
+``LDS_AI_IGPU_ENABLE``. AMD runtime on an AMD CPU uses ``1`` so Ollama admits the
+integrated Radeon GPU; the other derived cases use ``0``.
+
 Direct host-port control::
 
    lds llm host-port status
