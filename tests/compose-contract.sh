@@ -179,17 +179,21 @@ assert nginx["LLM_PROXY_TIMEOUT_SECONDS"] == "1800"
 ' <<<"$ai_json"
 pass "companion-owned AI profile is internal-only and deterministic"
 
-printf '%s\n' 'LDS_AI_MODEL=qwen2.5:1.5b' 'LLM_SM_PDF_MAX_PAGES=12' 'LLM_SM_SYSTEM=Answer briefly.' >>"$user_env"
+printf '%s\n' 'LDS_AI_MODEL=qwen2.5:1.5b' 'LLM_SM_PDF_MAX_PAGES=12' 'LLM_SM_SYSTEM=Answer briefly.' 'LDS_AI_TIMEOUT=2400' >>"$user_env"
 ai_override_json="$("${compose[@]}" --profile ai config --format json)"
 python3 -c '
 import json,sys
-s=json.load(sys.stdin)["services"]["llm-sm"]
-env=s["environment"]
-assert env["LLM_SM_MODEL"] == "qwen2.5:1.5b"
-assert env["LLM_SM_PDF_MAX_PAGES"] == "12"
-assert env["LLM_SM_SYSTEM"] == "Answer briefly."
+d=json.load(sys.stdin)
+llm=d["services"]["llm-sm"]["environment"]
+assert llm["LLM_SM_MODEL"] == "qwen2.5:1.5b"
+assert llm["LLM_SM_PDF_MAX_PAGES"] == "12"
+assert llm["LLM_SM_SYSTEM"] == "Answer briefly."
+tools=d["services"]["server-tools"]["environment"]
+assert tools["LDS_AI_TIMEOUT"] == "2400"
+nginx=d["services"]["nginx"]["environment"]
+assert nginx["LLM_PROXY_TIMEOUT_SECONDS"] == "2400"
 ' <<<"$ai_override_json"
-pass "LocalDevStack forwards configured model and provider options into llm-sm"
+pass "LocalDevStack forwards configured provider and generation-timeout options"
 
 amd_json="$(COMPOSE_PROFILES=ai LDS_AI_RUNTIME=amd "$ROOT/lds" --quiet config show --json --raw 2>/dev/null | sed -n '/^[[:space:]]*{/,$p')"
 python3 -c '
