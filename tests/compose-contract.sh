@@ -8,6 +8,24 @@ source "$ROOT/tests/lib/assertions.sh"
 command -v docker >/dev/null 2>&1 || fail "docker is required"
 docker compose version >/dev/null 2>&1 || fail "docker compose plugin is required"
 
+for compose_file in "$ROOT"/docker/compose/*.yaml; do
+  if awk '
+    /^    volumes:[[:space:]]*$/ { in_service_volumes=1; next }
+    in_service_volumes && /^      - / {
+      entry=$0
+      sub(/^[[:space:]]*-[[:space:]]*/, "", entry)
+      if (entry ~ /^["'\''"]/ ) exit 1
+      next
+    }
+    in_service_volumes { in_service_volumes=0 }
+  ' "$compose_file"; then
+    :
+  else
+    fail "service volume mounts must use unquoted short-syntax scalars: $compose_file"
+  fi
+done
+pass "service volume mounts use one unquoted short-syntax style"
+
 release_env="$ROOT/docker/release.env"
 user_env="$ROOT/docker/.env"
 backup_env=""
