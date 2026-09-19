@@ -229,6 +229,7 @@ it is ``0``.
 Use::
 
    lds llm runtime <cpu|nvidia|amd>
+
 to override the detected runtime behavior.
 
 The selected ``LDS_AI_MODEL`` is also forwarded to the provider as
