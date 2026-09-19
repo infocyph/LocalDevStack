@@ -55,24 +55,28 @@ cmd_graphify() {
   [[ $# -eq 0 ]] || shift
   [[ -e "$target" ]] || die "Graphify target does not exist: $target"
 
-  local base_url timeout model graphify_bin arg next_is_model=0
+  local base_url timeout model graphify_bin arg next_is_model=0 next_is_timeout=0
   base_url="${OLLAMA_BASE_URL:-$(_graphify_local_base_url)}"
   timeout="${GRAPHIFY_API_TIMEOUT:-$(compose_control_value LDS_AI_TIMEOUT 1800)}"
   model="${OLLAMA_MODEL:-$(compose_control_value LDS_AI_MODEL qwen2.5:3b)}"
 
-  [[ "$timeout" =~ ^[0-9]+$ ]] && ((timeout >= 1)) ||
-    die "GRAPHIFY_API_TIMEOUT must be a positive integer"
-
-  # Keep an explicit --model override consistent across extraction and clustering.
+  # Keep explicit model/timeout overrides consistent across extraction and clustering.
   for arg in "$@"; do
     if ((next_is_model)); then
       model="$arg"
       next_is_model=0
       continue
     fi
+    if ((next_is_timeout)); then
+      timeout="$arg"
+      next_is_timeout=0
+      continue
+    fi
     case "$arg" in
     --model) next_is_model=1 ;;
     --model=*) model="${arg#--model=}" ;;
+    --api-timeout) next_is_timeout=1 ;;
+    --api-timeout=*) timeout="${arg#--api-timeout=}" ;;
     --backend | --backend=*)
       die "lds graphify owns --backend=ollama; do not pass --backend"
       ;;
@@ -82,7 +86,10 @@ cmd_graphify() {
     esac
   done
   ((next_is_model == 0)) || die "--model requires a value"
+  ((next_is_timeout == 0)) || die "--api-timeout requires a value"
   [[ -n "$model" ]] || die "Graphify model cannot be empty"
+  [[ "$timeout" =~ ^[0-9]+$ ]] && ((timeout >= 1)) ||
+    die "GRAPHIFY_API_TIMEOUT/--api-timeout must be a positive integer"
 
   graphify_bin="$(bin_path graphify)"
 
