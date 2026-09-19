@@ -292,6 +292,11 @@ Example::
 
    lds graphify ./your-project --mode deep --token-budget 4000 --max-concurrency 1
 
+``lds graphify`` sets ``OLLAMA_API_KEY=local`` when no key is supplied. Ollama does
+not require authentication on this loopback endpoint; the non-empty placeholder only
+suppresses Graphify's Ollama-backend warning. An explicitly supplied
+``OLLAMA_API_KEY`` is preserved.
+
 A one-off ``--model`` or ``--api-timeout`` option is propagated to the clustering
 phase through the corresponding Graphify environment value. ``llm-sm`` remains only
 the model provider and still receives no repository bind mount.
