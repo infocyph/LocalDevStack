@@ -305,7 +305,7 @@ Provider configuration placed in `docker/.env` is forwarded to `llm-sm` where ap
 | `OLLAMA_KEEP_ALIVE` | `5m` | Model keep-alive |
 | `OLLAMA_NO_CLOUD` | `1` | Keep cloud integration disabled |
 
-`LDS_AI_CONNECT_TIMEOUT`, `LDS_AI_PREFLIGHT_TIMEOUT`, `LDS_AI_TIMEOUT`, `LDS_AI_AVAILABILITY_TTL`, `LDS_AI_MAX_CONTEXT_BYTES`, `LDS_AI_MAX_REQUEST_BYTES`, and `LDS_AI_MAX_RESPONSE_BYTES` belong to the Tools consumer layer rather than the provider container.
+`LDS_AI_CONNECT_TIMEOUT=2` and `LDS_AI_PREFLIGHT_TIMEOUT=5` intentionally fail fast. `LDS_AI_TIMEOUT=1800` gives local model loading/inference up to 30 minutes and is also forwarded to the dedicated Nginx LLM route as `LLM_PROXY_TIMEOUT_SECONDS`. `LDS_AI_AVAILABILITY_TTL=5`, `LDS_AI_MAX_CONTEXT_BYTES=524288`, `LDS_AI_MAX_REQUEST_BYTES=1048576`, and `LDS_AI_MAX_RESPONSE_BYTES=2097152` remain Tools consumer controls rather than provider-container limits.
 
 Use the `lds` wrapper for provider commands. LocalDevStack intentionally has no repository-root `compose.yml`; its effective Compose project is assembled from `docker/compose/main.yaml`, release/user env files, optional extras, and temporary runtime-specific overrides. Therefore a bare command such as `docker compose exec llm-sm ...` from the LocalDevStack root is not equivalent and fails before reaching the container. Use `lds llm ...` instead.
 
