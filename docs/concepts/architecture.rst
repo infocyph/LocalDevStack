@@ -149,7 +149,17 @@ When the ``ai`` profile is enabled:
 4. ``lds ai`` delegates higher-level/operational AI to Tools;
 5. ``lds llm`` delegates model/runtime operations to the bundled ``llm-sm`` CLI.
 
-The provider is one ``llm-sm`` service declared with the core companion services and enabled only by the ``ai`` profile. Its image is ``infocyph/llm-sm:${LDS_LLM_ARCH}``: CPU/NVIDIA resolve to ``latest`` and AMD/ROCm resolves to ``amd-latest``. No AI-specific Compose files are tracked; ``lds`` generates a temporary Compose fragment only when NVIDIA GPU access, AMD device mappings, or loopback host-port exposure is required, then removes it after the Compose command.
+The provider is one ``llm-sm`` service declared in
+``docker/compose/companion.yaml`` and enabled only by the ``ai`` profile. Its image
+is ``infocyph/llm-sm:${LDS_LLM_ARCH}``: CPU/NVIDIA resolve to ``latest`` and
+AMD/ROCm resolves to ``amd-latest``. ``LDS_LLM_ARCH`` is derived from the effective
+runtime rather than maintained as an independent version selector.
+
+No AI-specific Compose files are tracked. ``lds`` generates a temporary fragment under
+``docker/.runtime/`` only when NVIDIA GPU access, AMD device mappings, or loopback
+host-port exposure is required, then removes it after the Compose command. The service
+also forwards the configured ``LDS_AI_MODEL`` to the provider as ``LLM_SM_MODEL`` and
+passes the documented provider safety/tuning settings from ``docker/.env``.
 
 Project Identity
 ----------------
