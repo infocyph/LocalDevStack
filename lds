@@ -773,7 +773,6 @@ cmd_help() {
 ## LLM provider
 - `lds llm models|ps|show|pull|rm|unload|run|ask|chat|prompt|code|review|json|ai-commit|ollama|api|version ...`
 - `lds llm runtime [cpu|nvidia|amd]`
-- `lds llm host-port <status|on|off>`
 
 ## Rebuild
 - `lds rebuild`
@@ -850,7 +849,6 @@ ${CYAN}AI:${NC}
   graphify [path] [graphify-extract-options...]
   llm models|ps|show|pull|rm|unload|run|ask|chat|prompt|code|review|json|ai-commit|ollama|api|version
   llm runtime [cpu|nvidia|amd]
-  llm host-port <status|on|off>
 
 ${CYAN}Maintenance:${NC}
   rebuild [all|<service...>]
