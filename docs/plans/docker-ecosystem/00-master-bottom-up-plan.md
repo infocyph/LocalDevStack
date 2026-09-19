@@ -13,7 +13,7 @@ Completed/published baseline as of 2026-09-18:
 - `infocyph/nginx:0.4.1`
 - `infocyph/apache:0.4.2`
 - `infocyph/tools:0.23.2`
-- `infocyph/llm-sm:0.03` / `amd-0.03`
+- `infocyph/llm-ollama:0.03` / `amd-0.03`
 
 The authoritative active implementation plan is now `07-localdevstack-integration-plan.md`. Earlier 01–06 files remain historical planning records for the completed lower layers.
 
@@ -33,7 +33,7 @@ Bottom to top:
 4. `infocyph/docker-nginx` — primary HTTP/TLS edge and local routing.
 5. `infocyph/docker-apache` — optional Apache backend for PHP/vhost compatibility.
 6. `infocyph/docker-tools` — LocalDevStack control plane: domain/TLS/config generation, service/profile helpers, monitoring, admin panel, environment/secrets tooling.
-7. `infocyph/docker-llm-sm` — published optional local-AI capability; already follows the newer image publication model.
+7. `infocyph/docker-llm-ollama` — published optional local-AI capability; already follows the newer image publication model.
 8. `infocyph/LocalDevStack` — product/orchestrator: `lds`, Compose topology, PHP/Node runtime Dockerfiles, generated configuration, user-facing workflow, platform integration.
 
 ## Core Architectural Rules
@@ -46,7 +46,7 @@ Published images remain independently versioned infrastructure:
 - `infocyph/nginx`
 - `infocyph/apache`
 - `infocyph/tools`
-- `infocyph/llm-sm`
+- `infocyph/llm-ollama`
 
 PHP and Node remain locally generated runtime images because they are customized by selected runtime version, host UID/GID, extensions/packages, and project-level needs:
 
@@ -65,7 +65,7 @@ For every published `docker-*` repository:
 - source release and resulting image revision must be identifiable through OCI metadata/provenance;
 - Docker Hub and GHCR should receive the same built digest for the same variant.
 
-`docker-llm-sm` is the reference implementation for this contract.
+`docker-llm-ollama` is the reference implementation for this contract.
 
 ### Dependency reproducibility
 
@@ -174,9 +174,9 @@ Primary goals:
 
 ### Phase 3 — Local AI capability — COMPLETE
 
-Plan: `06-docker-llm-sm-plan.md`
+Plan: `06-docker-llm-ollama-plan.md`
 
-`docker-llm-sm` is published as `0.03` and its provider/runtime contract is complete for this program.
+`docker-llm-ollama` is published as `0.03` and its provider/runtime contract is complete for this program.
 
 Primary goals:
 
@@ -264,6 +264,6 @@ The ecosystem work is complete when:
 5. Static IP dependence is removed unless a documented unavoidable case remains.
 6. PHP and Node runtime generation remains version-flexible and user-customizable.
 7. Local domains/TLS, mail, DB/admin clients, cron/supervisor, secrets, and diagnostics still work.
-8. Optional local AI can be enabled through `infocyph/llm-sm` without contaminating the default stack.
+8. Optional local AI can be enabled through `infocyph/llm-ollama` without contaminating the default stack.
 9. Documentation matches the actual storage/network/release behavior.
 10. A clean install on supported host categories can reach a working PHP or Node local domain with TLS using the documented workflow.
