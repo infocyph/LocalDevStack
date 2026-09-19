@@ -140,7 +140,7 @@ python3 -c '
 import json,sys
 d=json.load(sys.stdin)
 s=d["services"]["llm-sm"]
-assert s["image"] == "infocyph/llm-sm:latest"
+assert s["image"] == "infocyph/llm-ollama:latest"
 assert s["container_name"] == "LLM_SM"
 assert not s.get("ports")
 assert set(s["networks"]) == {"frontend","backend"}
@@ -201,7 +201,7 @@ amd_json="$(COMPOSE_PROFILES=ai LDS_AI_RUNTIME=amd "$ROOT/lds" --quiet config sh
 python3 -c '
 import json,sys
 s=json.load(sys.stdin)["services"]["llm-sm"]
-assert s["image"] == "infocyph/llm-sm:amd-latest"
+assert s["image"] == "infocyph/llm-ollama:amd-latest"
 devices=" ".join(str(x) for x in s.get("devices", []))
 assert "/dev/kfd" in devices and "/dev/dri" in devices
 ' <<<"$amd_json"
@@ -211,7 +211,7 @@ nvidia_json="$(COMPOSE_PROFILES=ai LDS_AI_RUNTIME=nvidia "$ROOT/lds" --quiet con
 python3 -c '
 import json,sys
 s=json.load(sys.stdin)["services"]["llm-sm"]
-assert s["image"] == "infocyph/llm-sm:latest"
+assert s["image"] == "infocyph/llm-ollama:latest"
 assert s.get("gpus")
 ' <<<"$nvidia_json"
 pass "NVIDIA AI runtime is generated dynamically"
@@ -233,5 +233,5 @@ fi
 if [[ -d "$ROOT/docker/.runtime" ]] && find "$ROOT/docker/.runtime" -type f -print -quit | grep -q .; then
   fail "temporary AI Compose overrides were not cleaned up"
 fi
-assert_file_contains "$ROOT/docker/compose/companion.yaml" 'image: infocyph/llm-sm:${LDS_LLM_ARCH}'
+assert_file_contains "$ROOT/docker/compose/companion.yaml" 'image: infocyph/llm-ollama:${LDS_LLM_ARCH}'
 pass "single LLM service plus ephemeral hardware/port overrides"
