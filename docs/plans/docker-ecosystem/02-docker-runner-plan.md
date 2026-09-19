@@ -18,7 +18,7 @@
 
 Replace the legacy publication workflow with the current ecosystem contract:
 
-- current GitHub Action majors matching `docker-llm-sm` where compatible;
+- current GitHub Action majors matching `docker-llm-ollama` where compatible;
 - release event: publish immutable `<release>` + `latest`;
 - scheduled event: resolve latest published release source but publish only `latest`;
 - never overwrite a release-version tag on schedule;
