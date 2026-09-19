@@ -45,7 +45,7 @@ pass "Graphify workflow help"
 graphify_log="$(mktemp)"
 cat >"$tmpbin/graphify" <<'SH'
 #!/usr/bin/env sh
-printf 'base=%s model=%s timeout=%s args=%s\n' "$OLLAMA_BASE_URL" "$OLLAMA_MODEL" "$GRAPHIFY_API_TIMEOUT" "$*" >>"$GRAPHIFY_TEST_LOG"
+printf 'base=%s key=%s model=%s timeout=%s args=%s\n' "$OLLAMA_BASE_URL" "$OLLAMA_API_KEY" "$OLLAMA_MODEL" "$GRAPHIFY_API_TIMEOUT" "$*" >>"$GRAPHIFY_TEST_LOG"
 SH
 chmod +x "$tmpbin/graphify"
 
@@ -56,9 +56,9 @@ LDS_AI_TIMEOUT=1800 \
 GRAPHIFY_TEST_LOG="$graphify_log" \
   "$ROOT/lds" graphify . --model test-model --api-timeout 42 --mode deep >/dev/null
 
-grep -Fq 'base=http://127.0.0.1:11434/v1 model=test-model timeout=42 args=extract . --backend ollama --no-cluster --model test-model --api-timeout 42 --mode deep' "$graphify_log" ||
+grep -Fq 'base=http://127.0.0.1:11434/v1 key=local model=test-model timeout=42 args=extract . --backend ollama --no-cluster --model test-model --api-timeout 42 --mode deep' "$graphify_log" ||
   fail "Graphify extract wrapper contract failed"
-grep -Fq 'base=http://127.0.0.1:11434/v1 model=test-model timeout=42 args=cluster-only . --backend ollama' "$graphify_log" ||
+grep -Fq 'base=http://127.0.0.1:11434/v1 key=local model=test-model timeout=42 args=cluster-only . --backend ollama' "$graphify_log" ||
   fail "Graphify cluster wrapper contract failed"
 rm -f "$graphify_log"
 pass "Graphify host workflow wrapper"
