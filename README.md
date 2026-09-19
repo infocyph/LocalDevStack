@@ -261,6 +261,10 @@ lds ai troubleshoot ...
 lds ai review ...
 lds ai repo-review ...
 
+# Host Graphify + LocalDevStack Ollama
+lds graphify
+lds graphify ./your-project --mode deep --token-budget 4000 --max-concurrency 1
+
 lds llm models
 lds llm pull <model>
 lds llm show <model>
@@ -269,6 +273,18 @@ lds llm chat ...
 ```
 
 Direct host Ollama access is off by default. `lds llm host-port on` binds only to `127.0.0.1:11434` by default. Change that loopback port with `LLM_SM_PORT` in `docker/.env`.
+
+`lds graphify [path] [extract-options...]` is a host-side Graphify workflow. It requires the host `graphify` CLI, uses the configured LocalDevStack model and `LDS_AI_TIMEOUT`, and targets the actual loopback-published `llm-sm` API. The command runs extraction with `--backend ollama --no-cluster`, then runs `cluster-only` for the same path if extraction succeeds. This avoids clustering twice.
+
+Before first use, publish the provider port and apply that Compose change:
+
+```bash
+lds llm host-port on
+lds up -d llm-sm
+lds graphify
+```
+
+You may override `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, or `GRAPHIFY_API_TIMEOUT` for a one-off run. A CLI `--model` or `--api-timeout` override is kept consistent across both Graphify phases.
 
 The LocalDevStack LLM Compose layout is intentionally small:
 
