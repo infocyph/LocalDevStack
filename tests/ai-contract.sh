@@ -60,6 +60,10 @@ assert_file_contains "$ROOT/docker/compose/companion.yaml" 'lds_llm:/root/.ollam
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'LLM_SM_MODEL=${LDS_AI_MODEL:-qwen2.5:3b}'
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'LLM_SM_ATTACHMENT_MAX_BYTES=${LLM_SM_ATTACHMENT_MAX_BYTES:-16777216}'
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'LLM_SM_PDF_MAX_PAGES=${LLM_SM_PDF_MAX_PAGES:-24}'
+assert_file_contains "$ROOT/docker/compose/companion.yaml" 'LDS_AI_CONNECT_TIMEOUT=${LDS_AI_CONNECT_TIMEOUT:-2}'
+assert_file_contains "$ROOT/docker/compose/companion.yaml" 'LDS_AI_PREFLIGHT_TIMEOUT=${LDS_AI_PREFLIGHT_TIMEOUT:-5}'
+assert_file_contains "$ROOT/docker/compose/companion.yaml" 'LDS_AI_TIMEOUT=${LDS_AI_TIMEOUT:-1800}'
+assert_file_contains "$ROOT/docker/compose/http.yaml" 'LLM_PROXY_TIMEOUT_SECONDS=${LDS_AI_TIMEOUT:-1800}'
 assert_file_contains "$ROOT/lib/compose.sh" "'    gpus: all'"
 assert_file_contains "$ROOT/lib/compose.sh" "'      - /dev/kfd:/dev/kfd'"
 assert_file_contains "$ROOT/lib/compose.sh" "'      - /dev/dri:/dev/dri'"
