@@ -71,7 +71,10 @@ assert_file_contains "$ai" 'does not mount the project/repository into llm-sm by
 assert_file_contains "$ai" 'infocyph/llm-sm:${LDS_LLM_ARCH}'
 assert_file_contains "$ai" 'LDS_LLM_ARCH=amd-latest'
 assert_file_contains "$ai" 'LDS_AI_MODEL=qwen2.5:3b'
-pass "local AI trust boundary, platform and workspace limits are documented"
+assert_file_contains "$ai" 'Always invoke provider commands through ``lds llm``'
+assert_file_contains "$ai" 'docker compose exec llm-sm'
+assert_file_contains "$readme" 'lds llm ask "Explain dependency injection briefly"'
+pass "local AI trust boundary, platform, workspace and invocation limits are documented"
 
 for stale in   'Scriptomatic/master'   'infocyph/tools:0.23.2'   'infocyph/runner:0.5'   'infocyph/nginx:0.4.1'   'infocyph/apache:0.4.2'   'infocyph/llm-sm:0.03'; do
   if grep -RqsF "$stale" "$ROOT/README.md" "$ROOT/docs" --exclude-dir=plans; then
