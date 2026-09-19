@@ -264,10 +264,13 @@ lds ai repo-review ...
 lds llm models
 lds llm pull <model>
 lds llm show <model>
+lds llm ask "Explain dependency injection briefly"
 lds llm chat ...
 ```
 
 Direct host Ollama access is off by default. `lds llm host-port on` binds only to `127.0.0.1:11434` by default.
+
+Use the `lds` wrapper for provider commands. LocalDevStack intentionally has no repository-root `compose.yml`; its effective Compose project is assembled from `docker/compose/main.yaml`, release/user env files, optional extras, and temporary runtime-specific overrides. Therefore a bare command such as `docker compose exec llm-sm ...` from the LocalDevStack root is not equivalent and fails before reaching the container. Use `lds llm ...` instead.
 
 The `llm-sm` container receives **no Docker socket and no project/repository bind mount** by default. Current published `llm-sm` images are `linux/amd64`; the rest of LocalDevStack can still run on arm64 with the AI profile disabled.
 
