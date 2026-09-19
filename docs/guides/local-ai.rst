@@ -104,7 +104,7 @@ AI vs LLM Commands
    lds llm rm <model>
    lds llm unload <model>
    lds llm run <model>
-   lds llm ask ...
+   lds llm ask "Explain dependency injection briefly"
    lds llm chat ...
    lds llm prompt ...
    lds llm code ...
@@ -117,6 +117,12 @@ AI vs LLM Commands
 
 This separation keeps application/operational AI in Tools and model/runtime behavior in
 the provider image.
+
+Always invoke provider commands through ``lds llm`` inside LocalDevStack. The repository
+does not expose a root ``compose.yml`` because ``lds`` assembles the effective Compose
+project from the tracked main file, env layers, optional extras, and runtime-specific
+temporary overrides. A bare ``docker compose exec llm-sm ...`` from the LocalDevStack
+repository root therefore fails at the host Compose layer before ``llm-sm`` runs.
 
 Model Persistence
 -----------------
