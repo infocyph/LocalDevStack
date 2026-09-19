@@ -161,7 +161,9 @@ No AI-specific Compose files are tracked. ``lds`` generates a temporary fragment
 ``docker/.runtime/`` only when NVIDIA GPU access, AMD device mappings, or loopback
 host-port exposure is required, then removes it after the Compose command. The service
 also forwards the configured ``LDS_AI_MODEL`` to the provider as ``LLM_SM_MODEL`` and
-passes the documented provider safety/tuning settings from ``docker/.env``.
+passes the documented provider safety/tuning settings from ``docker/.env``. For AMD
+runtime on an AMD CPU, LocalDevStack persists ``LDS_AI_IGPU_ENABLE=1`` and forwards it
+as ``OLLAMA_IGPU_ENABLE=1`` so Ollama admits the integrated Radeon GPU.
 
 Project Identity
 ----------------
