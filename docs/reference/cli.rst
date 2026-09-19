@@ -221,7 +221,8 @@ The host port must already be applied with::
    lds llm host-port on
    lds up -d llm-ollama
 
-An explicitly supplied ``OLLAMA_BASE_URL`` bypasses that host-port lookup.
+An explicitly supplied ``OLLAMA_BASE_URL`` overrides the default
+``http://llm-ollama.localhost:11434/v1`` endpoint.
 
 LLM Provider
 ------------
@@ -264,13 +265,9 @@ The runtime command keeps the derived image tag in sync and also refreshes
 ``LDS_AI_IGPU_ENABLE``. AMD runtime on an AMD CPU uses ``1`` so Ollama admits the
 integrated Radeon GPU; the other derived cases use ``0``.
 
-Direct host-port control::
-
-   lds llm host-port status
-   lds llm host-port on
-   lds llm host-port off
-
-The loopback port defaults to 11434 and can be changed with ``LLM_OLLAMA_PORT``.
+Native Ollama access is always routed through Nginx at
+``http://llm-ollama.localhost:11434``; the provider container itself is not
+published directly.
 
 Rebuild
 -------
