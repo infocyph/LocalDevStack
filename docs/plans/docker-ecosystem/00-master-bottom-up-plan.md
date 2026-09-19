@@ -198,7 +198,7 @@ Only after lower layers have stable contracts:
 - migrate static networking to Docker DNS;
 - reconcile generated-state/storage documentation with actual named volumes/bind mounts;
 - consume versioned infrastructure images;
-- integrate optional `llm-sm` cleanly;
+- integrate optional `llm-ollama` cleanly;
 - review Docker socket exposure;
 - keep PHP/Node runtime generation flexible.
 
