@@ -553,6 +553,7 @@ Base service:
 ```yaml
 services:
   llm-sm:
+    container_name: LLM_SM
     image: infocyph/llm-sm:${LDS_LLM_ARCH}
     restart: unless-stopped
     profiles: [ai]
@@ -566,8 +567,9 @@ services:
 Important rules:
 
 - service key must be exactly `llm-sm`;
+- preserve the existing fixed container name `LLM_SM` for single-stack compatibility;
+- route internally by the Compose service/hostname `llm-sm`, not by the fixed container name;
 - do not set a fixed IP;
-- do not require `container_name`;
 - do not mount Docker socket;
 - do not expose `11434` to all interfaces;
 - do not add a host port in the base companion service;
@@ -2235,6 +2237,7 @@ with:
 
 ```yaml
 llm-sm:
+  container_name: LLM_SM
   image: infocyph/llm-sm:${LDS_LLM_ARCH}
   profiles: [ai]
   environment:
