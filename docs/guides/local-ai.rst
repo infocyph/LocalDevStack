@@ -266,9 +266,35 @@ container. The upstream ``llm-sm`` CLI also supports stdin-based flows such as
 Graphify
 --------
 
-``lds ai graphify`` delegates Graphify-assisted analysis to the Tools AI layer.
-``llm-sm`` remains only the model provider and does not gain direct repository access
-from this integration.
+Two Graphify flows are intentionally separate.
+
+``lds ai graphify`` analyzes an already-produced Graphify output file through the Tools
+AI layer.
+
+``lds graphify [path] [extract-options...]`` runs the host Graphify CLI against the
+LocalDevStack Ollama provider. The default path is the current directory. It derives the
+model from ``LDS_AI_MODEL``, derives ``GRAPHIFY_API_TIMEOUT`` from
+``LDS_AI_TIMEOUT``, and uses the actual loopback-published provider port unless
+``OLLAMA_BASE_URL`` is already set.
+
+Enable and apply the direct provider port before the default workflow::
+
+   lds llm host-port on
+   lds up -d llm-sm
+   lds graphify
+
+Internally the workflow runs extraction with ``--backend ollama --no-cluster`` and,
+only after a successful extraction, runs ``cluster-only`` against the same path. This
+preserves the requested two-phase flow without performing the default extraction
+clustering and then immediately clustering a second time.
+
+Example::
+
+   lds graphify ./your-project --mode deep --token-budget 4000 --max-concurrency 1
+
+A one-off ``--model`` or ``--api-timeout`` option is propagated to the clustering
+phase through the corresponding Graphify environment value. ``llm-sm`` remains only
+the model provider and still receives no repository bind mount.
 
 Diagnostics
 -----------
