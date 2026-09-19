@@ -24,8 +24,8 @@ class Handler(BaseHTTPRequestHandler):
                 {
                     "models": [
                         {
-                            "name": "qwen2.5:3b",
-                            "model": "qwen2.5:3b",
+                            "name": "qwen3:14b",
+                            "model": "qwen3:14b",
                             "size": 1,
                             "digest": "ci-fixture",
                         }
@@ -41,7 +41,7 @@ class Handler(BaseHTTPRequestHandler):
                     "object": "list",
                     "data": [
                         {
-                            "id": "qwen2.5:3b",
+                            "id": "qwen3:14b",
                             "object": "model",
                             "owned_by": "local",
                         }
@@ -61,7 +61,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json(
                 200,
                 {
-                    "model": "qwen2.5:3b",
+                    "model": "qwen3:14b",
                     "response": "LocalDevStack CI",
                     "message": {"role": "assistant", "content": "LocalDevStack CI"},
                     "done": True,
