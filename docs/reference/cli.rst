@@ -212,14 +212,14 @@ It performs ``extract --backend ollama --no-cluster`` followed by
 
 By default it derives:
 
-- ``OLLAMA_BASE_URL`` from the actual loopback-published ``llm-sm`` port;
+- ``OLLAMA_BASE_URL`` from the actual loopback-published ``llm-ollama`` port;
 - ``OLLAMA_MODEL`` from ``LDS_AI_MODEL``;
 - ``GRAPHIFY_API_TIMEOUT`` from ``LDS_AI_TIMEOUT``.
 
 The host port must already be applied with::
 
    lds llm host-port on
-   lds up -d llm-sm
+   lds up -d llm-ollama
 
 An explicitly supplied ``OLLAMA_BASE_URL`` bypasses that host-port lookup.
 
@@ -248,10 +248,10 @@ LLM Provider
    lds llm help
 
 These commands execute the bundled provider CLI through LocalDevStack's Compose wrapper.
-Do not replace them with bare ``docker compose exec llm-sm ...`` from the repository
+Do not replace them with bare ``docker compose exec llm-ollama ...`` from the repository
 root; LocalDevStack has no root ``compose.yml``.
 
-``LDS_AI_MODEL`` is forwarded to the provider as ``LLM_SM_MODEL``, so
+``LDS_AI_MODEL`` is forwarded to the provider as ``LLM_OLLAMA_MODEL``, so
 ``lds ai`` and ``lds llm`` share the configured default model. Provider input,
 attachment, PDF and Ollama runtime knobs are documented in :doc:`../guides/local-ai`.
 
@@ -270,7 +270,7 @@ Direct host-port control::
    lds llm host-port on
    lds llm host-port off
 
-The loopback port defaults to 11434 and can be changed with ``LLM_SM_PORT``.
+The loopback port defaults to 11434 and can be changed with ``LLM_OLLAMA_PORT``.
 
 Rebuild
 -------
