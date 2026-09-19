@@ -109,7 +109,7 @@ under ``docker/.runtime/`` for the current command only:
 
 - NVIDIA -> ``gpus: all``;
 - AMD/ROCm -> ``/dev/kfd`` and ``/dev/dri``;
-- direct host API -> ``127.0.0.1:${LLM_OLLAMA_PORT:-11434}:11434``.
+- native host API -> ``127.0.0.1:11434:11434`` on Nginx -> ``llm-ollama:11434``.
 
 The fragment is removed after the Compose command. ``configuration/compose/`` remains
 the normal extras/generated-runtime area and is not the location of built-in LLM
@@ -282,7 +282,6 @@ model from ``LDS_AI_MODEL``, derives ``GRAPHIFY_API_TIMEOUT`` from
 
 Enable and apply the direct provider port before the default workflow::
 
-   lds llm host-port on
    lds up -d llm-ollama
    lds graphify
 
