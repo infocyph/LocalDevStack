@@ -40,7 +40,7 @@ Host
       └─ logs/
 ```
 
-LocalDevStack uses three logical Docker networks: `Frontend`, `Backend`, and `DataStore`. Docker assigns their address ranges dynamically. Internal communication uses service names such as `nginx`, `postgres`, `redis`, `server-tools`, and `llm-sm`.
+LocalDevStack uses three logical Docker networks: `Frontend`, `Backend`, and `DataStore`. Docker assigns their address ranges dynamically. Internal communication uses service names such as `nginx`, `postgres`, `redis`, `server-tools`, and `llm-sm`. For single-stack compatibility the LLM service keeps the fixed container name `LLM_SM`; internal routing still uses the Compose service/hostname `llm-sm`, never the fixed container name.
 
 ## Prerequisites
 
