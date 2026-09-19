@@ -175,8 +175,12 @@ assert tools["LDS_AI_AVAILABILITY_TTL"] == "5"
 assert tools["LDS_AI_MAX_CONTEXT_BYTES"] == "524288"
 assert tools["LDS_AI_MAX_REQUEST_BYTES"] == "1048576"
 assert tools["LDS_AI_MAX_RESPONSE_BYTES"] == "2097152"
-nginx=d["services"]["nginx"]["environment"]
-assert nginx["LLM_PROXY_TIMEOUT_SECONDS"] == "1800"
+nginx=d["services"]["nginx"]
+assert nginx["environment"]["LLM_PROXY_TIMEOUT_SECONDS"] == "1800"
+native=[p for p in nginx.get("ports", []) if int(p["target"]) == 11434]
+assert len(native) == 1
+assert native[0]["host_ip"] == "127.0.0.1"
+assert int(native[0]["published"]) == 11434
 ' <<<"$ai_json"
 pass "companion-owned AI profile is internal-only and deterministic"
 
@@ -216,17 +220,6 @@ assert s.get("gpus")
 ' <<<"$nvidia_json"
 pass "NVIDIA AI runtime is generated dynamically"
 
-host_json="$(COMPOSE_PROFILES=ai LDS_AI_RUNTIME=cpu LDS_LLM_HOST_PORT=1 "$ROOT/lds" --quiet config show --json --raw 2>/dev/null | sed -n '/^[[:space:]]*{/,$p')"
-python3 -c '
-import json,sys
-ports=json.load(sys.stdin)["services"]["llm-ollama"]["ports"]
-assert len(ports) == 1
-p=ports[0]
-assert p["host_ip"] == "127.0.0.1"
-assert int(p["target"]) == 11434 and int(p["published"]) == 11434
-' <<<"$host_json"
-pass "direct Ollama port is generated dynamically and loopback-only"
-
 if find "$ROOT/docker/compose" -maxdepth 1 -type f -name 'ai-*.yaml' -print -quit | grep -q .; then
   fail "AI-specific Compose files must not exist"
 fi
@@ -234,4 +227,4 @@ if [[ -d "$ROOT/docker/.runtime" ]] && find "$ROOT/docker/.runtime" -type f -pri
   fail "temporary AI Compose overrides were not cleaned up"
 fi
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'image: infocyph/llm-ollama:${LDS_LLM_ARCH}'
-pass "single LLM service plus ephemeral hardware/port overrides"
+pass "single LLM service plus ephemeral hardware overrides"
