@@ -137,7 +137,7 @@ cmd_llm() {
       update_env "$ENV_DOCKER" LDS_AI_RUNTIME "$normalized"
       update_env "$ENV_DOCKER" LDS_LLM_ARCH "$arch"
       update_env "$ENV_DOCKER" LDS_AI_IGPU_ENABLE "$igpu_enable"
-      ok "LLM runtime set to $normalized (infocyph/llm-sm:$arch, iGPU=$igpu_enable). Recreate llm-sm to apply the change."
+      ok "LLM runtime set to $normalized (infocyph/llm-ollama:$arch, iGPU=$igpu_enable). Recreate llm-sm to apply the change."
       ;;
     *) die "llm runtime <cpu|nvidia|amd>" ;;
     esac
