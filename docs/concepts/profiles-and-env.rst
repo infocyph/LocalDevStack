@@ -210,8 +210,9 @@ Important AI settings include::
    LDS_AI_ENABLED=auto
    LDS_AI_PROVIDER=ollama
    LDS_AI_URL=http://llm-sm:11434
-   LDS_AI_MODEL=qwen2.5:3b
+   LDS_AI_MODEL=qwen3:14b
    LDS_AI_RUNTIME=<optional explicit cpu|nvidia|amd>
+   LDS_AI_IGPU_ENABLE=<auto-derived 0|1>
    LDS_LLM_HOST_PORT=0
    LLM_SM_PORT=11434
 
@@ -222,8 +223,10 @@ usable; AMD is selected only when the ROCm Linux device nodes ``/dev/kfd`` and
 
 ``LDS_LLM_ARCH`` is derived from that runtime (``latest`` for CPU/NVIDIA,
 ``amd-latest`` for AMD). It is not a separate user-facing image version selector.
-Using ``lds llm runtime ...`` persists the explicit runtime choice and matching derived
-tag for compatibility/inspection.
+Using ``lds llm runtime ...`` persists the explicit runtime choice, matching derived
+tag and the automatic ``LDS_AI_IGPU_ENABLE`` value. On an AMD CPU with the AMD runtime,
+the automatic value is ``1`` and is forwarded as ``OLLAMA_IGPU_ENABLE=1``; otherwise
+it is ``0``.
 
 Use::
 
