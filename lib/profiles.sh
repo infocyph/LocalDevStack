@@ -202,7 +202,7 @@ setup_service() {
     local detected_runtime detected_arch
     detected_runtime="$(compose_control_value LDS_AI_RUNTIME "$(detect_ai_runtime)")"
     detected_arch="$(llm_arch_for_runtime "$detected_runtime")"
-    printf "%bDetected local-AI runtime:%b %s (%s)\n" "$CYAN" "$NC" "$detected_runtime" "infocyph/llm-sm:$detected_arch"
+    printf "%bDetected local-AI runtime:%b %s (%s)\n" "$CYAN" "$NC" "$detected_runtime" "infocyph/llm-ollama:$detected_arch"
   fi
 
   local defaults="${PROFILE_ENV[$profile]:-}"
@@ -228,13 +228,6 @@ setup_service() {
       case "$val" in
       cpu | nvidia | amd) ;;
       *) die "AI runtime must be cpu, nvidia, or amd" ;;
-      esac
-      ;;
-    LDS_LLM_HOST_PORT)
-      case "${val,,}" in
-      1 | y | yes | true | on) val=1 ;;
-      0 | n | no | false | off) val=0 ;;
-      *) die "Direct localhost API must be yes or no" ;;
       esac
       ;;
     esac
