@@ -197,6 +197,32 @@ AI Consumer
 
 ``status`` maps to the Tools provider-status flow.
 
+Host Graphify Workflow
+----------------------
+
+::
+
+   lds graphify
+   lds graphify ./your-project
+   lds graphify ./your-project --mode deep --token-budget 4000 --max-concurrency 1
+
+This command runs the host ``graphify`` CLI against LocalDevStack's Ollama provider.
+It performs ``extract --backend ollama --no-cluster`` followed by
+``cluster-only <same-path> --backend ollama``, so clustering happens once.
+
+By default it derives:
+
+- ``OLLAMA_BASE_URL`` from the actual loopback-published ``llm-sm`` port;
+- ``OLLAMA_MODEL`` from ``LDS_AI_MODEL``;
+- ``GRAPHIFY_API_TIMEOUT`` from ``LDS_AI_TIMEOUT``.
+
+The host port must already be applied with::
+
+   lds llm host-port on
+   lds up -d llm-sm
+
+An explicitly supplied ``OLLAMA_BASE_URL`` bypasses that host-port lookup.
+
 LLM Provider
 ------------
 
