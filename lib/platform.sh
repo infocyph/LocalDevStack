@@ -23,6 +23,28 @@ detect_ai_runtime() {
   printf '%s' cpu
 }
 
+host_cpu_is_amd() {
+  if [[ -r /proc/cpuinfo ]] &&
+    grep -qiE '^[[:space:]]*vendor_id[[:space:]]*:[[:space:]]*AuthenticAMD([[:space:]]|$)' /proc/cpuinfo; then
+    return 0
+  fi
+
+  if has_cmd lscpu &&
+    lscpu 2>/dev/null | grep -qiE '^Vendor ID:[[:space:]]*AuthenticAMD([[:space:]]|$)'; then
+    return 0
+  fi
+
+  return 1
+}
+
+ai_igpu_default_for_runtime() {
+  if [[ "${1,,}" == "amd" ]] && host_cpu_is_amd; then
+    printf '%s' 1
+  else
+    printf '%s' 0
+  fi
+}
+
 llm_arch_for_runtime() {
   case "${1,,}" in
   amd) printf '%s' amd-latest ;;
