@@ -145,7 +145,7 @@ When the ``ai`` profile is enabled:
 
 1. ``llm-ollama`` provides the Ollama runtime and persistent model store;
 2. Tools consumes ``http://llm-ollama:11434`` internally;
-3. Nginx exposes ``https://llm-ollama.localhost`` to the user;
+3. Nginx exposes ``https://llm-ollama.localhost`` and the loopback-only native endpoint ``http://llm-ollama.localhost:11434`` to host clients;
 4. ``lds ai`` delegates higher-level/operational AI to Tools;
 5. ``lds llm`` delegates model/runtime operations to the bundled ``llm-ollama`` CLI.
 
