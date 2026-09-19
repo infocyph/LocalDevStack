@@ -206,13 +206,19 @@ PDF-vision limits remain active unless their own value is set to ``0``.
 Consumer settings are separate. The following values configure the Tools AI layer, not
 the provider runtime::
 
-   LDS_AI_CONNECT_TIMEOUT
-   LDS_AI_PREFLIGHT_TIMEOUT
-   LDS_AI_TIMEOUT
-   LDS_AI_AVAILABILITY_TTL
-   LDS_AI_MAX_CONTEXT_BYTES
-   LDS_AI_MAX_REQUEST_BYTES
-   LDS_AI_MAX_RESPONSE_BYTES
+   LDS_AI_CONNECT_TIMEOUT=2
+   LDS_AI_PREFLIGHT_TIMEOUT=5
+   LDS_AI_TIMEOUT=1800
+   LDS_AI_AVAILABILITY_TTL=5
+   LDS_AI_MAX_CONTEXT_BYTES=524288
+   LDS_AI_MAX_REQUEST_BYTES=1048576
+   LDS_AI_MAX_RESPONSE_BYTES=2097152
+
+Connection and provider/model preflight remain deliberately short. Generation and
+analysis use a separate 30-minute default because first model load, CPU inference, and
+larger local prompts can legitimately take much longer. LocalDevStack also forwards
+``LDS_AI_TIMEOUT`` to Nginx as ``LLM_PROXY_TIMEOUT_SECONDS`` for the dedicated
+``llm.localhost`` route so the edge proxy does not terminate a valid generation earlier.
 
 Privacy and Trust Boundaries
 ----------------------------
