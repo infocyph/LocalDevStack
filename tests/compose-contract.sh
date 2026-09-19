@@ -141,7 +141,7 @@ import json,sys
 d=json.load(sys.stdin)
 s=d["services"]["llm-sm"]
 assert s["image"] == "infocyph/llm-sm:latest"
-assert "container_name" not in s
+assert s["container_name"] == "LLM_SM"
 assert not s.get("ports")
 assert set(s["networks"]) == {"frontend","backend"}
 targets={v["target"] for v in s["volumes"]}
