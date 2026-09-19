@@ -6,33 +6,33 @@ services:
     restart: unless-stopped
     environment:
       - TZ=${TZ:-}
+      - LLM_PROXY_TIMEOUT_SECONDS=${LDS_AI_TIMEOUT:-1800}
     ports:
       - "${HTTP_PORT:-80}:80"
       - "${HTTPS_PORT:-443}:443"
+      - "127.0.0.1:11434:11434"
     volumes:
-      - "${PROJECT_DIR:-./../../../application}:/app"
+      - ${PROJECT_DIR:-./../../../application}:/app
       - lds_nginx_host:/etc/nginx/conf.d
       - lds_ssl_keys:/etc/mkcert:ro
       - lds_ssl_roots:/etc/share/rootCA:ro
       - lds_fpm_sock:/run/php-fpm:ro
       - ../../logs/nginx:/var/log/nginx
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     networks:
-      frontend:
-        ipv4_address: 172.28.0.10
+      - frontend
     depends_on:
-      - server-tools
+      server-tools:
+        condition: service_healthy
 
   apache:
     container_name: APACHE
     hostname: apache
     image: infocyph/apache:latest
-    restart: always
+    restart: unless-stopped
     environment:
       - TZ=${TZ:-}
     volumes:
-      - "${PROJECT_DIR:-./../../../application}:/app"
+      - ${PROJECT_DIR:-./../../../application}:/app
       - lds_ssl_keys:/etc/mkcert:ro
       - lds_apache_host:/usr/local/apache2/conf/vhosts:ro
       - lds_ssl_roots:/etc/share/rootCA:ro
@@ -41,5 +41,4 @@ services:
     depends_on:
       - nginx
     networks:
-      frontend:
-        ipv4_address: 172.28.0.11
+      - frontend

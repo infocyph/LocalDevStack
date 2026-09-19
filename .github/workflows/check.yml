@@ -1,0 +1,156 @@
+name: Check
+
+on:
+  push:
+    branches:
+      - main
+      - "plan/**"
+      - "feature/**"
+  pull_request:
+  schedule:
+    # Related moving latest images refresh weekly; re-run the full compatibility
+    # suite after that window even when LocalDevStack source has not changed.
+    - cron: "30 2 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static-and-contracts:
+    name: Static and contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install ShellCheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends shellcheck
+
+      - name: Static validation
+        run: tests/static.sh
+
+      - name: CLI contract
+        run: tests/cli-contract.sh
+
+      - name: Environment contract
+        run: tests/env-contract.sh
+
+      - name: Catalog contract
+        run: bash tests/catalog-contract.sh
+
+      - name: PHP runtime contract
+        run: tests/runtime-php-contract.sh
+
+      - name: Node runtime contract
+        run: tests/runtime-node-contract.sh
+
+      - name: Networking characterization
+        run: tests/networking-contract.sh
+
+      - name: Wrapper contract
+        run: tests/wrappers-contract.sh
+
+      - name: Service hardening contract
+        run: bash tests/service-hardening-contract.sh
+
+      - name: QoL contract
+        run: bash tests/qol-contract.sh
+
+      - name: Permission contract
+        run: bash tests/permissions-contract.sh
+
+      - name: Documentation contract
+        run: bash tests/docs-contract.sh
+
+  compose:
+    name: Compose contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Docker versions
+        run: |
+          docker version
+          docker compose version
+
+      - name: Render supported Compose matrices
+        run: tests/compose-contract.sh
+
+  fake-ollama:
+    name: Fake Ollama contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Validate lightweight Ollama-compatible fixture
+        run: tests/ai-contract.sh
+
+  published-images:
+    name: Published image baseline
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Validate published compatibility images
+        run: tests/published-images.sh
+
+  windows-bridge:
+    name: Windows bridge
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Validate lds.bat contract
+        shell: pwsh
+        run: tests/windows-bridge.ps1
+
+
+  docs:
+    name: Documentation build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: docs/requirements.txt
+
+      - name: Install documentation dependencies
+        run: python -m pip install -r docs/requirements.txt
+
+      - name: Build documentation
+        run: sphinx-build -W --keep-going -b html docs docs/_build/html
+
+
+  runtime-build:
+    name: Runtime build compatibility
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/plan/docker-ecosystem-bottom-up')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Build current selected PHP/Node runtimes
+        run: bash tests/runtime-build-smoke.sh

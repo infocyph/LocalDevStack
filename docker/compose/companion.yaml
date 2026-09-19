@@ -16,8 +16,20 @@ services:
       - SOPS_CFG_DIR=/etc/share/sops/config
       - SOPS_GLOBAL_DIR=/etc/share/sops/global
       - SOPS_REPO_DIR=/etc/share/vhosts/sops
+      - COMPOSE_PROFILES=${COMPOSE_PROFILES:-}
+      - LDS_AI_ENABLED=${LDS_AI_ENABLED:-auto}
+      - LDS_AI_PROVIDER=${LDS_AI_PROVIDER:-ollama}
+      - LDS_AI_URL=${LDS_AI_URL:-http://llm-ollama:11434}
+      - LDS_AI_MODEL=${LDS_AI_MODEL:-qwen3:14b}
+      - LDS_AI_CONNECT_TIMEOUT=${LDS_AI_CONNECT_TIMEOUT:-2}
+      - LDS_AI_PREFLIGHT_TIMEOUT=${LDS_AI_PREFLIGHT_TIMEOUT:-5}
+      - LDS_AI_TIMEOUT=${LDS_AI_TIMEOUT:-1800}
+      - LDS_AI_AVAILABILITY_TTL=${LDS_AI_AVAILABILITY_TTL:-5}
+      - LDS_AI_MAX_CONTEXT_BYTES=${LDS_AI_MAX_CONTEXT_BYTES:-524288}
+      - LDS_AI_MAX_REQUEST_BYTES=${LDS_AI_MAX_REQUEST_BYTES:-1048576}
+      - LDS_AI_MAX_RESPONSE_BYTES=${LDS_AI_MAX_RESPONSE_BYTES:-2097152}
     volumes:
-      - "${PROJECT_DIR:-./../../../application}:/app"
+      - ${PROJECT_DIR:-./../../../application}:/app
       - lds_ssl_roots:/etc/share/rootCA
       - lds_apache_host:/etc/share/vhosts/apache
       - lds_nginx_host:/etc/share/vhosts/nginx
@@ -25,24 +37,50 @@ services:
       - lds_fpm_pools:/etc/share/vhosts/fpm
       - lds_composer_global:/etc/share/vhosts/composer
       - lds_git_config:/git-config
+      - lds_tools_state:/etc/share/state
       - ../../configuration/compose:/etc/share/vhosts/docker-compose
       - ../../configuration/scheduler/cron-jobs:/etc/share/scheduler/cron-jobs
       - ../../configuration/scheduler/supervisor:/etc/share/scheduler/supervisor
       - ../../configuration/sops/config:/etc/share/sops/config
       - ../../configuration/sops/global:/etc/share/sops/global
       - ../../configuration/sops/keys:/etc/share/sops/keys
-      - "../../configuration/ssh:/home/root/.ssh:ro"
-      - "${SOP_REPO:-./../../../sops-repo}:/etc/share/vhosts/sops"
+      - ../../configuration/ssh:/home/root/.ssh:ro
+      - ${SOP_REPO:-./../../../sops-repo}:/etc/share/vhosts/sops
       - ../../configuration/ssl:/etc/share/certs
       - ../../logs:/global/log:ro
       - /var/run/docker.sock:/var/run/docker.sock
     networks:
-      frontend:
-        ipv4_address: 172.28.0.13
-      backend:
-        ipv4_address: 172.29.0.10
-      datastore:
-        ipv4_address: 172.30.0.10
+      - frontend
+      - backend
+      - datastore
+
+  llm-ollama:
+    container_name: LLM_OLLAMA
+    hostname: llm-ollama
+    image: infocyph/llm-ollama:${LDS_LLM_ARCH}
+    restart: unless-stopped
+    profiles: [ai]
+    environment:
+      - LLM_OLLAMA_MODEL=${LDS_AI_MODEL:-qwen3:14b}
+      - LLM_OLLAMA_SYSTEM=${LLM_OLLAMA_SYSTEM:-}
+      - LLM_OLLAMA_INPUT_WARN_BYTES=${LLM_OLLAMA_INPUT_WARN_BYTES:-1048576}
+      - LLM_OLLAMA_INPUT_MAX_BYTES=${LLM_OLLAMA_INPUT_MAX_BYTES:-0}
+      - LLM_OLLAMA_ATTACHMENT_MAX_BYTES=${LLM_OLLAMA_ATTACHMENT_MAX_BYTES:-16777216}
+      - LLM_OLLAMA_ATTACHMENTS_MAX_BYTES=${LLM_OLLAMA_ATTACHMENTS_MAX_BYTES:-33554432}
+      - LLM_OLLAMA_ATTACHMENT_MAX_COUNT=${LLM_OLLAMA_ATTACHMENT_MAX_COUNT:-16}
+      - LLM_OLLAMA_PDF_MAX_PAGES=${LLM_OLLAMA_PDF_MAX_PAGES:-24}
+      - LLM_OLLAMA_PDF_DPI=${LLM_OLLAMA_PDF_DPI:-120}
+      - LLM_OLLAMA_ALLOW_LARGE_INPUT=${LLM_OLLAMA_ALLOW_LARGE_INPUT:-0}
+      - OLLAMA_IGPU_ENABLE=${LDS_AI_IGPU_ENABLE:-0}
+      - OLLAMA_NUM_PARALLEL=${OLLAMA_NUM_PARALLEL:-1}
+      - OLLAMA_MAX_LOADED_MODELS=${OLLAMA_MAX_LOADED_MODELS:-1}
+      - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-5m}
+      - OLLAMA_NO_CLOUD=${OLLAMA_NO_CLOUD:-1}
+    volumes:
+      - lds_llm:/root/.ollama
+    networks:
+      - frontend
+      - backend
 
   runner:
     container_name: RUNNER
@@ -69,10 +107,10 @@ services:
       - ../../logs/redis-insight:/global/log/redis-insight
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
-      - server-tools
+      server-tools:
+        condition: service_healthy
     networks:
-      backend:
-        ipv4_address: 172.29.0.11
+      - backend
 
   mailpit:
     container_name: MAILPIT
@@ -91,12 +129,11 @@ services:
       - lds_ssl_keys:/certs:ro
       - lds_mail:/data
     depends_on:
-      - server-tools
+      server-tools:
+        condition: service_healthy
     networks:
-      frontend:
-        ipv4_address: 172.28.0.12
-      backend:
-        ipv4_address: 172.29.0.12
+      - frontend
+      - backend
     healthcheck:
       test: [ "CMD", "wget", "-qO-", "http://127.0.0.1:8025/" ]
       interval: 10s
