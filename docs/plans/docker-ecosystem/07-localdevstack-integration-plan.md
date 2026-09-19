@@ -32,8 +32,8 @@ LocalDevStack implementation must begin against this tested ecosystem set:
 | Nginx | `infocyph/nginx:0.4.1` |
 | Apache | `infocyph/apache:0.4.2` |
 | Tools | `infocyph/tools:0.23.2` |
-| LLM standard | `infocyph/llm-sm:latest` |
-| LLM AMD | `infocyph/llm-sm:amd-latest` |
+| LLM standard | `infocyph/llm-ollama:latest` |
+| LLM AMD | `infocyph/llm-ollama:amd-latest` |
 
 The implemented image policy now follows the ecosystem moving aliases for LocalDevStack
 infrastructure. Standard LLM uses `latest`; AMD/ROCm uses `amd-latest`. Release
@@ -87,7 +87,7 @@ Host
         │     ├── admin.localhost   -> server-tools:9911
         │     ├── webmail.localhost -> mailpit:8025
         │     ├── db/ri/me/kibana convenience routes
-        │     └── llm.localhost     -> llm-sm:11434
+        │     └── llm-ollama.localhost     -> llm-ollama:11434
         │
         ├── apache 0.4.2 (optional backend)
         ├── PHP runtimes (local builds)
@@ -96,7 +96,7 @@ Host
         │     ├── host/domain/TLS/config control plane
         │     ├── monitoring/admin panel
         │     ├── askai / aiops / gitx AI consumer paths
-        │     └── http://llm-sm:11434
+        │     └── http://llm-ollama:11434
         │
         ├── runner 0.5
         │     └── Supervisor / cron / logrotate / sibling exec
@@ -104,7 +104,7 @@ Host
         ├── mailpit
         ├── databases and admin clients
         │
-        └── llm-sm current stable (optional)
+        └── llm-ollama current stable (optional)
               ├── qwen3:14b baked default
               ├── persistent /root/.ollama
               └── Ollama API :11434
@@ -113,13 +113,13 @@ Host
 Service-to-service AI traffic must use:
 
 ```text
-http://llm-sm:11434
+http://llm-ollama:11434
 ```
 
 Host/user-facing AI traffic must use:
 
 ```text
-https://llm.localhost
+https://llm-ollama.localhost
 ```
 
 Do not route Tools -> LLM traffic through Nginx.
@@ -172,12 +172,12 @@ Deleting volumes must remain an explicit destructive action.
 
 - AI is optional.
 - `docker-tools` is an AI consumer, never an Ollama runtime.
-- `docker-llm-sm` is the only LocalDevStack Ollama/model runtime.
-- LocalDevStack must remain fully usable when `llm-sm` is absent.
+- `docker-llm-ollama` is the only LocalDevStack Ollama/model runtime.
+- LocalDevStack must remain fully usable when `llm-ollama` is absent.
 - No automatic execution of model-generated shell, SQL or code is introduced.
 - No external/cloud AI fallback is added by LocalDevStack.
-- No Docker socket is mounted into `llm-sm`.
-- No repository/workspace is mounted into `llm-sm` by default.
+- No Docker socket is mounted into `llm-ollama`.
+- No repository/workspace is mounted into `llm-ollama` by default.
 
 ## 3.6 Single-stack compatibility
 
@@ -317,17 +317,17 @@ Validate:
 
 Do not download a 3B model on every LocalDevStack PR.
 
-Use a lightweight fake Ollama-compatible service named `llm-sm` for the normal PR test.
+Use a lightweight fake Ollama-compatible service named `llm-ollama` for the normal PR test.
 
 Validate:
 
-- Tools `askai --status` reaches `http://llm-sm:11434`;
+- Tools `askai --status` reaches `http://llm-ollama:11434`;
 - Tools `aiops provider` works;
-- Nginx `llm.localhost` reaches the fake service;
+- Nginx `llm-ollama.localhost` reaches the fake service;
 - streamed response is not buffered incorrectly;
 - AI absence leaves core services healthy.
 
-A manual/release-gate job may optionally exercise the real published `infocyph/llm-sm:latest`, because that image already has its own model-bearing runtime gate.
+A manual/release-gate job may optionally exercise the real published `infocyph/llm-ollama:latest`, because that image already has its own model-bearing runtime gate.
 
 ## 5.2 New `tests/`
 
@@ -373,7 +373,7 @@ SCRIPTOMATIC_REF=main
 
 Tools, Runner, Nginx and Apache are declared directly as their moving `:latest` product
 images. The LLM service is declared directly as
-`infocyph/llm-sm:${LDS_LLM_ARCH}`, where `LDS_LLM_ARCH` is derived from the effective
+`infocyph/llm-ollama:${LDS_LLM_ARCH}`, where `LDS_LLM_ARCH` is derived from the effective
 AI runtime (`latest` for CPU/NVIDIA, `amd-latest` for AMD/ROCm).
 
 Do not add `LDS_TOOLS_IMAGE`, `LDS_RUNNER_IMAGE`, `LDS_NGINX_IMAGE`,
@@ -408,7 +408,7 @@ image: ${LDS_NGINX_IMAGE:-infocyph/nginx:0.4.1}
 image: ${LDS_APACHE_IMAGE:-infocyph/apache:0.4.2}
 ```
 
-Do the equivalent for `llm-sm`.
+Do the equivalent for `llm-ollama`.
 
 ## 6.3 Update command / future dependency bumps
 
@@ -532,9 +532,9 @@ Validate all of these without fixed IPs:
 - Nginx -> DB UIs;
 - Nginx -> Apache;
 - Nginx -> Node app;
-- Nginx -> llm-sm;
+- Nginx -> llm-ollama;
 - Tools -> DB/service diagnostics;
-- Tools -> llm-sm;
+- Tools -> llm-ollama;
 - Runner -> PHP/Node sibling execution;
 - DB clients -> databases;
 - Filebeat -> Elasticsearch;
@@ -546,15 +546,15 @@ Validate all of these without fixed IPs:
 
 AI should become a first-class optional LocalDevStack capability while remaining absent from the default stack.
 
-## 8.1 Single `llm-sm` service in `docker/compose/companion.yaml`
+## 8.1 Single `llm-ollama` service in `docker/compose/companion.yaml`
 
 Base service:
 
 ```yaml
 services:
-  llm-sm:
-    container_name: LLM_SM
-    image: infocyph/llm-sm:${LDS_LLM_ARCH}
+  llm-ollama:
+    container_name: LLM_OLLAMA
+    image: infocyph/llm-ollama:${LDS_LLM_ARCH}
     restart: unless-stopped
     profiles: [ai]
     volumes:
@@ -566,9 +566,9 @@ services:
 
 Important rules:
 
-- service key must be exactly `llm-sm`;
-- preserve the existing fixed container name `LLM_SM` for single-stack compatibility;
-- route internally by the Compose service/hostname `llm-sm`, not by the fixed container name;
+- service key must be exactly `llm-ollama`;
+- preserve the existing fixed container name `LLM_OLLAMA` for single-stack compatibility;
+- route internally by the Compose service/hostname `llm-ollama`, not by the fixed container name;
 - do not set a fixed IP;
 - do not mount Docker socket;
 - do not expose `11434` to all interfaces;
@@ -578,8 +578,8 @@ Important rules:
 
 Why both networks:
 
-- Nginx must reach `llm-sm:11434` for `https://llm.localhost`;
-- Tools must reach `llm-sm:11434` directly for AI consumer commands.
+- Nginx must reach `llm-ollama:11434` for `https://llm-ollama.localhost`;
+- Tools must reach `llm-ollama:11434` directly for AI consumer commands.
 
 ## 8.2 `docker/compose/main.yaml` volume
 
@@ -641,7 +641,7 @@ selects the AMD/ROCm image. `lds llm runtime ...` remains the explicit override.
 Default LocalDevStack access is:
 
 ```text
-https://llm.localhost
+https://llm-ollama.localhost
 ```
 
 Do not expose `11434` by default.
@@ -651,7 +651,7 @@ same temporary `docker/.runtime/ai.*` fragment used for hardware augmentation, b
 only:
 
 ```text
-127.0.0.1:${LLM_SM_PORT:-11434}:11434
+127.0.0.1:${LLM_OLLAMA_PORT:-11434}:11434
 ```
 
 Never default to `0.0.0.0:11434`.
@@ -663,14 +663,14 @@ No new Nginx image changes are required.
 `nginx:0.4.1` already reserves:
 
 ```text
-llm.localhost -> llm-sm:11434
+llm-ollama.localhost -> llm-ollama:11434
 ```
 
 and uses lazy Docker DNS resolution plus streaming proxy behavior.
 
 LocalDevStack must validate:
 
-- certificate coverage for `llm.localhost`;
+- certificate coverage for `llm-ollama.localhost`;
 - HTTP -> HTTPS redirect;
 - `/api/tags`;
 - `/api/generate`;
@@ -686,7 +686,7 @@ Pass the published Tools AI contract into `server-tools`:
 ```text
 LDS_AI_ENABLED=auto
 LDS_AI_PROVIDER=ollama
-LDS_AI_URL=http://llm-sm:11434
+LDS_AI_URL=http://llm-ollama:11434
 LDS_AI_MODEL=qwen3:14b
 ```
 
@@ -704,31 +704,31 @@ Also pass through supported advanced limits only when the user sets them:
 
 Keep connection and preflight bounds short, but give generation/analysis a 30-minute
 default. Forward `LDS_AI_TIMEOUT` to the Nginx container as
-`LLM_PROXY_TIMEOUT_SECONDS` so the dedicated `llm.localhost` route has the same
+`LLM_PROXY_TIMEOUT_SECONDS` so the dedicated `llm-ollama.localhost` route has the same
 long-running request budget. Do not reintroduce a shorter independent UI/process timeout
 for Admin AI analysis.
 
 Why LocalDevStack should default `LDS_AI_MODEL=qwen3:14b`:
 
-- `llm-sm:latest` ships that model;
+- `llm-ollama:latest` ships that model;
 - the 14B Qwen3 default provides materially stronger instruction/structured-output behavior than the previous 3B model while remaining practical on modern 32 GB unified-memory developer hosts;
 - Tools intentionally reports ambiguity when multiple models are installed and no model is selected;
 - users may pull more models without breaking Tools AI workflows.
 
 Users can change `LDS_AI_MODEL` explicitly. LocalDevStack forwards it to the provider
-as `LLM_SM_MODEL` so Tools and `lds llm` share the same default model.
+as `LLM_OLLAMA_MODEL` so Tools and `lds llm` share the same default model.
 
-Provider settings accepted through `docker/.env` and forwarded to `llm-sm` are:
+Provider settings accepted through `docker/.env` and forwarded to `llm-ollama` are:
 
-- `LLM_SM_SYSTEM`;
-- `LLM_SM_INPUT_WARN_BYTES`;
-- `LLM_SM_INPUT_MAX_BYTES`;
-- `LLM_SM_ATTACHMENT_MAX_BYTES`;
-- `LLM_SM_ATTACHMENTS_MAX_BYTES`;
-- `LLM_SM_ATTACHMENT_MAX_COUNT`;
-- `LLM_SM_PDF_MAX_PAGES`;
-- `LLM_SM_PDF_DPI`;
-- `LLM_SM_ALLOW_LARGE_INPUT`;
+- `LLM_OLLAMA_SYSTEM`;
+- `LLM_OLLAMA_INPUT_WARN_BYTES`;
+- `LLM_OLLAMA_INPUT_MAX_BYTES`;
+- `LLM_OLLAMA_ATTACHMENT_MAX_BYTES`;
+- `LLM_OLLAMA_ATTACHMENTS_MAX_BYTES`;
+- `LLM_OLLAMA_ATTACHMENT_MAX_COUNT`;
+- `LLM_OLLAMA_PDF_MAX_PAGES`;
+- `LLM_OLLAMA_PDF_DPI`;
+- `LLM_OLLAMA_ALLOW_LARGE_INPUT`;
 - `OLLAMA_NUM_PARALLEL`;
 - `OLLAMA_MAX_LOADED_MODELS`;
 - `OLLAMA_KEEP_ALIVE`;
@@ -778,17 +778,17 @@ lds llm json ...
 lds llm ai-commit ...
 ```
 
-These should delegate to the bundled `llm-sm` CLI inside the provider container.
+These should delegate to the bundled `llm-ollama` CLI inside the provider container.
 
 LocalDevStack must not reimplement Ollama/model logic.
 
 ## 8.8 Workspace/repository access
 
-Default: no project mount into `llm-sm`.
+Default: no project mount into `llm-ollama`.
 
 Tools already has the LocalDevStack project mounted at `/app` and its AI layer applies size/sensitivity/redaction guards.
 
-For direct `llm-sm` repository-aware commands:
+For direct `llm-ollama` repository-aware commands:
 
 - prefer stdin/file transfer where practical;
 - optionally provide a separate read-only workspace override;
@@ -799,22 +799,22 @@ Never automatically mount arbitrary host repositories.
 
 ## 8.9 Graphify
 
-Do not install Graphify into `llm-sm` or Tools solely for this integration.
+Do not install Graphify into `llm-ollama` or Tools solely for this integration.
 
 Supported patterns:
 
 - `lds graphify [path] [extract-options...]` -> host Graphify workflow against the
   loopback-published provider, using `LDS_AI_MODEL` and `LDS_AI_TIMEOUT` by default;
-- explicit host Graphify may use `https://llm.localhost/v1` or an overridden
+- explicit host Graphify may use `https://llm-ollama.localhost/v1` or an overridden
   `OLLAMA_BASE_URL`;
-- container Graphify on a shared network -> `http://llm-sm:11434/v1`;
+- container Graphify on a shared network -> `http://llm-ollama:11434/v1`;
 - Tools `aiops graphify --file <output>` -> analyze an explicitly supplied Graphify output file.
 
 The `lds graphify` workflow runs `extract --backend ollama --no-cluster` followed by
 `cluster-only <same-path> --backend ollama` so the requested two-phase flow clusters
 once rather than re-clustering immediately after the extraction command's default
 clustering pass. Graphify remains a host/external consumer and is not installed into
-`llm-sm` or Tools.
+`llm-ollama` or Tools.
 
 ## 8.10 AI admin panel
 
@@ -1111,7 +1111,7 @@ Only LocalDevStack orchestration/delegation:
 - profile enabled?;
 - compose override selection;
 - `lds ai` -> Tools;
-- `lds llm` -> llm-sm;
+- `lds llm` -> llm-ollama;
 - model/runtime status.
 
 No provider implementation.
@@ -1211,7 +1211,7 @@ or equivalent internal helpers invoked by `lds`.
 
 Keep them thin.
 
-They must not duplicate `askai`, `aiops` or `llm-sm` logic.
+They must not duplicate `askai`, `aiops` or `llm-ollama` logic.
 
 ---
 
@@ -1369,7 +1369,7 @@ Runner helpers and user scheduler definitions may execute into sibling container
 1. inventory exact Docker commands used;
 2. classify read/write/destructive operations;
 3. retain required socket mounts;
-4. ensure `llm-sm` never receives the socket;
+4. ensure `llm-ollama` never receives the socket;
 5. do not mount socket into ordinary databases/admin clients;
 6. document that LocalDevStack is trusted local developer infrastructure.
 
@@ -1602,7 +1602,7 @@ https://db.localhost
 https://ri.localhost
 https://me.localhost
 https://kibana.localhost
-https://llm.localhost   # when AI enabled
+https://llm-ollama.localhost   # when AI enabled
 ```
 
 Only show profile-dependent URLs when relevant.
@@ -1706,7 +1706,7 @@ Explain Docker DNS routing.
 
 ## `docs/guides/tls-and-certificates.rst`
 
-Ensure `llm.localhost` and convenience-host certificate behavior is covered.
+Ensure `llm-ollama.localhost` and convenience-host certificate behavior is covered.
 
 ## New `docs/guides/local-ai.rst`
 
@@ -1714,7 +1714,7 @@ Cover:
 
 - enabling AI;
 - CPU/NVIDIA/AMD;
-- `https://llm.localhost`;
+- `https://llm-ollama.localhost`;
 - `lds ai`;
 - `lds llm`;
 - model persistence;
@@ -1764,7 +1764,7 @@ Detect/rebuild only when relevant inputs changed.
 
 ## Existing users without AI
 
-Their stack should not pull `llm-sm`, create the model volume or consume GPU resources unless AI is selected.
+Their stack should not pull `llm-ollama`, create the model volume or consume GPU resources unless AI is selected.
 
 ---
 
@@ -1831,11 +1831,11 @@ With fake provider on normal CI:
 
 With real provider on manual/release gate when feasible:
 
-- `infocyph/llm-sm:latest`;
+- `infocyph/llm-ollama:latest`;
 - baked `qwen3:14b`;
 - persistent model volume;
 - Tools generation;
-- Nginx `llm.localhost`.
+- Nginx `llm-ollama.localhost`.
 
 ## Platforms
 
@@ -1895,8 +1895,8 @@ This LocalDevStack phase is complete when all of the following are true:
 9. Mailpit remains persistent and TLS-capable.
 10. Runner cron/Supervisor/logrotate workflows still work.
 11. AI can be omitted completely with no degradation to the default product.
-12. When AI is enabled, `llm-sm` persists models and is reachable internally at `http://llm-sm:11434`.
-13. `https://llm.localhost` works through Nginx streaming proxy behavior.
+12. When AI is enabled, `llm-ollama` persists models and is reachable internally at `http://llm-ollama:11434`.
+13. `https://llm-ollama.localhost` works through Nginx streaming proxy behavior.
 14. Tools `askai`, `aiops` and AI-enabled `gitx` use the separate LLM provider.
 15. No LocalDevStack component embeds a second Ollama runtime.
 16. No AI component auto-executes model-generated commands.
@@ -2019,7 +2019,7 @@ All planned LocalDevStack integration batches are implemented on branch `plan/do
    - optional `ai` profile;
    - persistent `LLMModels`;
    - CPU/NVIDIA/AMD modes;
-   - `https://llm.localhost`;
+   - `https://llm-ollama.localhost`;
    - loopback-only optional direct host port;
    - Tools consumer wiring;
    - `lds ai` / `lds llm` separation;
@@ -2068,7 +2068,7 @@ All planned LocalDevStack integration batches are implemented on branch `plan/do
 - Prefer a moving Alpine variant when an image family provides a suitable one; otherwise use its normal moving latest alias.
 - PostgreSQL defaults to `postgres:alpine`.
 - Tools, Runner, Nginx and Apache consume their published `:latest` aliases.
-- One LLM service uses `infocyph/llm-sm:${LDS_LLM_ARCH}`; CPU/NVIDIA map to `latest`, AMD/ROCm maps to `amd-latest`.
+- One LLM service uses `infocyph/llm-ollama:${LDS_LLM_ARCH}`; CPU/NVIDIA map to `latest`, AMD/ROCm maps to `amd-latest`.
 - Elasticsearch, Kibana and Filebeat remain version-aligned on the tested stable version because their required image contract does not provide a suitable moving `latest` alias.
 - PHP/Node runtime selection remains user-driven and version-specific.
 - Existing named volumes and container names remain intentionally stable for this release.
@@ -2115,7 +2115,7 @@ No legacy LocalDevStack command/service/storage feature was removed:
 
 New runtime additions are additive:
 
-- `llm-sm`;
+- `llm-ollama`;
 - `LLMModels`;
 - `ToolsState`;
 - AI/QoL/diagnostic commands.
@@ -2185,7 +2185,7 @@ This is a non-blocking follow-up, not a release defect.
 The current published LLM-SM image contract is **linux/amd64 only**. LocalDevStack
 remains usable on arm64 with the `ai` profile disabled.
 
-LocalDevStack intentionally does not mount a repository/workspace into `llm-sm` by
+LocalDevStack intentionally does not mount a repository/workspace into `llm-ollama` by
 default. Direct model/API/chat/stdin workflows are supported. Repository-aware analysis
 is supported through the Tools consumer layer (`lds ai review`, `repo-review`).
 
@@ -2244,12 +2244,12 @@ docker/compose/companion.yaml
 with:
 
 ```yaml
-llm-sm:
-  container_name: LLM_SM
-  image: infocyph/llm-sm:${LDS_LLM_ARCH}
+llm-ollama:
+  container_name: LLM_OLLAMA
+  image: infocyph/llm-ollama:${LDS_LLM_ARCH}
   profiles: [ai]
   environment:
-    LLM_SM_MODEL: ${LDS_AI_MODEL:-qwen3:14b}
+    LLM_OLLAMA_MODEL: ${LDS_AI_MODEL:-qwen3:14b}
     OLLAMA_IGPU_ENABLE: ${LDS_AI_IGPU_ENABLE:-0}
     # provider input/PDF/Ollama tuning values are forwarded from docker/.env
 ```
@@ -2289,7 +2289,7 @@ Hardware and optional direct-port settings are generated by `lds` only for the c
 
 - NVIDIA -> `gpus: all`;
 - AMD -> `/dev/kfd` and `/dev/dri`;
-- direct host API -> `127.0.0.1:${LLM_SM_PORT:-11434}:11434`.
+- direct host API -> `127.0.0.1:${LLM_OLLAMA_PORT:-11434}:11434`.
 
 The generated fragment is temporary, is not part of `configuration/compose/`, and is removed after the Compose command completes.
 
