@@ -121,7 +121,7 @@ The certificate SAN set includes at least::
 and Tools can include generated domain/service names.
 
 The wildcard covers built-in convenience endpoints such as ``admin.localhost``,
-``webmail.localhost``, and ``llm.localhost``.
+``webmail.localhost``, and ``llm-ollama.localhost``.
 
 Working in a Domain Container
 -----------------------------
