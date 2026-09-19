@@ -105,7 +105,7 @@ Host
         ├── databases and admin clients
         │
         └── llm-sm current stable (optional)
-              ├── qwen2.5:3b baked default
+              ├── qwen3:14b baked default
               ├── persistent /root/.ollama
               └── Ollama API :11434
 ```
@@ -600,7 +600,7 @@ Mount it to:
 
 The volume is authoritative runtime model state.
 
-A fresh volume receives the image-baked `qwen2.5:3b`.
+A fresh volume receives the image-baked `qwen3:14b`.
 
 Existing populated volumes must never be silently replaced/reset during upgrades.
 
@@ -687,7 +687,7 @@ Pass the published Tools AI contract into `server-tools`:
 LDS_AI_ENABLED=auto
 LDS_AI_PROVIDER=ollama
 LDS_AI_URL=http://llm-sm:11434
-LDS_AI_MODEL=qwen2.5:3b
+LDS_AI_MODEL=qwen3:14b
 ```
 
 Allow user overrides.
@@ -708,9 +708,10 @@ default. Forward `LDS_AI_TIMEOUT` to the Nginx container as
 long-running request budget. Do not reintroduce a shorter independent UI/process timeout
 for Admin AI analysis.
 
-Why LocalDevStack should default `LDS_AI_MODEL=qwen2.5:3b`:
+Why LocalDevStack should default `LDS_AI_MODEL=qwen3:14b`:
 
 - `llm-sm:latest` ships that model;
+- the 14B Qwen3 default provides materially stronger instruction/structured-output behavior than the previous 3B model while remaining practical on modern 32 GB unified-memory developer hosts;
 - Tools intentionally reports ambiguity when multiple models are installed and no model is selected;
 - users may pull more models without breaking Tools AI workflows.
 
@@ -897,7 +898,7 @@ Prompt only relevant AI settings:
 
 - enable AI yes/no;
 - detected runtime is shown, not prompted by default;
-- preferred model default `qwen2.5:3b`;
+- preferred model default `qwen3:14b`;
 - optional direct localhost port yes/no.
 
 Do not ask users for low-level timeout/byte-limit settings during normal setup.
@@ -1831,7 +1832,7 @@ With fake provider on normal CI:
 With real provider on manual/release gate when feasible:
 
 - `infocyph/llm-sm:latest`;
-- baked `qwen2.5:3b`;
+- baked `qwen3:14b`;
 - persistent model volume;
 - Tools generation;
 - Nginx `llm.localhost`.
@@ -2248,7 +2249,8 @@ llm-sm:
   image: infocyph/llm-sm:${LDS_LLM_ARCH}
   profiles: [ai]
   environment:
-    LLM_SM_MODEL: ${LDS_AI_MODEL:-qwen2.5:3b}
+    LLM_SM_MODEL: ${LDS_AI_MODEL:-qwen3:14b}
+    OLLAMA_IGPU_ENABLE: ${LDS_AI_IGPU_ENABLE:-0}
     # provider input/PDF/Ollama tuning values are forwarded from docker/.env
 ```
 
@@ -2269,11 +2271,17 @@ Initial runtime detection is conservative:
 - both `/dev/kfd` and `/dev/dri` present -> `amd`;
 - otherwise -> `cpu`.
 
-An AMD CPU alone does not select the ROCm image.
+An AMD CPU alone does not select the ROCm image. When the effective runtime is `amd`
+and the host CPU vendor is AMD, persist `LDS_AI_IGPU_ENABLE=1` and forward it to the
+provider as `OLLAMA_IGPU_ENABLE=1`; otherwise the derived default is `0`. This avoids
+Ollama's integrated-GPU filter silently dropping Ryzen integrated Radeon devices that are
+otherwise available through the ROCm device nodes.
 
 Explicit `LDS_AI_RUNTIME` / `lds llm runtime ...` selection remains authoritative.
-`LDS_LLM_ARCH` is derived from that effective runtime and must not become an
-independent manual image-version selector.
+`LDS_LLM_ARCH` and the automatic `LDS_AI_IGPU_ENABLE` value are derived from that
+effective runtime/host combination and must not become independent image-version
+selectors. A deliberately persisted iGPU override remains user-controlled until the
+runtime selector is invoked again.
 
 ## Ephemeral hardware/host-port Compose augmentation
 
