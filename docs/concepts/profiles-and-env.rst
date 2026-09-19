@@ -251,10 +251,19 @@ Provider-side options accepted in ``docker/.env`` include::
    OLLAMA_KEEP_ALIVE=5m
    OLLAMA_NO_CLOUD=1
 
-Tools consumer settings remain separate and include
-``LDS_AI_CONNECT_TIMEOUT``, ``LDS_AI_PREFLIGHT_TIMEOUT``, ``LDS_AI_TIMEOUT``,
-``LDS_AI_AVAILABILITY_TTL``, ``LDS_AI_MAX_CONTEXT_BYTES``,
-``LDS_AI_MAX_REQUEST_BYTES``, and ``LDS_AI_MAX_RESPONSE_BYTES``.
+Tools consumer settings remain separate::
+
+   LDS_AI_CONNECT_TIMEOUT=2
+   LDS_AI_PREFLIGHT_TIMEOUT=5
+   LDS_AI_TIMEOUT=1800
+   LDS_AI_AVAILABILITY_TTL=5
+   LDS_AI_MAX_CONTEXT_BYTES=524288
+   LDS_AI_MAX_REQUEST_BYTES=1048576
+   LDS_AI_MAX_RESPONSE_BYTES=2097152
+
+Only generation/analysis receives the long 1800-second default. Connect and preflight
+checks stay fast. The same generation timeout is passed to Nginx as
+``LLM_PROXY_TIMEOUT_SECONDS`` for the dedicated LLM proxy path.
 
 The LLM service itself is tracked only in ``docker/compose/companion.yaml``. There are
 no tracked AI runtime-variant YAML files; ``lds`` creates temporary fragments under
