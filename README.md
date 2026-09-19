@@ -166,8 +166,8 @@ Examples:
 - PostgreSQL: `postgres:alpine`
 - Tools / Runner / Nginx / Apache: published `:latest`
 - MySQL / MariaDB / MongoDB / Redis: their supported moving defaults
-- local AI: `infocyph/llm-sm:latest`
-- AMD local AI: `infocyph/llm-sm:amd-latest`
+- local AI: `infocyph/llm-ollama:latest`
+- AMD local AI: `infocyph/llm-ollama:amd-latest`
 
 Elasticsearch, Kibana, and Filebeat stay on one aligned Elastic version.
 
@@ -239,7 +239,7 @@ LocalDevStack auto-detects the preferred AI runtime during setup: NVIDIA when `n
 The provider uses one image/tag contract:
 
 ```text
-infocyph/llm-sm:${LDS_LLM_ARCH}
+infocyph/llm-ollama:${LDS_LLM_ARCH}
 ```
 
 CPU/NVIDIA map to `LDS_LLM_ARCH=latest`; AMD/ROCm maps to `LDS_LLM_ARCH=amd-latest`. `LDS_LLM_ARCH` is derived by the LocalDevStack runtime selector; it is not a separate version choice users should maintain manually. `lds llm runtime ...` also refreshes `LDS_AI_IGPU_ENABLE` to match the selected runtime and host CPU.
