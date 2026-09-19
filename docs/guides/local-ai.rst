@@ -19,7 +19,7 @@ The default consumer contract is::
    LDS_AI_ENABLED=auto
    LDS_AI_PROVIDER=ollama
    LDS_AI_URL=http://llm-sm:11434
-   LDS_AI_MODEL=qwen2.5:3b
+   LDS_AI_MODEL=qwen3:14b
 
 The explicit model default avoids ambiguity when multiple models are installed in the
 persistent Ollama store.
@@ -33,7 +33,7 @@ LocalDevStack detects the preferred runtime during environment setup. Detection 
 - AMD only when both ``/dev/kfd`` and ``/dev/dri`` are present for ROCm;
 - CPU otherwise.
 
-An AMD CPU alone does **not** select the AMD image.
+An AMD CPU alone does **not** select the AMD image. When the effective runtime is ``amd`` and the host CPU vendor is AMD, LocalDevStack persists ``LDS_AI_IGPU_ENABLE=1`` and forwards it to Ollama as ``OLLAMA_IGPU_ENABLE=1`` so integrated Radeon GPUs are not discarded by Ollama's default iGPU filter.
 
 The single provider service uses::
 
@@ -55,7 +55,7 @@ Override detection explicitly when required::
    lds llm runtime nvidia
    lds llm runtime amd
 
-Changing runtime mode updates both ``LDS_AI_RUNTIME`` and ``LDS_LLM_ARCH`` in ``docker/.env``. Recreate/start the service afterward so the Compose override changes take effect.
+Changing runtime mode updates ``LDS_AI_RUNTIME``, ``LDS_LLM_ARCH`` and the derived ``LDS_AI_IGPU_ENABLE`` value in ``docker/.env``. Recreate/start the service afterward so the Compose override and provider environment changes take effect.
 
 Access
 ------
@@ -198,10 +198,13 @@ These provider settings can be placed in ``docker/.env`` and are forwarded to
    LLM_SM_PDF_MAX_PAGES=24
    LLM_SM_PDF_DPI=120
    LLM_SM_ALLOW_LARGE_INPUT=0
+   LDS_AI_IGPU_ENABLE=1   # auto-persisted for AMD CPU + AMD runtime; otherwise 0
    OLLAMA_NUM_PARALLEL=1
    OLLAMA_MAX_LOADED_MODELS=1
    OLLAMA_KEEP_ALIVE=5m
    OLLAMA_NO_CLOUD=1
+
+``LDS_AI_IGPU_ENABLE`` is forwarded as ``OLLAMA_IGPU_ENABLE``. The automatic value is ``1`` only for an AMD CPU with the AMD runtime selected; users may override the persisted value deliberately.
 
 ``LLM_SM_INPUT_MAX_BYTES=0`` disables only the hard text/diff ceiling. Attachment and
 PDF-vision limits remain active unless their own value is set to ``0``.
