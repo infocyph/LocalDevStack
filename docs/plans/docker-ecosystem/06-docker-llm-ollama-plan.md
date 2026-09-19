@@ -175,18 +175,18 @@ Current LocalDevStack controls:
 - `LDS_AI_RUNTIME` selects `cpu`, `nvidia`, or `amd` when explicitly configured;
 - `LDS_LLM_ARCH` is derived from the effective runtime (`latest` for CPU/NVIDIA,
   `amd-latest` for AMD/ROCm);
-- `LDS_LLM_HOST_PORT` controls optional direct loopback exposure;
-- `LLM_OLLAMA_PORT` controls that loopback host port;
 - provider input/PDF/Ollama tuning values are forwarded from LocalDevStack
-  `docker/.env`.
+  `docker/.env`;
+- host access is owned by LocalDevStack Nginx, not by the provider container.
 
 Compose ownership:
 
 - one tracked `llm-ollama` service in `docker/compose/companion.yaml`;
 - no tracked `ai.yaml`, `ai-nvidia.yaml`, `ai-amd.yaml`, or
   `ai-host-port.yaml`;
-- NVIDIA, AMD/ROCm, and host-port additions are generated temporarily under
-  `docker/.runtime/` by `lds`.
+- NVIDIA and AMD/ROCm additions are generated temporarily under
+  `docker/.runtime/` by `lds`;
+- Nginx publishes the fixed loopback-only native endpoint on host port `11434`.
 
 Persistence:
 
@@ -204,7 +204,9 @@ Networking:
 
 - internal consumers use `http://llm-ollama:11434`;
 - Nginx exposes `https://llm-ollama.localhost`;
-- direct host `11434`-style access is opt-in and loopback-only.
+- Nginx also exposes `http://llm-ollama.localhost:11434` through a fixed
+  loopback-only host bind;
+- the provider container itself has no published host port.
 
 User/provider commands are invoked through `lds llm ...`, not a bare
 `docker compose exec` from the LocalDevStack repository root.
@@ -216,7 +218,7 @@ User/provider commands are invoked through `lds llm ...`, not a bare
 3. Standard and AMD tags are selectable.
 4. Named volume persists pulled models across container recreation.
 5. Other LocalDevStack containers can reach Ollama by service DNS.
-6. Host clients can reach it through an explicitly configured loopback port when enabled.
+6. Host clients can reach it through Nginx at the fixed loopback-only native Ollama endpoint.
 7. `lds llm ...` delegates to the bundled provider CLI through LocalDevStack's Compose wrapper.
 8. No project/repository bind mount is required for normal provider operation.
 9. No Graphify/LocalDevStack-specific package is added to the image solely for integration.
