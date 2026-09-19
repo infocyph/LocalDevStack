@@ -29,7 +29,7 @@ services:
       - LDS_AI_MAX_REQUEST_BYTES
       - LDS_AI_MAX_RESPONSE_BYTES
     volumes:
-      - "${PROJECT_DIR:-./../../../application}:/app"
+      - ${PROJECT_DIR:-./../../../application}:/app
       - lds_ssl_roots:/etc/share/rootCA
       - lds_apache_host:/etc/share/vhosts/apache
       - lds_nginx_host:/etc/share/vhosts/nginx
@@ -44,8 +44,8 @@ services:
       - ../../configuration/sops/config:/etc/share/sops/config
       - ../../configuration/sops/global:/etc/share/sops/global
       - ../../configuration/sops/keys:/etc/share/sops/keys
-      - "../../configuration/ssh:/home/root/.ssh:ro"
-      - "${SOP_REPO:-./../../../sops-repo}:/etc/share/vhosts/sops"
+      - ../../configuration/ssh:/home/root/.ssh:ro
+      - ${SOP_REPO:-./../../../sops-repo}:/etc/share/vhosts/sops
       - ../../configuration/ssl:/etc/share/certs
       - ../../logs:/global/log:ro
       - /var/run/docker.sock:/var/run/docker.sock
