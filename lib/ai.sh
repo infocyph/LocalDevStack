@@ -58,7 +58,7 @@ cmd_graphify() {
   local base_url timeout model api_key graphify_bin arg next_is_model=0 next_is_timeout=0
   base_url="${OLLAMA_BASE_URL:-$(_graphify_local_base_url)}"
   timeout="${GRAPHIFY_API_TIMEOUT:-$(compose_control_value LDS_AI_TIMEOUT 1800)}"
-  model="${OLLAMA_MODEL:-$(compose_control_value LDS_AI_MODEL qwen2.5:3b)}"
+  model="${OLLAMA_MODEL:-$(compose_control_value LDS_AI_MODEL qwen3:14b)}"
   api_key="${OLLAMA_API_KEY:-local}"
 
   # Keep explicit model/timeout overrides consistent across extraction and clustering.
@@ -130,12 +130,14 @@ cmd_llm() {
     fi
     case "${mode,,}" in
     cpu | nvidia | amd)
-      local normalized arch
+      local normalized arch igpu_enable
       normalized="${mode,,}"
       arch="$(llm_arch_for_runtime "$normalized")"
+      igpu_enable="$(ai_igpu_default_for_runtime "$normalized")"
       update_env "$ENV_DOCKER" LDS_AI_RUNTIME "$normalized"
       update_env "$ENV_DOCKER" LDS_LLM_ARCH "$arch"
-      ok "LLM runtime set to $normalized (infocyph/llm-sm:$arch). Recreate llm-sm to apply the change."
+      update_env "$ENV_DOCKER" LDS_AI_IGPU_ENABLE "$igpu_enable"
+      ok "LLM runtime set to $normalized (infocyph/llm-sm:$arch, iGPU=$igpu_enable). Recreate llm-sm to apply the change."
       ;;
     *) die "llm runtime <cpu|nvidia|amd>" ;;
     esac
