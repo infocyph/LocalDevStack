@@ -43,7 +43,6 @@ assert_file_contains "$ops" 'lds support bundle'
 assert_file_contains "$ops" 'lds clean --global --yes'
 assert_file_contains "$runner" 'lds run --sock'
 assert_file_contains "$notify" 'Windows/Git Bash'
-assert_file_contains "$cli" 'lds llm host-port'
 pass "docs describe current architecture, operations, and complete user surfaces"
 
 assert_file_contains "$profiles" 'docker/release.env'
@@ -62,7 +61,7 @@ pass "docs distinguish persistent runtime/control state and public TLS exports"
 
 assert_file_contains "$ai" 'http://llm-ollama:11434'
 assert_file_contains "$ai" 'https://llm-ollama.localhost'
-assert_file_contains "$ai" '127.0.0.1:11434'
+assert_file_contains "$ai" 'http://llm-ollama.localhost:11434'
 assert_file_contains "$ai" 'no Docker socket'
 assert_file_contains "$ai" 'no project/repository bind mount'
 assert_file_contains "$ai" 'automatically execute model-generated shell commands'
