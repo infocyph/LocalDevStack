@@ -42,8 +42,7 @@ docker_compose() {
   local -a env_files=(--env-file "$ENV_RELEASE")
   [[ -r "$ENV_DOCKER" ]] && env_files+=(--env-file "$ENV_DOCKER")
 
-  local ai_runtime ai_host_port llm_arch llm_port runtime_override=""
-  local ai_host_port_enabled=0
+  local ai_runtime llm_arch runtime_override=""
   local -a runtime_f=()
 
   ai_runtime="$(compose_control_value LDS_AI_RUNTIME "")"
@@ -57,18 +56,7 @@ docker_compose() {
   llm_arch="$(llm_arch_for_runtime "$ai_runtime")" ||
     die "Cannot resolve LLM image tag for runtime: $ai_runtime"
 
-  ai_host_port="$(compose_control_value LDS_LLM_HOST_PORT 0)"
-  case "${ai_host_port,,}" in
-  "" | 0 | false | no | off) ;;
-  1 | true | yes | on) ai_host_port_enabled=1 ;;
-  *) die "Invalid LDS_LLM_HOST_PORT: $ai_host_port (expected 0|1)" ;;
-  esac
-
-  llm_port="$(compose_control_value LLM_OLLAMA_PORT 11434)"
-  [[ "$llm_port" =~ ^[0-9]+$ ]] && ((llm_port >= 1 && llm_port <= 65535)) ||
-    die "Invalid LLM_OLLAMA_PORT: $llm_port (expected 1-65535)"
-
-  if [[ "$ai_runtime" != "cpu" || "$ai_host_port_enabled" == "1" ]]; then
+  if [[ "$ai_runtime" != "cpu" ]]; then
     mkdir -p "$CFG/.runtime"
     runtime_override="$(mktemp "$CFG/.runtime/ai.XXXXXX")" ||
       die "Unable to create temporary AI Compose override"
@@ -83,10 +71,6 @@ docker_compose() {
         printf '%s\n' '    devices:'           '      - /dev/kfd:/dev/kfd'           '      - /dev/dri:/dev/dri'
         ;;
       esac
-      if ((ai_host_port_enabled)); then
-        printf '%s\n' '    ports:'
-        printf '      - "127.0.0.1:%s:11434"\n' "$llm_port"
-      fi
     } >"$runtime_override"
 
     runtime_f=(-f "$runtime_override")
