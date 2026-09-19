@@ -52,7 +52,7 @@ assert_contains "$urls" "https://admin.localhost"
 assert_contains "$urls" "https://webmail.localhost"
 assert_contains "$urls" "https://db.localhost"
 assert_contains "$urls" "https://ri.localhost"
-assert_contains "$urls" "https://llm.localhost"
+assert_contains "$urls" "https://llm-ollama.localhost"
 if grep -Fq "https://kibana.localhost" <<<"$urls"; then
   fail "urls must not show disabled Elasticsearch profile URL"
 fi
