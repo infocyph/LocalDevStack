@@ -54,7 +54,7 @@ pass "latest Tools reaches the separate provider contract"
 if find "$ROOT/docker/compose" -maxdepth 1 -type f -name 'ai-*.yaml' -print -quit | grep -q .; then
   fail "AI-specific Compose overlays must be generated ephemerally"
 fi
-assert_file_contains "$ROOT/docker/compose/companion.yaml" 'image: infocyph/llm-sm:${LDS_LLM_ARCH}'
+assert_file_contains "$ROOT/docker/compose/companion.yaml" 'image: infocyph/llm-ollama:${LDS_LLM_ARCH}'
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'profiles: [ai]'
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'lds_llm:/root/.ollama'
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'container_name: LLM_SM'
