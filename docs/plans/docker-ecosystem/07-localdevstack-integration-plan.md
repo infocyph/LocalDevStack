@@ -32,12 +32,14 @@ LocalDevStack implementation must begin against this tested ecosystem set:
 | Nginx | `infocyph/nginx:0.4.1` |
 | Apache | `infocyph/apache:0.4.2` |
 | Tools | `infocyph/tools:0.23.2` |
-| LLM standard | `infocyph/llm-sm:0.03` |
-| LLM AMD | `infocyph/llm-sm:amd-0.03` |
+| LLM standard | `infocyph/llm-sm:latest` |
+| LLM AMD | `infocyph/llm-sm:amd-latest` |
 
-Do not silently replace those defaults with moving `:latest` tags during the first LocalDevStack integration release.
-
-Users may override image references explicitly, but a released LocalDevStack version must have a reproducible compatibility baseline.
+The implemented image policy now follows the ecosystem moving aliases for LocalDevStack
+infrastructure. Standard LLM uses `latest`; AMD/ROCm uses `amd-latest`. Release
+reproducibility is provided by each image repository's immutable release tags, provenance
+and compatibility gates rather than by duplicating pinned image versions in
+LocalDevStack configuration.
 
 ---
 
@@ -102,7 +104,7 @@ Host
         ├── mailpit
         ├── databases and admin clients
         │
-        └── llm-sm 0.03 (optional)
+        └── llm-sm current stable (optional)
               ├── qwen2.5:3b baked default
               ├── persistent /root/.ollama
               └── Ollama API :11434
@@ -325,7 +327,7 @@ Validate:
 - streamed response is not buffered incorrectly;
 - AI absence leaves core services healthy.
 
-A manual/release-gate job may optionally exercise the real published `infocyph/llm-sm:0.03`, because that image already has its own model-bearing runtime gate.
+A manual/release-gate job may optionally exercise the real published `infocyph/llm-sm:latest`, because that image already has its own model-bearing runtime gate.
 
 ## 5.2 New `tests/`
 
@@ -612,25 +614,25 @@ nvidia
 amd
 ```
 
-Recommended static overrides:
-
-```text
-docker/compose/ai-nvidia.yaml
-docker/compose/ai-amd.yaml
-```
+Do not create tracked runtime-variant Compose files. Keep one service in
+`docker/compose/companion.yaml` and let `lds` generate a temporary
+`docker/.runtime/ai.*` fragment for the current Compose invocation only.
 
 NVIDIA:
 
-- set `LDS_LLM_ARCH=latest`;
-- add GPU access using the Compose mechanism supported by current Docker Desktop/Engine.
+- derive `LDS_LLM_ARCH=latest`;
+- add `gpus: all` in the temporary fragment.
 
 AMD:
 
-- set `LDS_LLM_ARCH=amd-latest`;
-- expose `/dev/kfd`;
-- expose `/dev/dri`.
+- derive `LDS_LLM_ARCH=amd-latest`;
+- expose `/dev/kfd` and `/dev/dri` in the temporary fragment.
 
-Store both the selected runtime (`LDS_AI_RUNTIME`) and derived tag (`LDS_LLM_ARCH`) in LocalDevStack env/state. Detection rules are: usable `nvidia-smi` -> NVIDIA; both `/dev/kfd` and `/dev/dri` -> AMD/ROCm; otherwise CPU. An AMD CPU alone never selects the AMD/ROCm image. `lds llm runtime ...` remains the explicit override.
+`LDS_AI_RUNTIME` is the explicit runtime selector when configured. `LDS_LLM_ARCH`
+is derived from the effective runtime for Compose interpolation and is not a separate
+user-facing image-version choice. Detection rules are: usable `nvidia-smi` -> NVIDIA;
+both `/dev/kfd` and `/dev/dri` -> AMD/ROCm; otherwise CPU. An AMD CPU alone never
+selects the AMD/ROCm image. `lds llm runtime ...` remains the explicit override.
 
 ## 8.4 Optional direct host API
 
@@ -642,13 +644,9 @@ https://llm.localhost
 
 Do not expose `11434` by default.
 
-If developers explicitly need direct Ollama access, add an optional override such as:
-
-```text
-docker/compose/ai-host-port.yaml
-```
-
-binding only:
+If developers explicitly need direct Ollama access, `lds` adds the port mapping to the
+same temporary `docker/.runtime/ai.*` fragment used for hardware augmentation, binding
+only:
 
 ```text
 127.0.0.1:${LLM_SM_PORT:-11434}:11434
@@ -704,11 +702,31 @@ Also pass through supported advanced limits only when the user sets them:
 
 Why LocalDevStack should default `LDS_AI_MODEL=qwen2.5:3b`:
 
-- `llm-sm:0.03` ships that model;
+- `llm-sm:latest` ships that model;
 - Tools intentionally reports ambiguity when multiple models are installed and no model is selected;
 - users may pull more models without breaking Tools AI workflows.
 
-Users can change `LDS_AI_MODEL` explicitly.
+Users can change `LDS_AI_MODEL` explicitly. LocalDevStack forwards it to the provider
+as `LLM_SM_MODEL` so Tools and `lds llm` share the same default model.
+
+Provider settings accepted through `docker/.env` and forwarded to `llm-sm` are:
+
+- `LLM_SM_SYSTEM`;
+- `LLM_SM_INPUT_WARN_BYTES`;
+- `LLM_SM_INPUT_MAX_BYTES`;
+- `LLM_SM_ATTACHMENT_MAX_BYTES`;
+- `LLM_SM_ATTACHMENTS_MAX_BYTES`;
+- `LLM_SM_ATTACHMENT_MAX_COUNT`;
+- `LLM_SM_PDF_MAX_PAGES`;
+- `LLM_SM_PDF_DPI`;
+- `LLM_SM_ALLOW_LARGE_INPUT`;
+- `OLLAMA_NUM_PARALLEL`;
+- `OLLAMA_MAX_LOADED_MODELS`;
+- `OLLAMA_KEEP_ALIVE`;
+- `OLLAMA_NO_CLOUD`.
+
+These are provider/runtime controls and are distinct from the Tools consumer
+`LDS_AI_*` timeout/context limits.
 
 Do not make Tools pull/remove models.
 
@@ -1797,7 +1815,7 @@ With fake provider on normal CI:
 
 With real provider on manual/release gate when feasible:
 
-- `infocyph/llm-sm:0.03`;
+- `infocyph/llm-sm:latest`;
 - baked `qwen2.5:3b`;
 - persistent model volume;
 - Tools generation;
@@ -2064,7 +2082,7 @@ Compared LocalDevStack against the current related releases/main contracts:
 - Runner **0.5**
 - Nginx **0.4.1**
 - Apache **0.4.2**
-- LLM-SM **0.03**
+- LLM-SM **current stable**
 - Toolset **2.0**
 - Scriptomatic current `main`
 
@@ -2213,9 +2231,13 @@ with:
 llm-sm:
   image: infocyph/llm-sm:${LDS_LLM_ARCH}
   profiles: [ai]
+  environment:
+    LLM_SM_MODEL: ${LDS_AI_MODEL:-qwen2.5:3b}
+    # provider input/PDF/Ollama tuning values are forwarded from docker/.env
 ```
 
-There are no tracked `ai.yaml`, `ai-nvidia.yaml`, `ai-amd.yaml`, or `ai-host-port.yaml` files.
+There are no tracked `ai.yaml`, `ai-nvidia.yaml`, `ai-amd.yaml`, or
+`ai-host-port.yaml` files. Do not reintroduce them.
 
 Runtime/tag mapping is:
 
@@ -2234,6 +2256,8 @@ Initial runtime detection is conservative:
 An AMD CPU alone does not select the ROCm image.
 
 Explicit `LDS_AI_RUNTIME` / `lds llm runtime ...` selection remains authoritative.
+`LDS_LLM_ARCH` is derived from that effective runtime and must not become an
+independent manual image-version selector.
 
 ## Ephemeral hardware/host-port Compose augmentation
 
