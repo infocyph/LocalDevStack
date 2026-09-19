@@ -30,7 +30,7 @@ cmd_ai() {
 }
 
 _graphify_local_base_url() {
-  local ctr published host_port
+  local ctr
   ctr="$(docker_compose ps -q llm-ollama 2>/dev/null | sed -n '1p' || true)"
   [[ -n "$ctr" ]] ||
     die "llm-ollama is not running. Enable the ai profile and start the stack first."
@@ -38,14 +38,7 @@ _graphify_local_base_url() {
   docker inspect -f '{{.State.Running}}' "$ctr" 2>/dev/null | grep -qx true ||
     die "llm-ollama container exists but is not running."
 
-  published="$(
-    docker inspect -f '{{with (index .NetworkSettings.Ports "11434/tcp")}}{{(index . 0).HostPort}}{{end}}' "$ctr" 2>/dev/null || true
-  )"
-  [[ "$published" =~ ^[0-9]+$ ]] ||
-    die "Graphify needs the llm-ollama loopback API. Run: lds llm host-port on && lds up -d llm-ollama"
-
-  host_port="$published"
-  printf 'http://127.0.0.1:%s/v1' "$host_port"
+  printf '%s' 'http://llm-ollama.localhost:11434/v1'
 }
 
 cmd_graphify() {
@@ -142,30 +135,14 @@ cmd_llm() {
     *) die "llm runtime <cpu|nvidia|amd>" ;;
     esac
     ;;
-  host-port)
-    local state="${1:-status}"
-    case "${state,,}" in
-    status) printf '%s\n' "$(compose_control_value LDS_LLM_HOST_PORT 0)" ;;
-    on | enable | enabled | 1)
-      update_env "$ENV_DOCKER" LDS_LLM_HOST_PORT 1
-      ok "Direct LLM API enabled on loopback only. Recreate llm-ollama to apply."
-      ;;
-    off | disable | disabled | 0)
-      update_env "$ENV_DOCKER" LDS_LLM_HOST_PORT 0
-      ok "Direct LLM host API disabled. Recreate llm-ollama to apply."
-      ;;
-    *) die "llm host-port <status|on|off>" ;;
-    esac
-    ;;
   models | ps | show | pull | rm | unload | run | ask | chat | prompt | code | review | json | ai-commit | ollama | api | version)
     _llm_exec "${sub,,}" "$@"
     ;;
   help | -h | --help)
     printf '%s\n' "llm <models|ps|show|pull|rm|unload|run|ask|chat|prompt|code|review|json|ai-commit|ollama|api|version>"
     printf '%s\n' "llm runtime <cpu|nvidia|amd>"
-    printf '%s\n' "llm host-port <status|on|off>"
     ;;
-  *) die "llm <models|ps|show|pull|rm|unload|run|ask|chat|prompt|code|review|json|ai-commit|ollama|api|version|runtime|host-port>" ;;
+  *) die "llm <models|ps|show|pull|rm|unload|run|ask|chat|prompt|code|review|json|ai-commit|ollama|api|version|runtime>" ;;
   esac
 }
 
