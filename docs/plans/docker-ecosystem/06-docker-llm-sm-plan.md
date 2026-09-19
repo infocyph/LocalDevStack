@@ -1,8 +1,8 @@
-# docker-llm-sm — File-by-File Compatibility + Integration Plan
+# docker-llm-ollama — File-by-File Compatibility + Integration Plan
 
 ## Role
 
-`infocyph/docker-llm-sm` is the optional local-AI service for the LocalDevStack ecosystem. It is already published and already uses the newer single-repository tag model:
+`infocyph/docker-llm-ollama` is the optional local-AI service for the LocalDevStack ecosystem. It is already published and already uses the newer single-repository tag model:
 
 - standard CPU/NVIDIA: `latest`, `<release>`
 - AMD ROCm: `amd-latest`, `amd-<release>`
@@ -16,7 +16,7 @@ This plan is intentionally conservative. The image should remain independently u
 - `/root/.ollama` must be persisted by the consumer/orchestrator.
 - CLI commands bundled in the image remain available; users do not install/remove the CLI separately.
 - CPU/NVIDIA and AMD ROCm remain separate tag families within the same registry repository.
-- LocalDevStack must not rebuild `docker-llm-sm` locally.
+- LocalDevStack must not rebuild `docker-llm-ollama` locally.
 - Graphify or other AI clients consume the Ollama endpoint; they are not baked into this image merely because they can use it.
 
 ## Existing Files
@@ -80,7 +80,7 @@ Keep published-image/persistent-volume NVIDIA example and GPU request semantics.
 
 Keep `amd-latest`/ROCm example and `/dev/kfd` + `/dev/dri` device requirements.
 
-### `scripts/llm-sm`
+### `scripts/llm-ollama`
 
 Keep as fixed dispatcher installed in the image.
 
@@ -165,24 +165,24 @@ This lower-layer plan is implemented through the authoritative LocalDevStack int
 plan in `07-localdevstack-integration-plan.md`.
 
 LocalDevStack consumes the published provider through the optional `ai` profile. It does
-not rebuild `docker-llm-sm` locally and does not consume this repository's standalone
+not rebuild `docker-llm-ollama` locally and does not consume this repository's standalone
 Compose files.
 
 Current LocalDevStack controls:
 
 - `LDS_AI_MODEL` selects the shared Tools/provider default model and is forwarded as
-  `LLM_SM_MODEL`;
+  `LLM_OLLAMA_MODEL`;
 - `LDS_AI_RUNTIME` selects `cpu`, `nvidia`, or `amd` when explicitly configured;
 - `LDS_LLM_ARCH` is derived from the effective runtime (`latest` for CPU/NVIDIA,
   `amd-latest` for AMD/ROCm);
 - `LDS_LLM_HOST_PORT` controls optional direct loopback exposure;
-- `LLM_SM_PORT` controls that loopback host port;
+- `LLM_OLLAMA_PORT` controls that loopback host port;
 - provider input/PDF/Ollama tuning values are forwarded from LocalDevStack
   `docker/.env`.
 
 Compose ownership:
 
-- one tracked `llm-sm` service in `docker/compose/companion.yaml`;
+- one tracked `llm-ollama` service in `docker/compose/companion.yaml`;
 - no tracked `ai.yaml`, `ai-nvidia.yaml`, `ai-amd.yaml`, or
   `ai-host-port.yaml`;
 - NVIDIA, AMD/ROCm, and host-port additions are generated temporarily under
@@ -195,15 +195,15 @@ Persistence:
 
 Workspace:
 
-- LocalDevStack intentionally does not mount a project/repository into `llm-sm` by
+- LocalDevStack intentionally does not mount a project/repository into `llm-ollama` by
   default;
 - repository-aware analysis normally uses the Tools consumer layer;
 - provider stdin flows remain available without weakening the default trust boundary.
 
 Networking:
 
-- internal consumers use `http://llm-sm:11434`;
-- Nginx exposes `https://llm.localhost`;
+- internal consumers use `http://llm-ollama:11434`;
+- Nginx exposes `https://llm-ollama.localhost`;
 - direct host `11434`-style access is opt-in and loopback-only.
 
 User/provider commands are invoked through `lds llm ...`, not a bare
@@ -211,7 +211,7 @@ User/provider commands are invoked through `lds llm ...`, not a bare
 
 ## Acceptance Criteria
 
-1. Existing published `docker-llm-sm` behavior remains standalone and stable.
+1. Existing published `docker-llm-ollama` behavior remains standalone and stable.
 2. LocalDevStack can enable it without building locally.
 3. Standard and AMD tags are selectable.
 4. Named volume persists pulled models across container recreation.
