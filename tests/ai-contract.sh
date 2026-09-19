@@ -57,6 +57,7 @@ fi
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'image: infocyph/llm-sm:${LDS_LLM_ARCH}'
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'profiles: [ai]'
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'lds_llm:/root/.ollama'
+assert_file_contains "$ROOT/docker/compose/companion.yaml" 'container_name: LLM_SM'
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'LLM_SM_MODEL=${LDS_AI_MODEL:-qwen2.5:3b}'
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'LLM_SM_ATTACHMENT_MAX_BYTES=${LLM_SM_ATTACHMENT_MAX_BYTES:-16777216}'
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'LLM_SM_PDF_MAX_PAGES=${LLM_SM_PDF_MAX_PAGES:-24}'
