@@ -230,11 +230,11 @@ Enable the `ai` profile through `lds setup profile`.
 ```text
 Tools consumer -> http://llm-sm:11434
 User HTTPS     -> https://llm.localhost
-Default model  -> qwen2.5:3b
+Default model  -> qwen3:14b
 Model store    -> LLMModels
 ```
 
-LocalDevStack auto-detects the preferred AI runtime during setup: NVIDIA when `nvidia-smi` is usable, AMD only when the Linux ROCm device nodes `/dev/kfd` and `/dev/dri` are present, otherwise CPU. An AMD CPU by itself does not select the AMD image.
+LocalDevStack auto-detects the preferred AI runtime during setup: NVIDIA when `nvidia-smi` is usable, AMD only when the Linux ROCm device nodes `/dev/kfd` and `/dev/dri` are present, otherwise CPU. An AMD CPU by itself does not select the AMD image. When the effective runtime is AMD and the host CPU vendor is AMD, setup persists `LDS_AI_IGPU_ENABLE=1`; the provider forwards it as `OLLAMA_IGPU_ENABLE=1` so Ollama does not discard the integrated Radeon GPU.
 
 The provider uses one image/tag contract:
 
@@ -242,7 +242,7 @@ The provider uses one image/tag contract:
 infocyph/llm-sm:${LDS_LLM_ARCH}
 ```
 
-CPU/NVIDIA map to `LDS_LLM_ARCH=latest`; AMD/ROCm maps to `LDS_LLM_ARCH=amd-latest`. `LDS_LLM_ARCH` is derived by the LocalDevStack runtime selector; it is not a separate version choice users should maintain manually.
+CPU/NVIDIA map to `LDS_LLM_ARCH=latest`; AMD/ROCm maps to `LDS_LLM_ARCH=amd-latest`. `LDS_LLM_ARCH` is derived by the LocalDevStack runtime selector; it is not a separate version choice users should maintain manually. `lds llm runtime ...` also refreshes `LDS_AI_IGPU_ENABLE` to match the selected runtime and host CPU.
 
 Override detection explicitly when needed:
 
@@ -305,8 +305,9 @@ Provider configuration placed in `docker/.env` is forwarded to `llm-sm` where ap
 
 | Setting | Default | Effect |
 |---|---:|---|
-| `LDS_AI_MODEL` | `qwen2.5:3b` | Tools model and `lds llm` default model |
+| `LDS_AI_MODEL` | `qwen3:14b` | Tools model and `lds llm` default model |
 | `LDS_AI_RUNTIME` | auto-detected | `cpu`, `nvidia`, or `amd` runtime selection |
+| `LDS_AI_IGPU_ENABLE` | `1` for AMD CPU + AMD runtime, otherwise `0` | Forwarded to Ollama as `OLLAMA_IGPU_ENABLE` |
 | `LDS_LLM_HOST_PORT` | `0` | Enables/disables direct loopback API mapping |
 | `LLM_SM_PORT` | `11434` | Host loopback port when direct mapping is enabled |
 | `LLM_SM_SYSTEM` | empty | Default system instruction for provider prompts |
