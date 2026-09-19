@@ -213,8 +213,6 @@ Important AI settings include::
    LDS_AI_MODEL=qwen3:14b
    LDS_AI_RUNTIME=<optional explicit cpu|nvidia|amd>
    LDS_AI_IGPU_ENABLE=<auto-derived 0|1>
-   LDS_LLM_HOST_PORT=0
-   LLM_OLLAMA_PORT=11434
 
 When ``LDS_AI_RUNTIME`` is not explicitly set, LocalDevStack detects the preferred
 runtime for the Compose invocation. NVIDIA is selected only when ``nvidia-smi`` is
@@ -231,9 +229,7 @@ it is ``0``.
 Use::
 
    lds llm runtime <cpu|nvidia|amd>
-   lds llm host-port <status|on|off>
-
-to override the detected runtime or host-port behavior.
+to override the detected runtime behavior.
 
 The selected ``LDS_AI_MODEL`` is also forwarded to the provider as
 ``LLM_OLLAMA_MODEL``, so Tools and ``lds llm`` share the same default model.
@@ -270,7 +266,7 @@ checks stay fast. The same generation timeout is passed to Nginx as
 
 The LLM service itself is tracked only in ``docker/compose/companion.yaml``. There are
 no tracked AI runtime-variant YAML files; ``lds`` creates temporary fragments under
-``docker/.runtime/`` only for NVIDIA, AMD/ROCm, or direct host-port augmentation.
+``docker/.runtime/`` only for NVIDIA or AMD/ROCm augmentation.
 
 Compose Extras
 --------------
