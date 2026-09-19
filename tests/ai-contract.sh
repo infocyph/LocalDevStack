@@ -59,6 +59,7 @@ assert_file_contains "$ROOT/docker/compose/companion.yaml" 'profiles: [ai]'
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'lds_llm:/root/.ollama'
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'container_name: LLM_SM'
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'LLM_SM_MODEL=${LDS_AI_MODEL:-qwen3:14b}'
+assert_file_contains "$ROOT/docker/compose/companion.yaml" 'OLLAMA_IGPU_ENABLE=${LDS_AI_IGPU_ENABLE:-0}'
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'LLM_SM_ATTACHMENT_MAX_BYTES=${LLM_SM_ATTACHMENT_MAX_BYTES:-16777216}'
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'LLM_SM_PDF_MAX_PAGES=${LLM_SM_PDF_MAX_PAGES:-24}'
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'LDS_AI_CONNECT_TIMEOUT=${LDS_AI_CONNECT_TIMEOUT:-2}'
@@ -72,5 +73,6 @@ assert_file_contains "$ROOT/lib/ai.sh" 'graphify_bin" cluster-only "$target" --b
 assert_file_contains "$ROOT/lib/compose.sh" "'    gpus: all'"
 assert_file_contains "$ROOT/lib/compose.sh" "'      - /dev/kfd:/dev/kfd'"
 assert_file_contains "$ROOT/lib/compose.sh" "'      - /dev/dri:/dev/dri'"
+assert_file_contains "$ROOT/lib/ai.sh" 'update_env "$ENV_DOCKER" LDS_AI_IGPU_ENABLE "$igpu_enable"'
 assert_file_contains "$ROOT/lib/compose.sh" '"127.0.0.1:%s:11434"'
 pass "single companion AI service with ephemeral hardware/port augmentation"
