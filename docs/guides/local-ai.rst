@@ -71,20 +71,13 @@ User-facing HTTPS endpoint::
 Internal Docker consumers should use the service endpoint directly rather than routing
 through Nginx.
 
-Direct host Ollama access is disabled by default. Opt in with::
+Host-side native Ollama clients use the Nginx-owned endpoint::
 
-   lds llm host-port on
+   http://llm-ollama.localhost:11434
 
-The default direct binding is loopback-only::
-
-   127.0.0.1:11434
-
-Show/disable it with::
-
-   lds llm host-port status
-   lds llm host-port off
-
-The port can be changed through ``LLM_OLLAMA_PORT`` when direct host access is enabled.
+LocalDevStack binds Nginx's native listener to ``127.0.0.1:11434``. The
+``llm-ollama`` provider container itself has no published host port, and there is no
+host-port toggle or configurable provider port.
 
 Compose Ownership
 -----------------
@@ -108,8 +101,10 @@ When runtime-specific Compose data is required, ``lds`` creates a temporary frag
 under ``docker/.runtime/`` for the current command only:
 
 - NVIDIA -> ``gpus: all``;
-- AMD/ROCm -> ``/dev/kfd`` and ``/dev/dri``;
-- native host API -> ``127.0.0.1:11434:11434`` on Nginx -> ``llm-ollama:11434``.
+- AMD/ROCm -> ``/dev/kfd`` and ``/dev/dri``.
+
+The native host API is not part of the temporary fragment. Nginx permanently owns
+``127.0.0.1:11434:11434`` and proxies it to ``llm-ollama:11434``.
 
 The fragment is removed after the Compose command. ``configuration/compose/`` remains
 the normal extras/generated-runtime area and is not the location of built-in LLM
@@ -277,12 +272,12 @@ AI layer.
 ``lds graphify [path] [extract-options...]`` runs the host Graphify CLI against the
 LocalDevStack Ollama provider. The default path is the current directory. It derives the
 model from ``LDS_AI_MODEL``, derives ``GRAPHIFY_API_TIMEOUT`` from
-``LDS_AI_TIMEOUT``, and uses the actual loopback-published provider port unless
-``OLLAMA_BASE_URL`` is already set.
+``LDS_AI_TIMEOUT``, and uses ``http://llm-ollama.localhost:11434/v1`` through
+Nginx unless ``OLLAMA_BASE_URL`` is already set.
 
-Enable and apply the direct provider port before the default workflow::
+Start the stack with the AI profile, then run::
 
-   lds up -d llm-ollama
+   lds up -d
    lds graphify
 
 Internally the workflow runs extraction with ``--backend ollama --no-cluster`` and,
