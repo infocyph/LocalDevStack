@@ -37,7 +37,7 @@ An AMD CPU alone does **not** select the AMD image. When the effective runtime i
 
 The single provider service uses::
 
-   image: infocyph/llm-sm:${LDS_LLM_ARCH}
+   image: infocyph/llm-ollama:${LDS_LLM_ARCH}
 
 The derived image mapping is:
 
