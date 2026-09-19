@@ -125,7 +125,7 @@ Docker Socket Boundary
 
 because their supported workflows need Docker control.
 
-Persistent databases, admin clients, Nginx/Apache, and ``llm-sm`` do not receive the
+Persistent databases, admin clients, Nginx/Apache, and ``llm-ollama`` do not receive the
 socket by default.
 
 ``lds run --sock`` is a separate explicit opt-in for an ad-hoc container.
