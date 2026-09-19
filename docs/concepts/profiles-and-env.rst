@@ -211,11 +211,19 @@ Important AI settings include::
    LDS_AI_PROVIDER=ollama
    LDS_AI_URL=http://llm-sm:11434
    LDS_AI_MODEL=qwen2.5:3b
-   LDS_AI_RUNTIME=<auto-detected cpu|nvidia|amd>
-   LDS_LLM_ARCH=latest
+   LDS_AI_RUNTIME=<optional explicit cpu|nvidia|amd>
    LDS_LLM_HOST_PORT=0
+   LLM_SM_PORT=11434
 
-During setup LocalDevStack detects the preferred runtime. NVIDIA is selected only when ``nvidia-smi`` is usable; AMD is selected only when the ROCm Linux device nodes ``/dev/kfd`` and ``/dev/dri`` are present; otherwise CPU is selected. The corresponding image tag is persisted as ``LDS_LLM_ARCH`` (``latest`` for CPU/NVIDIA, ``amd-latest`` for AMD).
+When ``LDS_AI_RUNTIME`` is not explicitly set, LocalDevStack detects the preferred
+runtime for the Compose invocation. NVIDIA is selected only when ``nvidia-smi`` is
+usable; AMD is selected only when the ROCm Linux device nodes ``/dev/kfd`` and
+``/dev/dri`` are present; otherwise CPU is selected.
+
+``LDS_LLM_ARCH`` is derived from that runtime (``latest`` for CPU/NVIDIA,
+``amd-latest`` for AMD). It is not a separate user-facing image version selector.
+Using ``lds llm runtime ...`` persists the explicit runtime choice and matching derived
+tag for compatibility/inspection.
 
 Use::
 
@@ -224,10 +232,33 @@ Use::
 
 to override the detected runtime or host-port behavior.
 
-Tools also accepts optional timeout/context limits through ``LDS_AI_CONNECT_TIMEOUT``,
-``LDS_AI_PREFLIGHT_TIMEOUT``, ``LDS_AI_TIMEOUT``, ``LDS_AI_AVAILABILITY_TTL``,
-``LDS_AI_MAX_CONTEXT_BYTES``, ``LDS_AI_MAX_REQUEST_BYTES``, and
-``LDS_AI_MAX_RESPONSE_BYTES``.
+The selected ``LDS_AI_MODEL`` is also forwarded to the provider as
+``LLM_SM_MODEL``, so Tools and ``lds llm`` share the same default model.
+
+Provider-side options accepted in ``docker/.env`` include::
+
+   LLM_SM_SYSTEM=
+   LLM_SM_INPUT_WARN_BYTES=1048576
+   LLM_SM_INPUT_MAX_BYTES=0
+   LLM_SM_ATTACHMENT_MAX_BYTES=16777216
+   LLM_SM_ATTACHMENTS_MAX_BYTES=33554432
+   LLM_SM_ATTACHMENT_MAX_COUNT=16
+   LLM_SM_PDF_MAX_PAGES=24
+   LLM_SM_PDF_DPI=120
+   LLM_SM_ALLOW_LARGE_INPUT=0
+   OLLAMA_NUM_PARALLEL=1
+   OLLAMA_MAX_LOADED_MODELS=1
+   OLLAMA_KEEP_ALIVE=5m
+   OLLAMA_NO_CLOUD=1
+
+Tools consumer settings remain separate and include
+``LDS_AI_CONNECT_TIMEOUT``, ``LDS_AI_PREFLIGHT_TIMEOUT``, ``LDS_AI_TIMEOUT``,
+``LDS_AI_AVAILABILITY_TTL``, ``LDS_AI_MAX_CONTEXT_BYTES``,
+``LDS_AI_MAX_REQUEST_BYTES``, and ``LDS_AI_MAX_RESPONSE_BYTES``.
+
+The LLM service itself is tracked only in ``docker/compose/companion.yaml``. There are
+no tracked AI runtime-variant YAML files; ``lds`` creates temporary fragments under
+``docker/.runtime/`` only for NVIDIA, AMD/ROCm, or direct host-port augmentation.
 
 Compose Extras
 --------------
