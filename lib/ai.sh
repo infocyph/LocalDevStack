@@ -31,18 +31,18 @@ cmd_ai() {
 
 _graphify_local_base_url() {
   local ctr published host_port
-  ctr="$(docker_compose ps -q llm-sm 2>/dev/null | sed -n '1p' || true)"
+  ctr="$(docker_compose ps -q llm-ollama 2>/dev/null | sed -n '1p' || true)"
   [[ -n "$ctr" ]] ||
-    die "llm-sm is not running. Enable the ai profile and start the stack first."
+    die "llm-ollama is not running. Enable the ai profile and start the stack first."
 
   docker inspect -f '{{.State.Running}}' "$ctr" 2>/dev/null | grep -qx true ||
-    die "llm-sm container exists but is not running."
+    die "llm-ollama container exists but is not running."
 
   published="$(
     docker inspect -f '{{with (index .NetworkSettings.Ports "11434/tcp")}}{{(index . 0).HostPort}}{{end}}' "$ctr" 2>/dev/null || true
   )"
   [[ "$published" =~ ^[0-9]+$ ]] ||
-    die "Graphify needs the llm-sm loopback API. Run: lds llm host-port on && lds up -d llm-sm"
+    die "Graphify needs the llm-ollama loopback API. Run: lds llm host-port on && lds up -d llm-ollama"
 
   host_port="$published"
   printf 'http://127.0.0.1:%s/v1' "$host_port"
@@ -107,14 +107,14 @@ cmd_graphify() {
 
 _llm_exec() {
   local ctr
-  ctr="$(docker_compose ps -q llm-sm 2>/dev/null | sed -n '1p' || true)"
-  [[ -n "$ctr" ]] || die "llm-sm is not running. Enable the ai profile and start the stack first."
+  ctr="$(docker_compose ps -q llm-ollama 2>/dev/null | sed -n '1p' || true)"
+  [[ -n "$ctr" ]] || die "llm-ollama is not running. Enable the ai profile and start the stack first."
   docker inspect -f '{{.State.Running}}' "$ctr" 2>/dev/null | grep -qx true ||
-    die "llm-sm container exists but is not running."
+    die "llm-ollama container exists but is not running."
 
   local -a exec_args=(exec)
   [[ -t 0 && -t 1 ]] || exec_args+=(-T)
-  docker_compose "${exec_args[@]}" llm-sm llm-sm "$@"
+  docker_compose "${exec_args[@]}" llm-ollama llm-ollama "$@"
 }
 
 cmd_llm() {
@@ -137,7 +137,7 @@ cmd_llm() {
       update_env "$ENV_DOCKER" LDS_AI_RUNTIME "$normalized"
       update_env "$ENV_DOCKER" LDS_LLM_ARCH "$arch"
       update_env "$ENV_DOCKER" LDS_AI_IGPU_ENABLE "$igpu_enable"
-      ok "LLM runtime set to $normalized (infocyph/llm-ollama:$arch, iGPU=$igpu_enable). Recreate llm-sm to apply the change."
+      ok "LLM runtime set to $normalized (infocyph/llm-ollama:$arch, iGPU=$igpu_enable). Recreate llm-ollama to apply the change."
       ;;
     *) die "llm runtime <cpu|nvidia|amd>" ;;
     esac
@@ -148,11 +148,11 @@ cmd_llm() {
     status) printf '%s\n' "$(compose_control_value LDS_LLM_HOST_PORT 0)" ;;
     on | enable | enabled | 1)
       update_env "$ENV_DOCKER" LDS_LLM_HOST_PORT 1
-      ok "Direct LLM API enabled on loopback only. Recreate llm-sm to apply."
+      ok "Direct LLM API enabled on loopback only. Recreate llm-ollama to apply."
       ;;
     off | disable | disabled | 0)
       update_env "$ENV_DOCKER" LDS_LLM_HOST_PORT 0
-      ok "Direct LLM host API disabled. Recreate llm-sm to apply."
+      ok "Direct LLM host API disabled. Recreate llm-ollama to apply."
       ;;
     *) die "llm host-port <status|on|off>" ;;
     esac
