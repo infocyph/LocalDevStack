@@ -66,6 +66,7 @@ assert_file_contains "$ROOT/docker/compose/companion.yaml" 'LDS_AI_PREFLIGHT_TIM
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'LDS_AI_TIMEOUT=${LDS_AI_TIMEOUT:-1800}'
 assert_file_contains "$ROOT/docker/compose/http.yaml" 'LLM_PROXY_TIMEOUT_SECONDS=${LDS_AI_TIMEOUT:-1800}'
 assert_file_contains "$ROOT/lib/ai.sh" 'cmd_graphify()'
+assert_file_contains "$ROOT/lib/ai.sh" 'OLLAMA_API_KEY="$api_key"'
 assert_file_contains "$ROOT/lib/ai.sh" 'graphify_bin" extract "$target" --backend ollama --no-cluster'
 assert_file_contains "$ROOT/lib/ai.sh" 'graphify_bin" cluster-only "$target" --backend ollama'
 assert_file_contains "$ROOT/lib/compose.sh" "'    gpus: all'"
