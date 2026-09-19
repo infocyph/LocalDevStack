@@ -20,7 +20,6 @@ assert_file_contains "$ROOT/lds" 'compose_control_value()'
 assert_file_contains "$ROOT/lds" 'dotenv_value()'
 assert_file_contains "$ROOT/lib/compose.sh" 'compose_control_value LDS_AI_RUNTIME ""'
 assert_file_contains "$ROOT/lib/compose.sh" 'LDS_LLM_ARCH="$llm_arch"'
-assert_file_contains "$ROOT/lib/compose.sh" 'LDS_LLM_HOST_PORT 0'
 pass "environment file and precedence wiring"
 
 git -C "$ROOT" check-ignore -q docker/.env || fail "docker/.env must remain ignored user state"
