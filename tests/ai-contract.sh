@@ -74,5 +74,6 @@ assert_file_contains "$ROOT/lib/compose.sh" "'    gpus: all'"
 assert_file_contains "$ROOT/lib/compose.sh" "'      - /dev/kfd:/dev/kfd'"
 assert_file_contains "$ROOT/lib/compose.sh" "'      - /dev/dri:/dev/dri'"
 assert_file_contains "$ROOT/lib/ai.sh" 'update_env "$ENV_DOCKER" LDS_AI_IGPU_ENABLE "$igpu_enable"'
-assert_file_contains "$ROOT/lib/compose.sh" '"127.0.0.1:%s:11434"'
-pass "single companion AI service with ephemeral hardware/port augmentation"
+assert_file_contains "$ROOT/docker/compose/http.yaml" '"127.0.0.1:11434:11434"'
+assert_file_contains "$ROOT/lib/ai.sh" 'docker_compose ps -q nginx'
+pass "single companion AI service with ephemeral hardware augmentation and Nginx-owned native port"
