@@ -51,7 +51,7 @@ while IFS='|' read -r key profile display service_key version_env defaults promp
     [[ "$profile" == "ai" ]] || fail "AI profile must be ai"
     [[ "$service_key" == "llm-sm" ]] || fail "AI service key must be llm-sm"
     [[ "$runtime_modes" == "cpu,nvidia,amd" ]] || fail "AI runtime metadata drift"
-    [[ "$defaults" == *"LDS_AI_MODEL=qwen2.5:3b"* ]] || fail "AI model default drift"
+    [[ "$defaults" == *"LDS_AI_MODEL=qwen3:14b"* ]] || fail "AI model default drift"
     [[ "$version_env" == "LDS_LLM_ARCH" ]] || fail "AI image selector must be LDS_LLM_ARCH"
     [[ "$defaults" != *"LDS_AI_RUNTIME="* ]] || fail "AI profile wizard must not prompt for runtime"
     [[ "$defaults" == *"LDS_LLM_HOST_PORT=no"* ]] || fail "AI host-port default drift"
