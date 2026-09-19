@@ -55,6 +55,7 @@ services:
       - datastore
 
   llm-sm:
+    container_name: LLM_SM
     hostname: llm-sm
     image: infocyph/llm-sm:${LDS_LLM_ARCH}
     restart: unless-stopped
