@@ -209,12 +209,12 @@ Important AI settings include::
 
    LDS_AI_ENABLED=auto
    LDS_AI_PROVIDER=ollama
-   LDS_AI_URL=http://llm-sm:11434
+   LDS_AI_URL=http://llm-ollama:11434
    LDS_AI_MODEL=qwen3:14b
    LDS_AI_RUNTIME=<optional explicit cpu|nvidia|amd>
    LDS_AI_IGPU_ENABLE=<auto-derived 0|1>
    LDS_LLM_HOST_PORT=0
-   LLM_SM_PORT=11434
+   LLM_OLLAMA_PORT=11434
 
 When ``LDS_AI_RUNTIME`` is not explicitly set, LocalDevStack detects the preferred
 runtime for the Compose invocation. NVIDIA is selected only when ``nvidia-smi`` is
@@ -236,19 +236,19 @@ Use::
 to override the detected runtime or host-port behavior.
 
 The selected ``LDS_AI_MODEL`` is also forwarded to the provider as
-``LLM_SM_MODEL``, so Tools and ``lds llm`` share the same default model.
+``LLM_OLLAMA_MODEL``, so Tools and ``lds llm`` share the same default model.
 
 Provider-side options accepted in ``docker/.env`` include::
 
-   LLM_SM_SYSTEM=
-   LLM_SM_INPUT_WARN_BYTES=1048576
-   LLM_SM_INPUT_MAX_BYTES=0
-   LLM_SM_ATTACHMENT_MAX_BYTES=16777216
-   LLM_SM_ATTACHMENTS_MAX_BYTES=33554432
-   LLM_SM_ATTACHMENT_MAX_COUNT=16
-   LLM_SM_PDF_MAX_PAGES=24
-   LLM_SM_PDF_DPI=120
-   LLM_SM_ALLOW_LARGE_INPUT=0
+   LLM_OLLAMA_SYSTEM=
+   LLM_OLLAMA_INPUT_WARN_BYTES=1048576
+   LLM_OLLAMA_INPUT_MAX_BYTES=0
+   LLM_OLLAMA_ATTACHMENT_MAX_BYTES=16777216
+   LLM_OLLAMA_ATTACHMENTS_MAX_BYTES=33554432
+   LLM_OLLAMA_ATTACHMENT_MAX_COUNT=16
+   LLM_OLLAMA_PDF_MAX_PAGES=24
+   LLM_OLLAMA_PDF_DPI=120
+   LLM_OLLAMA_ALLOW_LARGE_INPUT=0
    OLLAMA_NUM_PARALLEL=1
    OLLAMA_MAX_LOADED_MODELS=1
    OLLAMA_KEEP_ALIVE=5m
