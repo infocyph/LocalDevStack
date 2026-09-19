@@ -161,8 +161,8 @@ Examples:
 
 - PostgreSQL defaults to ``postgres:alpine``.
 - Tools, Runner, Nginx, and Apache use their published ``:latest`` aliases.
-- Standard local AI uses ``infocyph/llm-sm:latest``.
-- AMD local AI uses ``infocyph/llm-sm:amd-latest``.
+- Standard local AI uses ``infocyph/llm-ollama:latest``.
+- AMD local AI uses ``infocyph/llm-ollama:amd-latest``.
 - Elasticsearch, Kibana, and Filebeat stay on one aligned version.
 
 Run::
