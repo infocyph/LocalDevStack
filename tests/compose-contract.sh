@@ -148,7 +148,7 @@ targets={v["target"] for v in s["volumes"]}
 assert targets == {"/root/.ollama"}
 assert d["volumes"]["lds_llm"]["name"] == "LLMModels"
 env=s["environment"]
-assert env["LLM_SM_MODEL"] == "qwen2.5:3b"
+assert env["LLM_SM_MODEL"] == "qwen3:14b"
 assert env["LLM_SM_SYSTEM"] == ""
 assert env["LLM_SM_INPUT_WARN_BYTES"] == "1048576"
 assert env["LLM_SM_INPUT_MAX_BYTES"] == "0"
@@ -162,11 +162,12 @@ assert env["OLLAMA_NUM_PARALLEL"] == "1"
 assert env["OLLAMA_MAX_LOADED_MODELS"] == "1"
 assert env["OLLAMA_KEEP_ALIVE"] == "5m"
 assert env["OLLAMA_NO_CLOUD"] == "1"
+assert env["OLLAMA_IGPU_ENABLE"] == "0"
 tools=d["services"]["server-tools"]["environment"]
 assert tools["LDS_AI_ENABLED"] == "auto"
 assert tools["LDS_AI_PROVIDER"] == "ollama"
 assert tools["LDS_AI_URL"] == "http://llm-sm:11434"
-assert tools["LDS_AI_MODEL"] == "qwen2.5:3b"
+assert tools["LDS_AI_MODEL"] == "qwen3:14b"
 assert tools["LDS_AI_CONNECT_TIMEOUT"] == "2"
 assert tools["LDS_AI_PREFLIGHT_TIMEOUT"] == "5"
 assert tools["LDS_AI_TIMEOUT"] == "1800"
@@ -179,7 +180,7 @@ assert nginx["LLM_PROXY_TIMEOUT_SECONDS"] == "1800"
 ' <<<"$ai_json"
 pass "companion-owned AI profile is internal-only and deterministic"
 
-printf '%s\n' 'LDS_AI_MODEL=qwen2.5:1.5b' 'LLM_SM_PDF_MAX_PAGES=12' 'LLM_SM_SYSTEM=Answer briefly.' 'LDS_AI_TIMEOUT=2400' >>"$user_env"
+printf '%s\n' 'LDS_AI_MODEL=qwen2.5:1.5b' 'LLM_SM_PDF_MAX_PAGES=12' 'LLM_SM_SYSTEM=Answer briefly.' 'LDS_AI_TIMEOUT=2400' 'LDS_AI_IGPU_ENABLE=1' >>"$user_env"
 ai_override_json="$("${compose[@]}" --profile ai config --format json)"
 python3 -c '
 import json,sys
@@ -188,6 +189,7 @@ llm=d["services"]["llm-sm"]["environment"]
 assert llm["LLM_SM_MODEL"] == "qwen2.5:1.5b"
 assert llm["LLM_SM_PDF_MAX_PAGES"] == "12"
 assert llm["LLM_SM_SYSTEM"] == "Answer briefly."
+assert llm["OLLAMA_IGPU_ENABLE"] == "1"
 tools=d["services"]["server-tools"]["environment"]
 assert tools["LDS_AI_TIMEOUT"] == "2400"
 nginx=d["services"]["nginx"]["environment"]
