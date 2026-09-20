@@ -277,14 +277,16 @@ lds llm chat ...
 
 # Host Graphify through the common LocalDevStack /v1 endpoint
 lds graphify
-lds graphify ./your-project --mode deep --token-budget 4000 --max-concurrency 1
+lds graphify ./your-project --mode deep
+# FastFlow already defaults to --token-budget 4000 --max-concurrency 1;
+# pass explicit values only when you want to override them.
 ```
 
 `lds llm` dispatches to the active provider. Ollama-only low-level commands (`ps`, `show`, `unload`, `ollama`) and FastFlow-only commands (`validate`, `check`, `flm`) are guarded and rejected when the other provider is active.
 
 Nginx owns the loopback-only native route `127.0.0.1:11434 -> nginx:11434 -> llm:11434`. Provider containers do not publish host ports.
 
-`lds graphify` uses `http://llm.localhost:11434/v1`, validates the selected model through `/v1/models`, and then invokes Graphify's currently named `ollama` backend. The backend name is Graphify terminology; the LocalDevStack endpoint itself is provider-neutral and OpenAI-compatible.
+`lds graphify` uses `http://llm.localhost:11434/v1` and validates the selected model through `/v1/models`. Backend selection follows the active provider automatically: FastFlow uses Graphify's generic `openai` backend, while Ollama uses Graphify's native `ollama` backend. For FastFlow, LocalDevStack also defaults to `--token-budget 4000 --max-concurrency 1` unless explicitly overridden; this keeps Qwen3.5 9B semantic chunks inside a safe local context budget.
 
 The built-in Compose layout keeps both provider definitions in `docker/compose/companion.yaml`, but runtime-generated profile selectors enable exactly one. NVIDIA/ROCm hardware augmentation is generated ephemerally under `docker/.runtime/`; FastFlow's `/dev/accel/accel0` + memlock contract lives in its tracked service definition.
 
