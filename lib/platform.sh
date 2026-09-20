@@ -113,14 +113,6 @@ ai_igpu_default_for_runtime() {
   fi
 }
 
-llm_arch_for_runtime() {
-  case "${1,,}" in
-  amd) printf '%s' amd-latest ;;
-  "" | cpu | nvidia | npu) printf '%s' latest ;;
-  *) return 1 ;;
-  esac
-}
-
 ###############################################################################
 # 2. INSTALL / PERMISSIONS (HOST)
 ###############################################################################
