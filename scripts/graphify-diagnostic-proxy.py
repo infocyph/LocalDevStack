@@ -488,7 +488,11 @@ def _replace_response_content(body: bytes, graph: dict[str, Any]) -> bytes | Non
     message.pop("reasoning", None)
     message.pop("thinking", None)
     first["message"] = message
-    first["finish_reason"] = "stop"
+    # Preserve an upstream/synthetic length signal so Graphify's adaptive
+    # retry layer bisects the offending chunk. Successful tool-call responses
+    # are normalized to a regular completed assistant response.
+    if first.get("finish_reason") != "length":
+        first["finish_reason"] = "stop"
     choices[0] = first
     response["choices"] = choices
     return json.dumps(response, ensure_ascii=False).encode("utf-8")
