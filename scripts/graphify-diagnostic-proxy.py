@@ -114,6 +114,8 @@ def classify_graph_content(content: str | None) -> tuple[bool, str]:
         return True, "graph arrays contain no usable object entries"
     if saw_graph_shape:
         return True, "valid but empty graph fragment"
+    if any(f'"{key}"' in content for key in _GRAPH_KEYS):
+        return True, "malformed graph JSON"
     if saw_json:
         return True, "JSON response has no graph fragment keys"
     return True, "response is not parseable as a graph JSON object"
