@@ -90,6 +90,10 @@ assert_file_contains "$ai" 'extra_body={"think": false}'
 assert_file_contains "$ai" 'reasoning_effort=none'
 assert_file_contains "$ai" 'lds llm think'
 assert_file_contains "$ai" 'LDS_AI_THINK'
+assert_file_contains "$ai" 'LDS_GRAPHIFY_DIAGNOSTICS=0'
+assert_file_contains "$ai" 'lds-graphify-diagnostics.jsonl'
+assert_file_contains "$ai" 'think'
+assert_file_contains "$ai" 'reasoning_effort'
 if grep -RqsF 'LDS_LLM_ARCH' "$ROOT/README.md" "$ROOT/docs" --exclude-dir=plans; then
   fail "user-facing docs expose removed LDS_LLM_ARCH setting"
 fi
