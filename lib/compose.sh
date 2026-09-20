@@ -42,21 +42,35 @@ docker_compose() {
   local -a env_files=(--env-file "$ENV_RELEASE")
   [[ -r "$ENV_DOCKER" ]] && env_files+=(--env-file "$ENV_DOCKER")
 
-  local ai_runtime llm_arch runtime_override=""
+  local ai_runtime ai_provider ai_model llm_arch ollama_profile fastflow_profile runtime_override=""
   local -a runtime_f=()
 
   ai_runtime="$(compose_control_value LDS_AI_RUNTIME "")"
   [[ -n "$ai_runtime" ]] || ai_runtime="$(detect_ai_runtime)"
   case "${ai_runtime,,}" in
-  cpu | nvidia | amd) ;;
-  *) die "Invalid LDS_AI_RUNTIME: $ai_runtime (expected cpu|nvidia|amd)" ;;
+  cpu | nvidia | amd | npu) ;;
+  *) die "Invalid LDS_AI_RUNTIME: $ai_runtime (expected cpu|nvidia|amd|npu)" ;;
   esac
   ai_runtime="${ai_runtime,,}"
 
+  ai_provider="$(ai_provider_for_runtime "$ai_runtime")" ||
+    die "Cannot resolve AI provider for runtime: $ai_runtime"
+  ai_model="$(effective_ai_model "$ai_runtime")" ||
+    die "Cannot resolve AI model for runtime: $ai_runtime"
   llm_arch="$(llm_arch_for_runtime "$ai_runtime")" ||
     die "Cannot resolve LLM image tag for runtime: $ai_runtime"
 
-  if [[ "$ai_runtime" != "cpu" ]]; then
+  if [[ "$ai_provider" == "fastflow" ]]; then
+    ollama_profile=__lds-ai-disabled-ollama
+    fastflow_profile=ai
+  else
+    ollama_profile=ai
+    fastflow_profile=__lds-ai-disabled-fastflow
+  fi
+
+  # Only Ollama GPU modes need generated hardware overrides. FastFlow's XDNA2
+  # device + memlock contract is part of its tracked service definition.
+  if [[ "$ai_runtime" == "nvidia" || "$ai_runtime" == "amd" ]]; then
     mkdir -p "$CFG/.runtime"
     runtime_override="$(mktemp "$CFG/.runtime/ai.XXXXXX")" ||
       die "Unable to create temporary AI Compose override"
@@ -68,7 +82,7 @@ docker_compose() {
         printf '%s\n' '    gpus: all'
         ;;
       amd)
-        printf '%s\n' '    devices:'           '      - /dev/kfd:/dev/kfd'           '      - /dev/dri:/dev/dri'
+        printf '%s\n' '    devices:' '      - /dev/kfd:/dev/kfd' '      - /dev/dri:/dev/dri'
         ;;
       esac
     } >"$runtime_override"
@@ -88,7 +102,14 @@ docker_compose() {
   local host_os="${HOST_OS:-$(detect_host_os)}"
 
   local rc=0
-  HOST_OS="$host_os" LDS_LLM_ARCH="$llm_arch" "${__LDS_DC_BIN[@]}" \
+  HOST_OS="$host_os" \
+    LDS_LLM_ARCH="$llm_arch" \
+    LDS_AI_PROVIDER=llm \
+    LDS_AI_URL=http://llm:11434 \
+    LDS_AI_MODEL="$ai_model" \
+    LDS_AI_OLLAMA_PROFILE="$ollama_profile" \
+    LDS_AI_FASTFLOW_PROFILE="$fastflow_profile" \
+    "${__LDS_DC_BIN[@]}" \
     --project-directory "$DIR" \
     -f "$COMPOSE_FILE" \
     "${runtime_f[@]}" \
