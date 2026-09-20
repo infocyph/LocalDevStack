@@ -206,7 +206,7 @@ _graphify_python_bin() {
 }
 
 _graphify_diagnostics_enabled() {
-  case "${LDS_GRAPHIFY_DIAGNOSTICS:-1}" in
+  case "${LDS_GRAPHIFY_DIAGNOSTICS:-0}" in
   1 | true | TRUE | yes | YES | on | ON) return 0 ;;
   0 | false | FALSE | no | NO | off | OFF) return 1 ;;
   *) die "LDS_GRAPHIFY_DIAGNOSTICS must be true/false" ;;
@@ -221,7 +221,8 @@ cmd_graphify() {
   [[ -e "$target" ]] || die "Graphify target does not exist: $target"
 
   local runtime provider backend base_url timeout model api_key graphify_bin arg provider_dir target_abs
-  local graphify_python="" diagnostic_root="" diagnostic_log="" diagnostic_preview="" graphify_think="off"
+  local graphify_python="" diagnostic_root="" diagnostic_log="" diagnostic_preview="4096" graphify_think="off"
+  local diagnostic_mode="off"
   local local_provider=0
   local next_is_model=0 next_is_timeout=0 next_is_token_budget=0 next_is_max_concurrency=0
   local has_token_budget=0 has_max_concurrency=0
@@ -364,18 +365,21 @@ cmd_graphify() {
     target_abs="$(_realpath "$target")"
     provider_dir="$(mktemp -d)" || die "Unable to create temporary Graphify provider directory"
 
+    graphify_python="$(_graphify_python_bin "$graphify_bin")" ||
+      die "Unable to find the Python interpreter required for LocalDevStack Graphify structured output"
+
+    if [[ -d "$target_abs" ]]; then
+      diagnostic_root="$target_abs"
+    else
+      diagnostic_root="$(dirname "$target_abs")"
+    fi
+    diagnostic_log="${LDS_GRAPHIFY_DIAGNOSTIC_LOG:-$diagnostic_root/graphify-out/lds-graphify-diagnostics.jsonl}"
+    diagnostic_preview="${LDS_GRAPHIFY_DIAGNOSTIC_PREVIEW:-4096}"
+    [[ "$diagnostic_preview" =~ ^[0-9]+$ ]] && ((diagnostic_preview >= 256)) ||
+      die "LDS_GRAPHIFY_DIAGNOSTIC_PREVIEW must be an integer >= 256"
+
     if _graphify_diagnostics_enabled; then
-      graphify_python="$(_graphify_python_bin "$graphify_bin")" ||
-        die "Unable to find the Python interpreter required for Graphify diagnostics"
-      if [[ -d "$target_abs" ]]; then
-        diagnostic_root="$target_abs"
-      else
-        diagnostic_root="$(dirname "$target_abs")"
-      fi
-      diagnostic_log="${LDS_GRAPHIFY_DIAGNOSTIC_LOG:-$diagnostic_root/graphify-out/lds-graphify-diagnostics.jsonl}"
-      diagnostic_preview="${LDS_GRAPHIFY_DIAGNOSTIC_PREVIEW:-4096}"
-      [[ "$diagnostic_preview" =~ ^[0-9]+$ ]] && ((diagnostic_preview >= 256)) ||
-        die "LDS_GRAPHIFY_DIAGNOSTIC_PREVIEW must be an integer >= 256"
+      diagnostic_mode=on
     fi
   fi
 
@@ -395,13 +399,16 @@ cmd_graphify() {
       local_provider_base_url="$base_url"
 
       if [[ -n "$graphify_python" ]]; then
-        ready_file="$provider_dir/diagnostic-proxy.port"
-        mkdir -p "$(dirname "$diagnostic_log")"
-        : >"$diagnostic_log"
+        ready_file="$provider_dir/graphify-proxy.port"
+        if [[ "$diagnostic_mode" == on ]]; then
+          mkdir -p "$(dirname "$diagnostic_log")"
+          : >"$diagnostic_log"
+        fi
 
         "$graphify_python" "$DIR/scripts/graphify-diagnostic-proxy.py" \
           --upstream "${base_url%/v1}" \
           --provider "$provider" \
+          --diagnostics "$diagnostic_mode" \
           --ready-file "$ready_file" \
           --log-file "$diagnostic_log" \
           --preview-chars "$diagnostic_preview" &
@@ -414,14 +421,16 @@ cmd_graphify() {
             break
           fi
           kill -0 "$proxy_pid" >/dev/null 2>&1 ||
-            die "Local Graphify diagnostic proxy exited before becoming ready"
+            die "Local Graphify structured-output proxy exited before becoming ready"
           sleep 0.05
         done
         [[ "$proxy_port" =~ ^[0-9]+$ ]] ||
-          die "Local Graphify diagnostic proxy did not become ready"
+          die "Local Graphify structured-output proxy did not become ready"
 
         local_provider_base_url="http://127.0.0.1:${proxy_port}/v1"
-        printf '%s\n' "[lds graphify] suspect-response diagnostics enabled: $diagnostic_log" >&2
+        if [[ "$diagnostic_mode" == on ]]; then
+          printf '%s\n' "[lds graphify] suspect-response diagnostics enabled: $diagnostic_log" >&2
+        fi
       fi
 
       backend="$(_graphify_write_local_provider "$provider_dir" "$provider" "$local_provider_base_url" "$model" "$token_budget_value" "$graphify_think")" ||
