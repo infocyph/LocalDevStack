@@ -144,7 +144,13 @@ volumes:
     labels:
       com.infocyph.lds: "1"
       com.infocyph.stack: "LocalDevStack"
-      com.infocyph.purpose: "LLM Model Store"
+      com.infocyph.purpose: "Ollama Model Store"
+  lds_llm_fastflow:
+    name: LLMFastFlowModels
+    labels:
+      com.infocyph.lds: "1"
+      com.infocyph.stack: "LocalDevStack"
+      com.infocyph.purpose: "FastFlow Model Store"
   lds_tools_state:
     name: ToolsState
     labels:
