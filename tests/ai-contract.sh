@@ -368,6 +368,36 @@ assert module._extract_graph_tool_result(json.dumps(string_array_response).encod
     "hyperedges": [],
 }
 
+nested_arguments_response = json.loads(json.dumps(tool_response))
+nested_arguments_response["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"] = json.dumps({
+    "arguments": json.dumps({
+        "nodes": [{"id": "nested"}],
+        "edges": [],
+        "hyperedges": [],
+    })
+})
+assert module._extract_graph_tool_result(json.dumps(nested_arguments_response).encode()) == {
+    "nodes": [{"id": "nested"}],
+    "edges": [],
+    "hyperedges": [],
+}
+
+name_drift_response = json.loads(json.dumps(tool_response))
+name_drift_response["choices"][0]["message"]["tool_calls"][0]["function"]["name"] = " submit_graph "
+assert module._extract_graph_tool_result(json.dumps(name_drift_response).encode()) == graph
+
+flat_call_response = json.loads(json.dumps(tool_response))
+call = flat_call_response["choices"][0]["message"]["tool_calls"][0]
+flat_call_response["choices"][0]["message"]["tool_calls"][0] = {
+    "name": "submit_graph",
+    "arguments": call["function"]["arguments"],
+}
+assert module._extract_graph_tool_result(json.dumps(flat_call_response).encode()) == graph
+
+summary = module._tool_call_summary(json.dumps(tool_response).encode())
+assert "submit_graph:keys=" in summary
+assert "nodes" in summary
+
 empty_tool_response = json.loads(json.dumps(tool_response))
 empty_tool_response["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"] = json.dumps({
     "nodes": [],
