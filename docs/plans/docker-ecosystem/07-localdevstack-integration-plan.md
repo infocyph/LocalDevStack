@@ -2300,3 +2300,85 @@ this fragment; Nginx owns the fixed loopback-only `127.0.0.1:11434` publication.
 
 This keeps the repository at one LLM service definition while still avoiding invalid
 GPU/device declarations on unsupported hosts.
+
+
+---
+
+# Final AI provider architecture override — 2026-09-20
+
+This section supersedes every earlier Ollama-only or single-provider-service statement
+in this plan where they conflict with the final LocalDevStack implementation.
+
+## Provider selection
+
+LocalDevStack tracks two provider service definitions in `docker/compose/companion.yaml`,
+but enables exactly one of them for the `ai` profile:
+
+```text
+supported XDNA2 NPU -> llm-fastflow -> infocyph/llm-fastflow:latest
+NVIDIA GPU          -> llm-ollama  -> infocyph/llm-ollama:latest
+AMD ROCm GPU        -> llm-ollama  -> infocyph/llm-ollama:amd-latest
+CPU fallback        -> llm-ollama  -> infocyph/llm-ollama:latest
+```
+
+`llm-fastflow` and `llm-ollama` are mutually exclusive. They must not be active at the
+same time for one LocalDevStack runtime.
+
+## Common LLM identity
+
+The selected provider owns the common Docker network alias and normalized internal port:
+
+```text
+llm:11434
+```
+
+Provider-neutral consumers use:
+
+```text
+LDS_AI_PROVIDER=llm
+LDS_AI_URL=http://llm:11434
+https://llm.localhost/v1
+http://127.0.0.1:11434/v1
+```
+
+Provider-specific `llm-ollama.localhost` and `llm-fastflow.localhost` routes are
+diagnostic/native identities only. Nginx owns the loopback publication and proxies it
+to the common `llm` alias.
+
+## Model defaults
+
+The default model follows the runtime:
+
+```text
+FastFlow / NPU -> qwen3.5:9b
+Ollama         -> qwen3:14b
+```
+
+Setup leaves `LDS_AI_MODEL` blank by default so the correct provider default can apply.
+An explicit user value remains authoritative for the active provider.
+
+## Runtime selection
+
+Automatic detection order is XDNA2 NPU, NVIDIA, AMD ROCm, CPU. The explicit selector is:
+
+```text
+lds llm runtime auto|npu|nvidia|amd|cpu
+```
+
+FastFlow's XDNA2 device/memlock contract is tracked in its service definition. NVIDIA
+and ROCm Ollama hardware settings remain temporary Compose augmentation.
+
+## Persistence
+
+```text
+LLMModels         -> Ollama /root/.ollama
+LLMFastFlowModels -> FastFlow /models
+```
+
+Neither provider receives a Docker socket or project/repository bind mount by default.
+
+## Completion impact
+
+The release-readiness AI matrix must validate both provider selections, the common
+OpenAI-compatible `/v1` route, published `llm-fastflow:latest`, published Ollama images,
+and the rule that only one provider service is present in the effective Compose graph.
