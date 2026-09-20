@@ -82,6 +82,14 @@ _graphify_local_model_preflight() {
     die "Model '$model' is not available from the active LocalDevStack provider. Run: lds llm pull $model"
 }
 
+_graphify_backend_for_provider() {
+  case "${1,,}" in
+  fastflow) printf '%s' openai ;;
+  ollama) printf '%s' ollama ;;
+  *) return 1 ;;
+  esac
+}
+
 cmd_graphify() {
   need_bin graphify "install the Graphify CLI on the host first"
 
@@ -89,18 +97,45 @@ cmd_graphify() {
   [[ $# -eq 0 ]] || shift
   [[ -e "$target" ]] || die "Graphify target does not exist: $target"
 
-  local base_url timeout model api_key graphify_bin arg next_is_model=0 next_is_timeout=0 local_provider=0
-  if [[ -n "${OLLAMA_BASE_URL:-}" ]]; then
-    base_url="$OLLAMA_BASE_URL"
-  else
-    base_url="$(_graphify_local_base_url)"
-    local_provider=1
-  fi
-  timeout="${GRAPHIFY_API_TIMEOUT:-$(compose_control_value LDS_AI_TIMEOUT 1800)}"
-  model="${OLLAMA_MODEL:-$(effective_ai_model "$(_active_llm_runtime)")}"
-  api_key="${OLLAMA_API_KEY:-local}"
+  local runtime provider backend base_url timeout model api_key graphify_bin arg
+  local local_provider=0
+  local next_is_model=0 next_is_timeout=0 next_is_token_budget=0 next_is_max_concurrency=0
+  local has_token_budget=0 has_max_concurrency=0
+  local token_budget_value="" max_concurrency_value=""
+  local -a graphify_defaults=()
 
-  # Keep explicit model/timeout overrides consistent across extraction and clustering.
+  runtime="$(_active_llm_runtime)"
+  provider="$(_active_llm_provider)"
+  backend="$(_graphify_backend_for_provider "$provider")" ||
+    die "Unsupported active LLM provider for Graphify: $provider"
+
+  case "$backend" in
+  openai)
+    if [[ -n "${OPENAI_BASE_URL:-}" ]]; then
+      base_url="$OPENAI_BASE_URL"
+    else
+      base_url="$(_graphify_local_base_url)"
+      local_provider=1
+    fi
+    model="${OPENAI_MODEL:-$(effective_ai_model "$runtime")}"
+    api_key="${OPENAI_API_KEY:-local}"
+    ;;
+  ollama)
+    if [[ -n "${OLLAMA_BASE_URL:-}" ]]; then
+      base_url="$OLLAMA_BASE_URL"
+    else
+      base_url="$(_graphify_local_base_url)"
+      local_provider=1
+    fi
+    model="${OLLAMA_MODEL:-$(effective_ai_model "$runtime")}"
+    api_key="${OLLAMA_API_KEY:-local}"
+    ;;
+  esac
+
+  timeout="${GRAPHIFY_API_TIMEOUT:-$(compose_control_value LDS_AI_TIMEOUT 1800)}"
+
+  # Keep explicit model/timeout/resource overrides consistent while LocalDevStack
+  # retains ownership of backend selection and the two-stage extract/cluster flow.
   for arg in "$@"; do
     if ((next_is_model)); then
       model="$arg"
@@ -112,37 +147,107 @@ cmd_graphify() {
       next_is_timeout=0
       continue
     fi
+    if ((next_is_token_budget)); then
+      token_budget_value="$arg"
+      next_is_token_budget=0
+      continue
+    fi
+    if ((next_is_max_concurrency)); then
+      max_concurrency_value="$arg"
+      next_is_max_concurrency=0
+      continue
+    fi
+
     case "$arg" in
     --model) next_is_model=1 ;;
     --model=*) model="${arg#--model=}" ;;
     --api-timeout) next_is_timeout=1 ;;
     --api-timeout=*) timeout="${arg#--api-timeout=}" ;;
+    --token-budget)
+      has_token_budget=1
+      next_is_token_budget=1
+      ;;
+    --token-budget=*)
+      has_token_budget=1
+      token_budget_value="${arg#--token-budget=}"
+      ;;
+    --max-concurrency)
+      has_max_concurrency=1
+      next_is_max_concurrency=1
+      ;;
+    --max-concurrency=*)
+      has_max_concurrency=1
+      max_concurrency_value="${arg#--max-concurrency=}"
+      ;;
     --backend | --backend=*)
-      die "lds graphify owns --backend=ollama; do not pass --backend"
+      die "lds graphify selects the Graphify backend from the active LLM provider; do not pass --backend"
       ;;
     --no-cluster)
       die "lds graphify already separates extraction and clustering; do not pass --no-cluster"
       ;;
     esac
   done
+
   ((next_is_model == 0)) || die "--model requires a value"
   ((next_is_timeout == 0)) || die "--api-timeout requires a value"
+  ((next_is_token_budget == 0)) || die "--token-budget requires a value"
+  ((next_is_max_concurrency == 0)) || die "--max-concurrency requires a value"
+
   [[ -n "$model" ]] || die "Graphify model cannot be empty"
   [[ "$timeout" =~ ^[0-9]+$ ]] && ((timeout >= 1)) ||
     die "GRAPHIFY_API_TIMEOUT/--api-timeout must be a positive integer"
+
+  if ((has_token_budget)); then
+    [[ "$token_budget_value" =~ ^[0-9]+$ ]] && ((token_budget_value >= 1)) ||
+      die "--token-budget must be a positive integer"
+  fi
+  if ((has_max_concurrency)); then
+    [[ "$max_concurrency_value" =~ ^[0-9]+$ ]] && ((max_concurrency_value >= 1)) ||
+      die "--max-concurrency must be a positive integer"
+  fi
+
+  # FastFlow's Qwen3.5 9B path is OpenAI-compatible but has a smaller practical
+  # context budget than the old Ollama default. Keep semantic chunks conservative
+  # unless the caller explicitly chooses different Graphify limits.
+  if [[ "$provider" == fastflow ]]; then
+    if ((has_token_budget == 0)); then
+      token_budget_value="${LDS_GRAPHIFY_TOKEN_BUDGET:-4000}"
+      [[ "$token_budget_value" =~ ^[0-9]+$ ]] && ((token_budget_value >= 1)) ||
+        die "LDS_GRAPHIFY_TOKEN_BUDGET must be a positive integer"
+      graphify_defaults+=(--token-budget "$token_budget_value")
+    fi
+    if ((has_max_concurrency == 0)); then
+      max_concurrency_value="${LDS_GRAPHIFY_MAX_CONCURRENCY:-1}"
+      [[ "$max_concurrency_value" =~ ^[0-9]+$ ]] && ((max_concurrency_value >= 1)) ||
+        die "LDS_GRAPHIFY_MAX_CONCURRENCY must be a positive integer"
+      graphify_defaults+=(--max-concurrency "$max_concurrency_value")
+    fi
+  fi
 
   ((local_provider == 0)) || _graphify_local_model_preflight "$model"
 
   graphify_bin="$(bin_path graphify)"
 
   (
-    export OLLAMA_BASE_URL="$base_url"
-    export OLLAMA_API_KEY="$api_key"
-    export OLLAMA_MODEL="$model"
     export GRAPHIFY_API_TIMEOUT="$timeout"
 
-    "$graphify_bin" extract "$target" --backend ollama --no-cluster "$@" &&
-      "$graphify_bin" cluster-only "$target" --backend ollama
+    case "$backend" in
+    openai)
+      unset OLLAMA_BASE_URL OLLAMA_API_KEY OLLAMA_MODEL
+      export OPENAI_BASE_URL="$base_url"
+      export OPENAI_API_KEY="$api_key"
+      export OPENAI_MODEL="$model"
+      ;;
+    ollama)
+      unset OPENAI_BASE_URL OPENAI_API_KEY OPENAI_MODEL
+      export OLLAMA_BASE_URL="$base_url"
+      export OLLAMA_API_KEY="$api_key"
+      export OLLAMA_MODEL="$model"
+      ;;
+    esac
+
+    "$graphify_bin" extract "$target" --backend "$backend" --no-cluster "${graphify_defaults[@]}" "$@" &&
+      "$graphify_bin" cluster-only "$target" --backend "$backend"
   )
 }
 
