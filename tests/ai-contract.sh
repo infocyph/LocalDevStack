@@ -104,7 +104,8 @@ assert_file_contains "$ROOT/lib/ai.sh" 'reasoning_effort: "none"'
 assert_file_contains "$ROOT/lib/ai.sh" 'graphify-diagnostic-proxy.py'
 assert_file_contains "$ROOT/lib/ai.sh" 'http://127.0.0.1:${proxy_port}/v1'
 assert_file_contains "$ROOT/lib/ai.sh" '--provider "$provider"'
-assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_DIAGNOSTICS:-1'
+assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_DIAGNOSTICS:-0'
+assert_file_contains "$ROOT/lib/ai.sh" '--diagnostics "$diagnostic_mode"'
 assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_THINK:-off'
 assert_file_contains "$ROOT/lib/ai.sh" 'lds-graphify-diagnostics.jsonl'
 assert_file_contains "$ROOT/lib/ai.sh" 'llm think <auto|on|off>'
@@ -219,6 +220,14 @@ assert module.parse_graph_content('{"nodes":[],"edges":[],"hyperedges":[]}') == 
     "hyperedges": [],
 }
 assert module.parse_graph_content('{"nodes":["bad"],"edges":[],"hyperedges":[]}') is None
+
+assert module.parse_graph_content(
+    '{"nodes":[{"id":"a"}],"edges":[],"hyperedges":[]}'
+) == {
+    "nodes": [{"id": "a"}],
+    "edges": [],
+    "hyperedges": [],
+}
 
 body = json.dumps({
     "model": "qwen3.5:9b",
