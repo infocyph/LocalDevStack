@@ -125,6 +125,24 @@ An explicit ``LDS_AI_MODEL`` in ``docker/.env`` overrides whichever provider is 
 Because the providers may publish different model names, keep this blank when relying on
 automatic runtime switching unless the override exists in both providers.
 
+Thinking Control
+----------------
+
+Thinking uses one provider-neutral LocalDevStack switch:
+
+.. code-block:: bash
+
+   lds llm think          # prints auto/on/off
+   lds llm think auto     # provider/model default
+   lds llm think on
+   lds llm think off
+
+The persisted setting is ``LDS_AI_THINK``, which LocalDevStack maps to the common
+provider variable ``LLM_THINK`` for both Ollama and FastFlow. Normal developer
+commands inherit that setting. Strict structured-output paths such as ``json`` and
+``lds graphify`` force thinking off so reasoning cannot displace the required JSON
+payload.
+
 Provider CLI
 ------------
 
@@ -228,8 +246,10 @@ profile selectors enable exactly one provider. There are no tracked ``ai.yaml``,
 ``ai-nvidia.yaml``, ``ai-amd.yaml`` or ``ai-host-port.yaml`` variants.
 
 Only Ollama NVIDIA/ROCm hardware augmentation is generated temporarily under
-``docker/.runtime/``. FastFlow's XDNA2 device/memlock contract is part of its tracked
-service definition.
+``docker/.runtime/``. The tracked Ollama image is
+``infocyph/llm-ollama:latest``; the AMD override directly selects
+``infocyph/llm-ollama:amd-latest``. There is no ``LDS_LLM_ARCH`` setting.
+FastFlow's XDNA2 device/memlock contract is part of its tracked service definition.
 
 Graphify
 --------
@@ -237,36 +257,39 @@ Graphify
 ``lds graphify [path]`` uses the common LocalDevStack endpoint and selects the
 Graphify backend from the active provider.
 
+For the built-in LocalDevStack endpoint, Graphify runs through an ephemeral
+provider definition created only for that invocation. Nothing is written into the
+target repository or ``~/.graphify/providers.json``.
+
 FastFlow / NPU:
 
 .. code-block:: text
 
-   OPENAI_BASE_URL=http://llm.localhost:11434/v1
-   OPENAI_MODEL=<effective FastFlow model>
-   OPENAI_API_KEY=local
-   GRAPHIFY_API_TIMEOUT=<LDS_AI_TIMEOUT>
-   backend=openai
-   default token budget=4000
-   default max concurrency=1
+   base_url=http://llm.localhost:11434/v1
+   backend=lds-fastflow
+   model=<effective FastFlow model>
+   extra_body={"think": false}
 
 Ollama / CPU, NVIDIA or ROCm:
 
 .. code-block:: text
 
-   OLLAMA_BASE_URL=http://llm.localhost:11434/v1
-   OLLAMA_MODEL=<effective Ollama model>
-   OLLAMA_API_KEY=local
-   GRAPHIFY_API_TIMEOUT=<LDS_AI_TIMEOUT>
-   backend=ollama
+   base_url=http://llm.localhost:11434/v1
+   backend=lds-ollama
+   model=<effective Ollama model>
+   reasoning_effort=none
+
+The Ollama provider definition also keeps explicit context headroom for Graphify's
+local chunks. Both local providers default to ``--token-budget 4000
+--max-concurrency 1`` unless the caller supplied those flags. These limits and the
+no-thinking request are separate protections: the former prevents local context/resource
+pressure, while the latter prevents reasoning output from producing hollow structured
+responses.
 
 Before extraction, LocalDevStack checks ``/v1/models`` and fails fast when the
-selected model is absent. FastFlow uses Graphify's generic OpenAI-compatible backend;
-Ollama continues to use Graphify's native Ollama backend.
-
-For FastFlow, LocalDevStack adds ``--token-budget 4000 --max-concurrency 1`` unless
-the caller already supplied those flags. Override the defaults with explicit Graphify
+selected model is absent. Override the local chunk defaults with explicit Graphify
 flags, or set ``LDS_GRAPHIFY_TOKEN_BUDGET`` /
-``LDS_GRAPHIFY_MAX_CONCURRENCY``. If FastFlow reports ``Max length reached!``,
+``LDS_GRAPHIFY_MAX_CONCURRENCY``. If a local model reports ``Max length reached!``,
 reduce the token budget further, for example:
 
 .. code-block:: bash
