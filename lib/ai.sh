@@ -222,7 +222,7 @@ cmd_graphify() {
 
   local runtime provider backend base_url timeout model api_key graphify_bin arg provider_dir target_abs
   local graphify_python="" diagnostic_root="" diagnostic_log="" diagnostic_preview="4096" graphify_think="off"
-  local diagnostic_mode="off"
+  local diagnostic_mode="off" structured_timeout=""
   local local_provider=0
   local next_is_model=0 next_is_timeout=0 next_is_token_budget=0 next_is_max_concurrency=0
   local has_token_budget=0 has_max_concurrency=0
@@ -258,6 +258,10 @@ cmd_graphify() {
   esac
 
   timeout="${GRAPHIFY_API_TIMEOUT:-$(compose_control_value LDS_AI_TIMEOUT 1800)}"
+
+  structured_timeout="${LDS_GRAPHIFY_STRUCTURED_TIMEOUT:-300}"
+  [[ "$structured_timeout" =~ ^[0-9]+$ ]] && ((structured_timeout >= 1)) ||
+    die "LDS_GRAPHIFY_STRUCTURED_TIMEOUT must be a positive integer"
 
   case "${LDS_GRAPHIFY_THINK:-off}" in
   off | false | 0) graphify_think=off ;;
@@ -409,6 +413,8 @@ cmd_graphify() {
           --upstream "${base_url%/v1}" \
           --provider "$provider" \
           --diagnostics "$diagnostic_mode" \
+          --timeout "$timeout" \
+          --structured-timeout "$structured_timeout" \
           --ready-file "$ready_file" \
           --log-file "$diagnostic_log" \
           --preview-chars "$diagnostic_preview" &
