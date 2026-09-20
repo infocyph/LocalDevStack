@@ -261,10 +261,11 @@ For the built-in LocalDevStack endpoint, Graphify runs through an ephemeral
 provider definition created only for that invocation. The provider definition itself
 is never written into the target repository or ``~/.graphify/providers.json``.
 
-Local Graphify runs enable a localhost diagnostic proxy by default. The temporary
-provider points to ``127.0.0.1:<ephemeral>/v1``, and the proxy forwards the request
-body unchanged to ``http://llm.localhost:11434/v1``. It inspects semantic-extraction
-responses only; community-label requests are ignored.
+Local Graphify runs always use a localhost structured-output compatibility proxy.
+The temporary provider points to ``127.0.0.1:<ephemeral>/v1``, and the proxy
+forwards requests to ``http://llm.localhost:11434/v1``. Community-label requests
+pass through unchanged; semantic-extraction requests use the active provider's native
+structured-output mechanism.
 
 FastFlow / NPU:
 
@@ -288,44 +289,49 @@ local chunks. Both local providers default to ``--token-budget 4000
 no-thinking request are separate protections: the former prevents local context/resource
 pressure, while the latter keeps reasoning out of the structured response channel.
 
-When a semantic response itself looks suspect (empty content, valid-but-empty graph
-JSON, malformed/non-graph JSON, or graph arrays with no object entries), LocalDevStack
-prints a bounded assistant-content preview and stores the full suspect assistant
-response as JSON Lines in:
+Structured extraction is provider-specific:
+
+* FastFlow / Qwen3.5 uses native tool calling with a single ``submit_graph``
+  function whose arguments follow Graphify's node/edge/hyperedge schema. The proxy
+  converts valid tool arguments back into the normal assistant JSON content that
+  Graphify already understands. FastFlow currently ignores OpenAI
+  ``response_format`` on its chat-completions path, so tool calling is the
+  supported structured channel.
+* Ollama uses its OpenAI-compatible ``response_format.type=json_schema`` path with
+  the same Graphify schema and ``temperature=0``. Ollama maps that schema to its
+  native structured-output ``format`` field.
+
+A structurally valid all-empty graph remains valid and is passed back to Graphify
+unchanged; Graphify then decides whether to retry it as a hollow extraction. If a
+provider's structured path itself fails or returns malformed data, LocalDevStack
+falls back once to the original free-form Graphify request and leaves Graphify's
+normal retry policy intact.
+
+Detailed suspect-response logging is optional and does not control the compatibility
+proxy. Enable it with:
+
+.. code-block:: bash
+
+   LDS_GRAPHIFY_DIAGNOSTICS=1 lds graphify .
+
+When enabled, a bounded assistant-content preview is printed and the full suspect
+assistant response is stored as JSON Lines in:
 
 .. code-block:: text
 
    <target>/graphify-out/lds-graphify-diagnostics.jsonl
 
-For FastFlow only, malformed semantic responses also get one provider-native
-structured recovery attempt. LocalDevStack replays the same extraction request with
-FastFlow's tool-calling channel and a ``submit_graph`` function, then converts valid
-tool arguments back into the normal Graphify JSON response. The original prompt and
-source corpus never leave the same local provider; the recovery only changes the
-response channel from free-form assistant text to structured tool arguments. If the
-tool call is absent or invalid, LocalDevStack returns the original response and
-Graphify applies its normal retry policy.
-
 The diagnostic record contains request controls such as model, ``think``,
 ``reasoning_effort``, finish reason, and token usage, but never stores the Graphify
-prompt or source corpus. Set ``LDS_GRAPHIFY_DIAGNOSTICS=0`` to bypass the proxy.
-``LDS_GRAPHIFY_DIAGNOSTIC_PREVIEW`` controls the terminal preview size (minimum 256,
-default 4096). ``LDS_GRAPHIFY_DIAGNOSTIC_LOG`` overrides the JSONL path.
+prompt or source corpus. ``LDS_GRAPHIFY_DIAGNOSTIC_PREVIEW`` controls the terminal
+preview size (minimum 256, default 4096). ``LDS_GRAPHIFY_DIAGNOSTIC_LOG`` overrides
+the JSONL path.
 
-FastFlow Graphify defaults to ``LDS_GRAPHIFY_THINK=off``. For a controlled
-instruction-following A/B test, run the same corpus once with thinking enabled:
-
-.. code-block:: bash
-
-   LDS_GRAPHIFY_THINK=on lds graphify .
-
-The ``on`` mode sends both ``think=true`` and
-``reasoning_effort=high``. FastFlow keeps reasoning in
-``reasoning_content`` and the final answer in ``message.content``, so the
-Graphify parser still receives only the final graph JSON. Use
-``LDS_GRAPHIFY_THINK=auto`` to omit both controls and return to the model/provider
-default. This switch is intended for diagnosis until the better-performing mode is
-confirmed on the real corpus.
+FastFlow Graphify still defaults to ``LDS_GRAPHIFY_THINK=off``. The current
+FastFlow Qwen3.5 non-stream parser can leave ``<think>...</think>`` text inside
+``message.content``, so thinking is intentionally kept off for Graphify's
+structured extraction path. ``LDS_GRAPHIFY_THINK=on`` and
+``LDS_GRAPHIFY_THINK=auto`` remain diagnostic overrides, not recommended defaults.
 
 Before extraction, LocalDevStack checks ``/v1/models`` and fails fast when the
 selected model is absent. Override the local chunk defaults with explicit Graphify
