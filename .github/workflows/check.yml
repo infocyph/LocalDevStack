@@ -86,15 +86,15 @@ jobs:
       - name: Render supported Compose matrices
         run: tests/compose-contract.sh
 
-  fake-ollama:
-    name: Fake Ollama contract
+  fake-llm:
+    name: Common LLM contract
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Validate lightweight Ollama-compatible fixture
+      - name: Validate common OpenAI-compatible LLM fixture
         run: tests/ai-contract.sh
 
   published-images:
