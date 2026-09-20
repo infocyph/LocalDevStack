@@ -36,7 +36,10 @@ Admin/observability volumes
    Mailpit persistence.
 
 ``LLMModels``
-   Ollama/local-model persistence when the ``ai`` profile is enabled.
+   Ollama model persistence when the selected AI provider is Ollama.
+
+``LLMFastFlowModels``
+   FastFlow model persistence under ``/models`` when the selected AI provider is FastFlow.
 
 These named volumes are intentionally stable so developer data can survive container and
 image replacement.
@@ -125,7 +128,7 @@ Docker Socket Boundary
 
 because their supported workflows need Docker control.
 
-Persistent databases, admin clients, Nginx/Apache, and ``llm-ollama`` do not receive the
+Persistent databases, admin clients, Nginx/Apache, ``llm-ollama``, and ``llm-fastflow`` do not receive the
 socket by default.
 
 ``lds run --sock`` is a separate explicit opt-in for an ad-hoc container.
