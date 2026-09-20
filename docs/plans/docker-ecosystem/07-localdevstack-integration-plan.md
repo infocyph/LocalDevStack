@@ -372,9 +372,9 @@ SCRIPTOMATIC_REF=main
 ```
 
 Tools, Runner, Nginx and Apache are declared directly as their moving `:latest` product
-images. The LLM service is declared directly as
-`infocyph/llm-ollama:${LDS_LLM_ARCH}`, where `LDS_LLM_ARCH` is derived from the effective
-AI runtime (`latest` for CPU/NVIDIA, `amd-latest` for AMD/ROCm).
+images. The tracked Ollama service is declared directly as
+`infocyph/llm-ollama:latest`. AMD/ROCm uses a temporary runtime override that directly
+selects `infocyph/llm-ollama:amd-latest`; there is no separate LLM image-tag selector.
 
 Do not add `LDS_TOOLS_IMAGE`, `LDS_RUNNER_IMAGE`, `LDS_NGINX_IMAGE`,
 `LDS_APACHE_IMAGE`, `LDS_LLM_IMAGE`, or `LDS_LLM_AMD_IMAGE` indirection.
@@ -554,7 +554,7 @@ Base service:
 services:
   llm-ollama:
     container_name: LLM_OLLAMA
-    image: infocyph/llm-ollama:${LDS_LLM_ARCH}
+    image: infocyph/llm-ollama:latest
     restart: unless-stopped
     profiles: [ai]
     volumes:
@@ -622,17 +622,17 @@ Do not create tracked runtime-variant Compose files. Keep one service in
 
 NVIDIA:
 
-- derive `LDS_LLM_ARCH=latest`;
+- keep the tracked `infocyph/llm-ollama:latest` image;
 - add `gpus: all` in the temporary fragment.
 
 AMD:
 
-- derive `LDS_LLM_ARCH=amd-latest`;
+- set `image: infocyph/llm-ollama:amd-latest` directly in the temporary fragment;
 - expose `/dev/kfd` and `/dev/dri` in the temporary fragment.
 
-`LDS_AI_RUNTIME` is the explicit runtime selector when configured. `LDS_LLM_ARCH`
-is derived from the effective runtime for Compose interpolation and is not a separate
-user-facing image-version choice. Detection rules are: usable `nvidia-smi` -> NVIDIA;
+`LDS_AI_RUNTIME` is the explicit runtime selector when configured. There is no
+`LDS_LLM_ARCH` setting or user-facing image-version choice. Detection rules are:
+usable `nvidia-smi` -> NVIDIA;
 both `/dev/kfd` and `/dev/dri` -> AMD/ROCm; otherwise CPU. An AMD CPU alone never
 selects the AMD/ROCm image. `lds llm runtime ...` remains the explicit override.
 
@@ -1949,7 +1949,6 @@ LDS_TOOLS_IMAGE=infocyph/tools:latest
 LDS_RUNNER_IMAGE=infocyph/runner:latest
 LDS_NGINX_IMAGE=infocyph/nginx:latest
 LDS_APACHE_IMAGE=infocyph/apache:latest
-LDS_LLM_ARCH=latest
 ```
 
 Other runtime defaults follow the same rule. PostgreSQL uses `postgres:alpine`; MySQL, MariaDB, MongoDB, Redis Stack/Redis Insight, CloudBeaver, Mongo Express and Mailpit use their normal moving latest tags because the selected image family does not provide a suitable moving Alpine alias for this stack.
