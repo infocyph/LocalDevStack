@@ -20,8 +20,9 @@ runner="$ROOT/docs/guides/ad-hoc-runner.rst"
 notify="$ROOT/docs/guides/notifications.rst"
 secrets="$ROOT/docs/guides/secrets-sops-age.rst"
 cli="$ROOT/docs/reference/cli.rst"
+plan="$ROOT/docs/plans/docker-ecosystem/07-localdevstack-integration-plan.md"
 
-for file in "$index" "$readme" "$quick" "$arch" "$profiles" "$storage" "$domain" "$tls" "$ai" "$databases" "$ops" "$runner" "$notify" "$secrets" "$cli"; do
+for file in "$index" "$readme" "$quick" "$arch" "$profiles" "$storage" "$domain" "$tls" "$ai" "$databases" "$ops" "$runner" "$notify" "$secrets" "$cli" "$plan"; do
   assert_file "$file"
 done
 
@@ -138,3 +139,21 @@ for stale in LDS_TOOLS_IMAGE LDS_RUNNER_IMAGE LDS_NGINX_IMAGE LDS_APACHE_IMAGE; 
 done
 assert_file_contains "$ai" 'Both provider definitions live in ``docker/compose/companion.yaml``'
 pass "docs reflect fixed infrastructure images and ephemeral AI overrides"
+
+assert_file_contains "$plan" 'Tools **0.25**'
+assert_file_contains "$plan" 'Nginx **0.6**'
+assert_file_contains "$plan" 'LLM-FastFlow **0.01.2**'
+assert_file_contains "$plan" 'LLM-Ollama **0.05**'
+assert_file_contains "$plan" 'current graph has **18** services'
+assert_file_contains "$plan" 'current graph has **22** named volumes'
+assert_file_contains "$plan" 'mutually exclusive'
+assert_file_contains "$plan" 'llm:11434'
+for stale in \
+  '# Final implementation simplification — single LLM service' \
+  '- automatic GPU detection;' \
+  'When AI is enabled, `llm-ollama` persists models'; do
+  if grep -Fq "$stale" "$plan"; then
+    fail "implementation plan contains superseded AI wording: $stale"
+  fi
+done
+pass "implementation plan matches the final provider architecture and current published baselines"
