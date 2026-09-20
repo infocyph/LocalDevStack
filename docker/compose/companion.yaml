@@ -59,7 +59,7 @@ services:
     hostname: llm-ollama
     image: infocyph/llm-ollama:${LDS_LLM_ARCH}
     restart: unless-stopped
-    profiles: ["${LDS_AI_OLLAMA_PROFILE:-__lds-ai-disabled-ollama}"]
+    profiles: ["${LDS_AI_OLLAMA_PROFILE:-ai}"]
     environment:
       - LLM_OLLAMA_MODEL=${LDS_AI_MODEL:-qwen3:14b}
       - LLM_OLLAMA_SYSTEM=${LLM_OLLAMA_SYSTEM:-}
