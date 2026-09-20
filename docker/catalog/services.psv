@@ -5,4 +5,4 @@ MARIADB|mariadb|MariaDB|mariadb|MARIADB_VERSION|MARIADB_VERSION=latest;MARIADB_R
 ELASTICSEARCH|elasticsearch|Elasticsearch|elasticsearch|ELASTICSEARCH_VERSION|ELASTICSEARCH_VERSION=9.5.4|Version|kibana|ElasticSearchStore|https://kibana.localhost|search|1|0|
 MONGODB|mongodb|MongoDB|mongodb|MONGODB_VERSION|MONGODB_VERSION=latest;MONGODB_ROOT_USERNAME=root;MONGODB_ROOT_PASSWORD=12345|Version;Root username;Root password|mongo-express|MongoDBStore|https://me.localhost|database|1|0|
 REDIS|redis|Redis|redis|REDIS_VERSION|REDIS_VERSION=latest|Version|redis-insight|RedisStore|https://ri.localhost|cache|1|0|
-AI|ai|Local AI|llm-ollama|LDS_LLM_ARCH|LDS_AI_MODEL=qwen3:14b|Preferred model||LLMModels|https://llm-ollama.localhost|ai|1|0|cpu,nvidia,amd
+AI|ai|Local AI|llm|LDS_AI_RUNTIME|LDS_AI_MODEL=|Model override (blank = provider default)||LLMModels|https://llm.localhost|ai|1|0|cpu,nvidia,amd,npu
