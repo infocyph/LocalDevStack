@@ -131,9 +131,83 @@ _GRAPH_TOOL = {
             "type": "object",
             "required": ["nodes", "edges", "hyperedges"],
             "properties": {
-                "nodes": {"type": "array", "items": {"type": "object"}},
-                "edges": {"type": "array", "items": {"type": "object"}},
-                "hyperedges": {"type": "array", "items": {"type": "object"}},
+                "nodes": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["id", "label", "file_type", "source_file"],
+                        "properties": {
+                            "id": {"type": "string"},
+                            "label": {"type": "string"},
+                            "file_type": {
+                                "type": "string",
+                                "enum": ["code", "document", "paper", "image", "rationale", "concept"],
+                            },
+                            "source_file": {"type": "string"},
+                            "source_location": {"type": ["string", "null"]},
+                            "source_url": {"type": ["string", "null"]},
+                            "captured_at": {"type": ["string", "null"]},
+                            "author": {"type": ["string", "null"]},
+                            "contributor": {"type": ["string", "null"]},
+                            "rationale": {"type": ["string", "null"]},
+                        },
+                    },
+                },
+                "edges": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": [
+                            "source", "target", "relation", "confidence",
+                            "confidence_score", "source_file", "weight",
+                        ],
+                        "properties": {
+                            "source": {"type": "string"},
+                            "target": {"type": "string"},
+                            "relation": {
+                                "type": "string",
+                                "enum": [
+                                    "calls", "implements", "references", "cites",
+                                    "conceptually_related_to", "shares_data_with",
+                                    "semantically_similar_to", "rationale_for",
+                                ],
+                            },
+                            "confidence": {
+                                "type": "string",
+                                "enum": ["EXTRACTED", "INFERRED", "AMBIGUOUS"],
+                            },
+                            "confidence_score": {"type": "number"},
+                            "source_file": {"type": "string"},
+                            "source_location": {"type": ["string", "null"]},
+                            "weight": {"type": "number"},
+                        },
+                    },
+                },
+                "hyperedges": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": [
+                            "id", "label", "nodes", "relation", "confidence",
+                            "confidence_score", "source_file",
+                        ],
+                        "properties": {
+                            "id": {"type": "string"},
+                            "label": {"type": "string"},
+                            "nodes": {"type": "array", "items": {"type": "string"}},
+                            "relation": {
+                                "type": "string",
+                                "enum": ["participate_in", "implement", "form"],
+                            },
+                            "confidence": {
+                                "type": "string",
+                                "enum": ["EXTRACTED", "INFERRED"],
+                            },
+                            "confidence_score": {"type": "number"},
+                            "source_file": {"type": "string"},
+                        },
+                    },
+                },
             },
         },
     },
