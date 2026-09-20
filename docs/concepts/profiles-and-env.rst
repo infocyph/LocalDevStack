@@ -47,6 +47,11 @@ the generated runtime/server profiles::
 
 while removing the previously selected catalog services.
 
+Choosing ``NONE`` clears all catalog-managed service profiles while preserving generated
+domain/runtime profiles. Choosing ``CANCEL / Back`` leaves the existing selection
+unchanged. When a selected service is configured again, existing user values are reused
+as prompt defaults; secret-like values are preserved without printing them.
+
 Manual profile operations remain available::
 
    lds profiles list
@@ -163,7 +168,7 @@ Examples:
 - Tools, Runner, Nginx, and Apache use their published ``:latest`` aliases.
 - Standard local AI uses ``infocyph/llm-ollama:latest``.
 - AMD local AI uses ``infocyph/llm-ollama:amd-latest``.
-- Elasticsearch, Kibana, and Filebeat stay on one aligned version.
+- Elasticsearch, Kibana, and Filebeat share ``ELASTICSEARCH_VERSION`` and default to ``latest``.
 
 Run::
 
