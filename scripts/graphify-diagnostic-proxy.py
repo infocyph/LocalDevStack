@@ -126,7 +126,20 @@ def _request_metadata(body: bytes) -> dict[str, Any]:
         return {}
     if not isinstance(request, dict):
         return {}
+
+    messages = request.get("messages")
+    extraction_request = False
+    if isinstance(messages, list):
+        for message in messages:
+            if not isinstance(message, dict) or message.get("role") != "system":
+                continue
+            content = message.get("content")
+            if isinstance(content, str) and "graphify semantic extraction agent" in content:
+                extraction_request = True
+                break
+
     return {
+        "_extraction_request": extraction_request,
         "model": request.get("model"),
         "think": request.get("think", "<omitted>"),
         "reasoning_effort": request.get("reasoning_effort", "<omitted>"),
@@ -220,7 +233,7 @@ class DiagnosticHandler(BaseHTTPRequestHandler):
     def _inspect_chat_response(self, request_body: bytes, response_body: bytes, status: int) -> None:
         req = _request_metadata(request_body)
         resp, content = _response_metadata(response_body)
-        if status < 200 or status >= 300:
+        if status < 200 or status >= 300 or not req.pop("_extraction_request", False):
             return
 
         suspect, reason = classify_graph_content(content)
