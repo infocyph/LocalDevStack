@@ -85,7 +85,11 @@ assert_file_contains "$ROOT/lib/ai.sh" 'Run: lds llm pull $model'
 assert_file_contains "$ROOT/lib/ai.sh" 'ai_service_for_runtime'
 assert_file_contains "$ROOT/lib/ai.sh" 'llm-fastflow'
 assert_file_contains "$ROOT/lib/ai.sh" 'llm-ollama'
-pass "LLM CLI and Graphify resolve through active provider/common endpoint"
+assert_file_contains "$ROOT/lib/ai.sh" 'fastflow) printf '\''%s'\'' openai'
+assert_file_contains "$ROOT/lib/ai.sh" 'ollama) printf '\''%s'\'' ollama'
+assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_TOKEN_BUDGET:-4000'
+assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_MAX_CONCURRENCY:-1'
+pass "LLM CLI and Graphify resolve through provider-aware common endpoint"
 
 (
   set -euo pipefail
@@ -106,6 +110,21 @@ pass "LLM CLI and Graphify resolve through active provider/common endpoint"
   fi
 )
 pass "Graphify validates either provider model through /v1/models"
+
+(
+  set -euo pipefail
+  # shellcheck source=lib/ai.sh
+  source "$ROOT/lib/ai.sh"
+
+  [[ "$(_graphify_backend_for_provider fastflow)" == openai ]] ||
+    fail "FastFlow Graphify backend did not resolve to openai"
+  [[ "$(_graphify_backend_for_provider ollama)" == ollama ]] ||
+    fail "Ollama Graphify backend did not resolve to ollama"
+  if _graphify_backend_for_provider unknown >/dev/null 2>&1; then
+    fail "Unknown LLM provider unexpectedly resolved a Graphify backend"
+  fi
+)
+pass "Graphify backend selection follows active LLM provider"
 
 
 (
