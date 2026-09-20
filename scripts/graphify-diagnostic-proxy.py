@@ -424,10 +424,22 @@ class DiagnosticHandler(BaseHTTPRequestHandler):
             if value:
                 request_headers[name] = value
 
+        is_chat = self.command == "POST" and self.path.rstrip("/").endswith("/v1/chat/completions")
+        metadata = _request_metadata(body) if is_chat else {}
+        extraction_request = bool(metadata.get("_extraction_request"))
+
+        upstream_body = body
+        structured_primary = False
+        if extraction_request:
+            candidate = _build_tool_recovery_request(body)
+            if candidate is not None:
+                upstream_body = candidate
+                structured_primary = True
+
         upstream_url = self.upstream.rstrip("/") + self.path
         request = urllib.request.Request(
             upstream_url,
-            data=body if self.command not in ("GET", "HEAD") else None,
+            data=upstream_body if self.command not in ("GET", "HEAD") else None,
             headers=request_headers,
             method=self.command,
         )
@@ -454,8 +466,27 @@ class DiagnosticHandler(BaseHTTPRequestHandler):
                 {"error": {"message": f"Graphify diagnostic proxy upstream error: {exc}"}}
             ).encode("utf-8")
 
-        if self.command == "POST" and self.path.rstrip("/").endswith("/v1/chat/completions"):
-            response_body = self._inspect_and_recover_chat_response(body, response_body, status)
+        if is_chat and extraction_request:
+            if structured_primary and 200 <= status < 300:
+                graph = _extract_graph_tool_result(response_body)
+                if graph is not None:
+                    replacement = _replace_response_content(response_body, graph)
+                    if replacement is not None:
+                        response_body = replacement
+                        print(
+                            "[lds graphify diagnostic] structured FastFlow graph via submit_graph tool: "
+                            f"model={metadata.get('model')}; think={metadata.get('think')}; "
+                            f"nodes={len(graph['nodes'])}; edges={len(graph['edges'])}; "
+                            f"hyperedges={len(graph['hyperedges'])}",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+                    else:
+                        response_body = self._fallback_freeform(body)
+                else:
+                    response_body = self._fallback_freeform(body)
+            else:
+                response_body = self._inspect_and_recover_chat_response(body, response_body, status)
 
         self.send_response(status)
         for name, value in response_headers.items():
@@ -465,6 +496,18 @@ class DiagnosticHandler(BaseHTTPRequestHandler):
         self.end_headers()
         if self.command != "HEAD":
             self.wfile.write(response_body)
+
+    def _fallback_freeform(self, original_body: bytes) -> bytes:
+        fallback = self._post_upstream(original_body)
+        if fallback is None:
+            return b'{"error":{"message":"Structured Graphify extraction failed and free-form fallback was unavailable"}}'
+        print(
+            "[lds graphify diagnostic] submit_graph primary extraction did not yield a usable graph; "
+            "falling back to the original free-form Graphify request",
+            file=sys.stderr,
+            flush=True,
+        )
+        return self._inspect_and_recover_chat_response(original_body, fallback, 200)
 
     def _post_upstream(self, body: bytes) -> bytes | None:
         request = urllib.request.Request(
