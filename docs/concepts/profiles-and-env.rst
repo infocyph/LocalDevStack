@@ -246,9 +246,9 @@ Use::
 
 to control the runtime explicitly. ``auto`` clears the explicit override.
 
-``LDS_LLM_ARCH`` remains a derived Ollama compatibility tag (``latest`` or
-``amd-latest``); it is not the FastFlow selector and should not be managed as a generic
-LLM version field.
+Ollama image tags are selected directly from the effective runtime: CPU/NVIDIA use
+``infocyph/llm-ollama:latest``, while AMD/ROCm uses
+``infocyph/llm-ollama:amd-latest``.
 
 New setup leaves ``LDS_AI_MODEL`` blank so the active provider default applies. An
 explicit model override is forwarded to both Tools and the active provider. Keep it blank
