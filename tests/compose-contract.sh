@@ -53,7 +53,6 @@ USER=$(id -un)
 UID=$(id -u)
 GID=$(id -g)
 PROJECT_DIR=$ROOT
-LDS_LLM_ARCH=latest
 EOF
 
 compose=(docker compose
@@ -263,7 +262,8 @@ fi
 if [[ -d "$ROOT/docker/.runtime" ]] && find "$ROOT/docker/.runtime" -type f -print -quit | grep -q .; then
   fail "temporary AI Compose overrides were not cleaned up"
 fi
-assert_file_contains "$ROOT/docker/compose/companion.yaml" 'image: infocyph/llm-ollama:${LDS_LLM_ARCH}'
+assert_file_contains "$ROOT/docker/compose/companion.yaml" 'image: infocyph/llm-ollama:latest'
+assert_file_contains "$ROOT/lib/compose.sh" 'image: infocyph/llm-ollama:amd-latest'
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'image: infocyph/llm-fastflow:latest'
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'aliases: [llm]'
 pass "mutually exclusive LLM providers share one common llm network identity"
