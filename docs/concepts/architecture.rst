@@ -101,7 +101,9 @@ Service-to-service traffic uses Docker DNS names such as::
    mongodb
    redis
    elasticsearch
+   llm
    llm-ollama
+   llm-fastflow
 
 The historical ``lds vpn-fix`` command remains only as a deprecated compatibility
 message because LocalDevStack no longer owns fixed bridge subnets.
@@ -141,30 +143,31 @@ profiles before recreating the stack.
 AI Flow
 -------
 
-When the ``ai`` profile is enabled:
+When the ``ai`` profile is enabled, LocalDevStack selects exactly one provider:
 
-1. ``llm-ollama`` provides the Ollama runtime and persistent model store;
-2. Tools consumes ``http://llm-ollama:11434`` internally;
-3. Nginx exposes ``https://llm-ollama.localhost`` and the loopback-only native endpoint ``http://llm-ollama.localhost:11434`` to host clients;
-4. ``lds ai`` delegates higher-level/operational AI to Tools;
-5. ``lds llm`` delegates model/runtime operations to the bundled ``llm-ollama`` CLI.
+.. code-block:: text
 
-The provider is one ``llm-ollama`` service declared in
-``docker/compose/companion.yaml`` and enabled only by the ``ai`` profile. The service
-keeps ``container_name: LLM_OLLAMA`` for current single-stack compatibility, while all
-internal routing continues to use the Compose service/hostname ``llm-ollama``. Its image
-is ``infocyph/llm-ollama:${LDS_LLM_ARCH}``: CPU/NVIDIA resolve to ``latest`` and
-AMD/ROCm resolves to ``amd-latest``. ``LDS_LLM_ARCH`` is derived from the effective
-runtime rather than maintained as an independent version selector.
+   supported XDNA2 NPU -> llm-fastflow
+   NVIDIA/ROCm/CPU     -> llm-ollama
 
-No AI-specific Compose files are tracked. ``lds`` generates a temporary fragment under
-``docker/.runtime/`` only when NVIDIA GPU access, AMD device mappings, or loopback
-host-port exposure is required, then removes it after the Compose command. The service
-also forwards the configured ``LDS_AI_MODEL`` to the provider as ``LLM_OLLAMA_MODEL`` and
-passes the documented provider safety/tuning settings from ``docker/.env``. For AMD
-runtime on an AMD CPU, LocalDevStack persists ``LDS_AI_IGPU_ENABLE=1`` and forwards it
-as ``OLLAMA_IGPU_ENABLE=1`` so Ollama admits the integrated Radeon GPU.
+The selected service owns the common Docker DNS alias ``llm`` on internal port ``11434``.
+Tools consumes ``http://llm:11434`` and Nginx exposes ``https://llm.localhost`` plus the
+loopback-only native route ``http://127.0.0.1:11434``. Provider-specific Nginx routes
+remain available for diagnostics/native operations.
 
+``lds ai`` delegates higher-level operational/developer AI to Tools. ``lds llm`` resolves
+the active provider and dispatches provider/model operations to ``llm-fastflow`` or
+``llm-ollama`` as appropriate.
+
+Both provider definitions live in ``docker/compose/companion.yaml`` but dynamic profile
+selection ensures they are mutually exclusive. FastFlow uses ``infocyph/llm-fastflow:latest``
+for ``npu``. Ollama uses ``latest`` for CPU/NVIDIA and ``amd-latest`` for AMD/ROCm.
+
+Provider defaults also differ: FastFlow uses ``qwen3.5:9b`` and Ollama uses
+``qwen3:14b`` unless ``LDS_AI_MODEL`` is explicitly set.
+
+NVIDIA/ROCm hardware augmentation is generated temporarily under ``docker/.runtime/``.
+FastFlow's XDNA2 device and memlock contract is tracked directly in its service definition.
 Project Identity
 ----------------
 
@@ -196,6 +199,7 @@ equivalent to powerful host Docker control.
 The Docker socket is not mounted into:
 
 - ``llm-ollama``;
+- ``llm-fastflow``;
 - databases;
 - database admin clients;
 - Nginx or Apache;
@@ -204,7 +208,7 @@ The Docker socket is not mounted into:
 The separate ad-hoc ``lds run --sock`` option is an explicit opt-in and should be used
 only with trusted Dockerfiles/code.
 
-``llm-ollama`` also receives no project/repository mount by default. AI output is not
+Neither LLM provider receives a project/repository mount by default. AI output is not
 automatically executed as shell, SQL, or code.
 
 Persistence
