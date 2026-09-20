@@ -44,6 +44,7 @@ moving_images=(
   "docker.elastic.co/beats/filebeat:9.5.4"
   "infocyph/llm-ollama:latest"
   "infocyph/llm-ollama:amd-latest"
+  "infocyph/llm-fastflow:latest"
 )
 
 for image in "${moving_images[@]}"; do
@@ -59,10 +60,14 @@ done
 pass "Tools and Runner publish healthchecks"
 
 grep -Fq 'image: infocyph/llm-ollama:${LDS_LLM_ARCH}' "$ROOT/docker/compose/companion.yaml" ||
-  fail "LLM service must use the single LDS_LLM_ARCH selector"
+  fail "Ollama service must use the latest/amd-latest selector"
+grep -Fq 'image: infocyph/llm-fastflow:latest' "$ROOT/docker/compose/companion.yaml" ||
+  fail "FastFlow service must use its published latest image"
 grep -Fq "amd) printf '%s' amd-latest" "$ROOT/lib/platform.sh" ||
-  fail "AMD runtime must map to amd-latest"
-pass "LLM image selection follows the single latest/amd-latest tag contract"
+  fail "AMD runtime must map to Ollama amd-latest"
+grep -Fq "npu) printf '%s' fastflow" "$ROOT/lib/platform.sh" ||
+  fail "NPU runtime must map to FastFlow"
+pass "LLM image selection follows mutually exclusive provider contracts"
 
 tools_profile_chooser="$(
   docker run --rm --entrypoint cat "$tools_image" /usr/local/bin/profile-chooser
