@@ -297,6 +297,15 @@ response as JSON Lines in:
 
    <target>/graphify-out/lds-graphify-diagnostics.jsonl
 
+For FastFlow only, malformed semantic responses also get one provider-native
+structured recovery attempt. LocalDevStack replays the same extraction request with
+FastFlow's tool-calling channel and a ``submit_graph`` function, then converts valid
+tool arguments back into the normal Graphify JSON response. The original prompt and
+source corpus never leave the same local provider; the recovery only changes the
+response channel from free-form assistant text to structured tool arguments. If the
+tool call is absent or invalid, LocalDevStack returns the original response and
+Graphify applies its normal retry policy.
+
 The diagnostic record contains request controls such as model, ``think``,
 ``reasoning_effort``, finish reason, and token usage, but never stores the Graphify
 prompt or source corpus. Set ``LDS_GRAPHIFY_DIAGNOSTICS=0`` to bypass the proxy.
