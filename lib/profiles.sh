@@ -119,7 +119,8 @@ setup_menu_print() {
       i=$((i + 1))
     done
     printf "\n  a) ALL\n"
-    printf "  n) NONE / Back\n\n"
+    printf "  n) NONE\n"
+    printf "  q) CANCEL / Back\n\n"
   } >&2
 }
 
