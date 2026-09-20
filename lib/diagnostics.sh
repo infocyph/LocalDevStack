@@ -426,15 +426,16 @@ cmd_images() {
   printf '%-16s %s\n' "Runner" "infocyph/runner:latest"
   printf '%-16s %s\n' "Nginx" "infocyph/nginx:latest"
   printf '%-16s %s\n' "Apache" "infocyph/apache:latest"
-  local ai_runtime ai_provider llm_arch llm_image
+  local ai_runtime ai_provider llm_image
   ai_runtime="$(compose_control_value LDS_AI_RUNTIME "")"
   [[ -n "$ai_runtime" ]] || ai_runtime="$(detect_ai_runtime)"
   ai_provider="$(ai_provider_for_runtime "$ai_runtime")"
   if [[ "$ai_provider" == "fastflow" ]]; then
     llm_image="infocyph/llm-fastflow:latest"
+  elif [[ "$ai_runtime" == "amd" ]]; then
+    llm_image="infocyph/llm-ollama:amd-latest"
   else
-    llm_arch="$(llm_arch_for_runtime "$ai_runtime")"
-    llm_image="infocyph/llm-ollama:$llm_arch"
+    llm_image="infocyph/llm-ollama:latest"
   fi
   printf '%-16s %s\n' "LLM" "$llm_image"
   printf '%-16s %s\n' "LLM provider" "$ai_provider"
