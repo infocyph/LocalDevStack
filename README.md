@@ -126,7 +126,7 @@ lds setup profile
 
 Catalog-managed optional profiles are `postgresql`, `mysql`, `mariadb`, `mongodb`, `redis`, `elasticsearch`, and `ai`.
 
-Re-running the wizard **replaces the catalog-managed selection** while preserving generated domain/runtime profiles.
+Re-running the wizard **replaces the catalog-managed selection** while preserving generated domain/runtime profiles and previously configured values. Choose `NONE` to clear catalog-managed profiles; `CANCEL / Back` leaves the current selection unchanged.
 
 Manual profile operations remain available:
 
@@ -169,7 +169,7 @@ Examples:
 - local AI: `infocyph/llm-ollama:latest`
 - AMD local AI: `infocyph/llm-ollama:amd-latest`
 
-Elasticsearch, Kibana, and Filebeat stay on one aligned Elastic version.
+Elasticsearch, Kibana, and Filebeat share the same `ELASTICSEARCH_VERSION` selector and default to the moving `latest` tag.
 
 Inspect the effective defaults with `lds images`.
 
@@ -274,7 +274,7 @@ lds llm chat ...
 
 LocalDevStack publishes the native Ollama API through Nginx on the fixed loopback-only endpoint `http://llm-ollama.localhost:11434`. The `llm-ollama` container itself remains internal and never owns a host port.
 
-`lds graphify [path] [extract-options...]` is a host-side Graphify workflow. It requires the host `graphify` CLI, uses the configured LocalDevStack model and `LDS_AI_TIMEOUT`, and targets `http://llm-ollama.localhost:11434/v1` through Nginx. The command runs extraction with `--backend ollama --no-cluster`, then runs `cluster-only` for the same path if extraction succeeds. This avoids clustering twice.
+`lds graphify [path] [extract-options...]` is a host-side Graphify workflow. It requires the host `graphify` CLI, uses the configured LocalDevStack model and `LDS_AI_TIMEOUT`, and targets `http://llm-ollama.localhost:11434/v1` through Nginx. For the LocalDevStack provider, the command first verifies that the selected model exists and fails immediately with an `lds llm pull <model>` hint when it does not. It then runs extraction with `--backend ollama --no-cluster`, followed by `cluster-only` for the same path if extraction succeeds.
 
 Start the AI profile, then Graphify can use the native endpoint directly:
 
