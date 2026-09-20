@@ -67,6 +67,8 @@ assert_file_contains "$ROOT/docker/compose/companion.yaml" 'LDS_AI_PREFLIGHT_TIM
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'LDS_AI_TIMEOUT=${LDS_AI_TIMEOUT:-1800}'
 assert_file_contains "$ROOT/docker/compose/http.yaml" 'LLM_PROXY_TIMEOUT_SECONDS=${LDS_AI_TIMEOUT:-1800}'
 assert_file_contains "$ROOT/lib/ai.sh" 'cmd_graphify()'
+assert_file_contains "$ROOT/lib/ai.sh" '_graphify_local_model_preflight()'
+assert_file_contains "$ROOT/lib/ai.sh" "Run: lds llm pull \$model"
 assert_file_contains "$ROOT/lib/ai.sh" 'OLLAMA_API_KEY="$api_key"'
 assert_file_contains "$ROOT/lib/ai.sh" 'graphify_bin" extract "$target" --backend ollama --no-cluster'
 assert_file_contains "$ROOT/lib/ai.sh" 'graphify_bin" cluster-only "$target" --backend ollama'
@@ -77,3 +79,19 @@ assert_file_contains "$ROOT/lib/ai.sh" 'update_env "$ENV_DOCKER" LDS_AI_IGPU_ENA
 assert_file_contains "$ROOT/docker/compose/http.yaml" '"127.0.0.1:11434:11434"'
 assert_file_contains "$ROOT/lib/ai.sh" 'docker_compose ps -q nginx'
 pass "single companion AI service with ephemeral hardware augmentation and Nginx-owned native port"
+
+(
+  set -euo pipefail
+  die() { return 1; }
+  docker_compose() {
+    [[ "$*" == "exec -T llm-ollama /bin/ollama show qwen3:14b" ]]
+  }
+  # shellcheck source=lib/ai.sh
+  source "$ROOT/lib/ai.sh"
+  _graphify_local_model_preflight qwen3:14b ||
+    fail "Graphify local-model preflight rejected an available model"
+  if _graphify_local_model_preflight missing-model; then
+    fail "Graphify local-model preflight accepted a missing model"
+  fi
+)
+pass "Graphify validates the selected local model before extraction"
