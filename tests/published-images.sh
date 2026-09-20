@@ -50,7 +50,7 @@ for image in "${moving_images[@]}"; do
   printf 'Checking moving image alias %s\n' "$image"
   docker manifest inspect "$image" >/dev/null
 done
-pass "all configured moving image aliases resolve"
+pass "all configured current image references resolve"
 
 for image in "$tools_image" "$runner_image"; do
   health="$(docker image inspect "$image" --format '{{json .Config.Healthcheck}}')"
