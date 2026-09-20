@@ -439,7 +439,6 @@ add_required_env() {
     ai_runtime="$(detect_ai_runtime)"
     update_env "$ENV_DOCKER" LDS_AI_RUNTIME "$ai_runtime"
   fi
-  update_env "$ENV_DOCKER" LDS_LLM_ARCH "$(llm_arch_for_runtime "$ai_runtime")"
 
   ai_igpu_enable="$(compose_control_value LDS_AI_IGPU_ENABLE "")"
   if [[ -z "$ai_igpu_enable" ]]; then
