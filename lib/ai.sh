@@ -321,8 +321,8 @@ cmd_graphify() {
       esac
     fi
 
-    "$graphify_bin" extract "$target_abs" --backend "$backend" --model "$model" --no-cluster "${graphify_defaults[@]}" "$@" &&
-      "$graphify_bin" cluster-only "$target_abs" --backend "$backend" --model "$model"
+    "$graphify_bin" extract "$target_abs" --backend "$backend" --no-cluster "${graphify_defaults[@]}" "$@" &&
+      "$graphify_bin" cluster-only "$target_abs" --backend "$backend"
   )
 }
 
@@ -410,6 +410,32 @@ cmd_llm() {
     _llm_exec "${sub,,}" "$@"
     ;;
 
+  think)
+    local think_mode="${1:-}"
+    if [[ -z "$think_mode" ]]; then
+      local configured
+      configured="$(compose_control_value LDS_AI_THINK "")"
+      printf '%s\n' "${configured:-auto}"
+      return 0
+    fi
+    [[ $# -eq 1 ]] || die "llm think <auto|on|off>"
+    case "${think_mode,,}" in
+    auto | default)
+      remove_env "$ENV_DOCKER" LDS_AI_THINK
+      ok "LLM thinking override cleared; provider/model default will be used after the AI service is recreated."
+      ;;
+    on | true | 1)
+      update_env "$ENV_DOCKER" LDS_AI_THINK true
+      ok "LLM thinking forced on. Recreate the AI service to apply the change."
+      ;;
+    off | false | 0)
+      update_env "$ENV_DOCKER" LDS_AI_THINK false
+      ok "LLM thinking forced off. Recreate the AI service to apply the change."
+      ;;
+    *) die "llm think <auto|on|off>" ;;
+    esac
+    ;;
+
   provider)
     printf '%s\n' "$(_active_llm_provider)"
     ;;
@@ -418,10 +444,11 @@ cmd_llm() {
     printf '%s\n' "llm <models|pull|rm|run|ask|chat|prompt|code|review|json|ai-commit|api|version>"
     printf '%s\n' "llm provider"
     printf '%s\n' "llm runtime <auto|cpu|nvidia|amd|npu>"
+    printf '%s\n' "llm think <auto|on|off>"
     printf '%s\n' "Ollama-only: llm <ps|show|unload|ollama>"
     printf '%s\n' "FastFlow-only: llm <validate|check|flm>"
     ;;
 
-  *) die "llm <models|pull|rm|run|ask|chat|prompt|code|review|json|ai-commit|api|version|provider|runtime>" ;;
+  *) die "llm <models|pull|rm|run|ask|chat|prompt|code|review|json|ai-commit|api|version|provider|runtime|think>" ;;
   esac
 }
