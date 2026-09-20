@@ -98,6 +98,15 @@ default_bundle="$(find "$default_bundle_dir" -maxdepth 1 -type f -name 'lds_bund
 rm -rf "$default_bundle_dir"
 pass "support bundle option-only invocation uses a generated filename"
 
+relative_bundle_dir="$(mktemp -d)"
+(
+  cd "$relative_bundle_dir"
+  "$ROOT/lds" support bundle --redact relative-support.zip >/dev/null
+  [[ -s relative-support.zip ]] || fail "relative support bundle path was lost with staging cleanup"
+)
+rm -rf "$relative_bundle_dir"
+pass "support bundle preserves explicit relative output paths"
+
 help="$("$ROOT/lds" help)"
 assert_contains "$help" "doctor"
 assert_contains "$help" "images"
