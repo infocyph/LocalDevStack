@@ -72,11 +72,13 @@ _graphify_local_model_preflight() {
   local model="${1:-}" response
   [[ -n "$model" ]] || return 1
   need_bin curl "install curl to validate the selected LocalDevStack model"
+  need_bin jq "install jq to validate the selected LocalDevStack model"
 
-  response="$(curl --connect-timeout 3 --max-time 10 -fsS     'http://llm.localhost:11434/v1/models' 2>/dev/null)" ||
+  response="$(curl --connect-timeout 3 --max-time 10 -fsS \
+    'http://llm.localhost:11434/v1/models' 2>/dev/null)" ||
     die "The selected LocalDevStack LLM endpoint is unavailable. Start the ai profile first."
 
-  printf '%s' "$response" | grep -Fq ""$model"" ||
+  jq -e --arg model "$model" '[.data[]?.id // empty] | index($model) != null' <<<"$response" >/dev/null 2>&1 ||
     die "Model '$model' is not available from the active LocalDevStack provider. Run: lds llm pull $model"
 }
 
