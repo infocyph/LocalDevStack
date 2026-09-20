@@ -248,7 +248,7 @@ profile selectors enable exactly one provider. There are no tracked ``ai.yaml``,
 Only Ollama NVIDIA/ROCm hardware augmentation is generated temporarily under
 ``docker/.runtime/``. The tracked Ollama image is
 ``infocyph/llm-ollama:latest``; the AMD override directly selects
-``infocyph/llm-ollama:amd-latest``. There is no ``LDS_LLM_ARCH`` setting.
+``infocyph/llm-ollama:amd-latest``.
 FastFlow's XDNA2 device/memlock contract is part of its tracked service definition.
 
 Graphify
