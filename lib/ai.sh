@@ -151,24 +151,24 @@ _graphify_write_local_provider() {
 _graphify_python_bin() {
   local graphify_bin="${1:-}" first_line="" candidate=""
 
-  if [[ -n "$graphify_bin" && -f "$graphify_bin" ]]; then
-    IFS= read -r first_line <"$graphify_bin" || true
-    if [[ "$first_line" == '#!'* ]]; then
-      candidate="${first_line#\#!}"
-      candidate="${candidate%% *}"
-      if [[ -x "$candidate" ]]; then
-        printf '%s' "$candidate"
-        return 0
-      fi
-    fi
-  fi
-
   for candidate in python3 python; do
     if type -P -- "$candidate" >/dev/null 2>&1; then
       type -P -- "$candidate"
       return 0
     fi
   done
+
+  if [[ -n "$graphify_bin" && -f "$graphify_bin" ]]; then
+    IFS= read -r first_line <"$graphify_bin" || true
+    if [[ "$first_line" == '#!'* ]]; then
+      candidate="${first_line#\#!}"
+      candidate="${candidate%% *}"
+      if [[ -x "$candidate" && "${candidate##*/}" == python* ]]; then
+        printf '%s' "$candidate"
+        return 0
+      fi
+    fi
+  fi
   return 1
 }
 
