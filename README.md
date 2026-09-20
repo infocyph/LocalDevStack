@@ -227,30 +227,36 @@ See `docs/guides/databases-and-clients.rst` for the profile/client map.
 
 Enable the `ai` profile through `lds setup profile`.
 
+LocalDevStack runs exactly one provider at a time:
+
+```text
+supported AMD XDNA2 NPU -> infocyph/llm-fastflow:latest
+NVIDIA GPU              -> infocyph/llm-ollama:latest
+AMD ROCm GPU             -> infocyph/llm-ollama:amd-latest
+otherwise                -> infocyph/llm-ollama:latest
+```
+
+`llm-fastflow` and `llm-ollama` are mutually exclusive. The selected service owns the common Docker alias `llm` on port `11434`, so provider-neutral consumers use:
+
 ```text
 Tools consumer -> http://llm:11434
 User HTTPS     -> https://llm.localhost
-Default model  -> qwen3:14b
-Model store    -> LLMModels
+Host loopback  -> http://127.0.0.1:11434
 ```
 
-LocalDevStack auto-detects the preferred AI runtime during setup: NVIDIA when `nvidia-smi` is usable, AMD only when the Linux ROCm device nodes `/dev/kfd` and `/dev/dri` are present, otherwise CPU. An AMD CPU by itself does not select the AMD image. When the effective runtime is AMD and the host CPU vendor is AMD, setup persists `LDS_AI_IGPU_ENABLE=1`; the provider forwards it as `OLLAMA_IGPU_ENABLE=1` so Ollama does not discard the integrated Radeon GPU.
+Provider-specific `https://llm-ollama.localhost` and `https://llm-fastflow.localhost` remain available for diagnostics/native operations.
 
-The provider uses one image/tag contract:
-
-```text
-infocyph/llm-ollama:${LDS_LLM_ARCH}
-```
-
-CPU/NVIDIA map to `LDS_LLM_ARCH=latest`; AMD/ROCm maps to `LDS_LLM_ARCH=amd-latest`. `LDS_LLM_ARCH` is derived by the LocalDevStack runtime selector; it is not a separate version choice users should maintain manually. `lds llm runtime ...` also refreshes `LDS_AI_IGPU_ENABLE` to match the selected runtime and host CPU.
-
-Override detection explicitly when needed:
+Automatic runtime selection prefers a supported XDNA2 NPU, then NVIDIA, then AMD ROCm device nodes, then CPU. Override it explicitly when needed:
 
 ```bash
-lds llm runtime cpu
+lds llm runtime auto
+lds llm runtime npu
 lds llm runtime nvidia
 lds llm runtime amd
+lds llm runtime cpu
 ```
+
+Provider defaults are intentionally different: FastFlow/NPU uses `qwen3.5:9b`; Ollama uses `qwen3:14b`. New setup leaves `LDS_AI_MODEL` blank so the selected provider default can apply. An explicit `LDS_AI_MODEL` overrides whichever provider is active.
 
 Common commands:
 
@@ -261,72 +267,29 @@ lds ai troubleshoot ...
 lds ai review ...
 lds ai repo-review ...
 
-# Host Graphify + LocalDevStack Ollama
-lds graphify
-lds graphify ./your-project --mode deep --token-budget 4000 --max-concurrency 1
-
+lds llm provider
 lds llm models
 lds llm pull <model>
-lds llm show <model>
+lds llm run <model>
 lds llm ask "Explain dependency injection briefly"
 lds llm chat ...
-```
 
-LocalDevStack publishes the native Ollama API through Nginx on the fixed loopback-only endpoint `http://llm-ollama.localhost:11434`. The `llm-ollama` container itself remains internal and never owns a host port.
-
-`lds graphify [path] [extract-options...]` is a host-side Graphify workflow. It requires the host `graphify` CLI, uses the configured LocalDevStack model and `LDS_AI_TIMEOUT`, and targets `http://llm-ollama.localhost:11434/v1` through Nginx. For the LocalDevStack provider, the command first verifies that the selected model exists and fails immediately with an `lds llm pull <model>` hint when it does not. It then runs extraction with `--backend ollama --no-cluster`, followed by `cluster-only` for the same path if extraction succeeds.
-
-Start the AI profile, then Graphify can use the native endpoint directly:
-
-```bash
-lds up -d llm-ollama
+# Host Graphify through the common LocalDevStack /v1 endpoint
 lds graphify
+lds graphify ./your-project --mode deep --token-budget 4000 --max-concurrency 1
 ```
 
-`lds graphify` also sets `OLLAMA_API_KEY=local` when no key is supplied. Ollama does not require authentication for this local loopback endpoint; the non-empty placeholder only satisfies Graphify's Ollama-backend warning check. An explicitly supplied `OLLAMA_API_KEY` is preserved.
+`lds llm` dispatches to the active provider. Ollama-only low-level commands (`ps`, `show`, `unload`, `ollama`) and FastFlow-only commands (`validate`, `check`, `flm`) are guarded and rejected when the other provider is active.
 
-You may override `OLLAMA_BASE_URL`, `OLLAMA_API_KEY`, `OLLAMA_MODEL`, or `GRAPHIFY_API_TIMEOUT` for a one-off run. A CLI `--model` or `--api-timeout` override is kept consistent across both Graphify phases.
+Nginx owns the loopback-only native route `127.0.0.1:11434 -> nginx:11434 -> llm:11434`. Provider containers do not publish host ports.
 
-The LocalDevStack LLM Compose layout is intentionally small:
+`lds graphify` uses `http://llm.localhost:11434/v1`, validates the selected model through `/v1/models`, and then invokes Graphify's currently named `ollama` backend. The backend name is Graphify terminology; the LocalDevStack endpoint itself is provider-neutral and OpenAI-compatible.
 
-```text
-docker/compose/main.yaml
-  └─ includes docker/compose/companion.yaml
-       └─ llm-ollama service (profile: ai)
+The built-in Compose layout keeps both provider definitions in `docker/compose/companion.yaml`, but runtime-generated profile selectors enable exactly one. NVIDIA/ROCm hardware augmentation is generated ephemerally under `docker/.runtime/`; FastFlow's `/dev/accel/accel0` + memlock contract lives in its tracked service definition.
 
-docker/.runtime/ai.*   temporary per-command overlay generated by lds
-                       only when NVIDIA or AMD/ROCm settings require it
-```
+Ollama model state persists in `LLMModels` (`/root/.ollama`). FastFlow model state persists in `LLMFastFlowModels` (`/models`). Both providers receive no Docker socket and no project/repository bind mount by default.
 
-There are no tracked `ai.yaml`, `ai-nvidia.yaml`, `ai-amd.yaml`, or `ai-host-port.yaml` files. AI hardware additions are generated ephemerally and removed after the Compose command. Nginx owns the fixed loopback-only native Ollama publication on port 11434. Files under `configuration/compose/` remain the normal LocalDevStack extras/runtime-fragment area; they are not built-in LLM variant files.
-
-Provider configuration placed in `docker/.env` is forwarded to `llm-ollama` where applicable:
-
-| Setting | Default | Effect |
-|---|---:|---|
-| `LDS_AI_MODEL` | `qwen3:14b` | Tools model and `lds llm` default model |
-| `LDS_AI_RUNTIME` | auto-detected | `cpu`, `nvidia`, or `amd` runtime selection |
-| `LDS_AI_IGPU_ENABLE` | `1` for AMD CPU + AMD runtime, otherwise `0` | Forwarded to Ollama as `OLLAMA_IGPU_ENABLE` |
-| `LLM_OLLAMA_SYSTEM` | empty | Default system instruction for provider prompts |
-| `LLM_OLLAMA_INPUT_WARN_BYTES` | `1048576` | Text/diff warning threshold |
-| `LLM_OLLAMA_INPUT_MAX_BYTES` | `0` | Text/diff hard ceiling; `0` disables it |
-| `LLM_OLLAMA_ATTACHMENT_MAX_BYTES` | `16777216` | Per attachment/source-file ceiling |
-| `LLM_OLLAMA_ATTACHMENTS_MAX_BYTES` | `33554432` | Aggregate attachment ceiling |
-| `LLM_OLLAMA_ATTACHMENT_MAX_COUNT` | `16` | Source-attachment count ceiling |
-| `LLM_OLLAMA_PDF_MAX_PAGES` | `24` | PDF-vision page ceiling |
-| `LLM_OLLAMA_PDF_DPI` | `120` | PDF-vision render DPI |
-| `LLM_OLLAMA_ALLOW_LARGE_INPUT` | `0` | Deliberate bypass for configured provider limits |
-| `OLLAMA_NUM_PARALLEL` | `1` | Ollama request parallelism |
-| `OLLAMA_MAX_LOADED_MODELS` | `1` | Loaded-model limit |
-| `OLLAMA_KEEP_ALIVE` | `5m` | Model keep-alive |
-| `OLLAMA_NO_CLOUD` | `1` | Keep cloud integration disabled |
-
-`LDS_AI_CONNECT_TIMEOUT=2` and `LDS_AI_PREFLIGHT_TIMEOUT=5` intentionally fail fast. `LDS_AI_TIMEOUT=1800` gives local model loading/inference up to 30 minutes and is also forwarded to the dedicated Nginx LLM route as `LLM_PROXY_TIMEOUT_SECONDS`. `LDS_AI_AVAILABILITY_TTL=5`, `LDS_AI_MAX_CONTEXT_BYTES=524288`, `LDS_AI_MAX_REQUEST_BYTES=1048576`, and `LDS_AI_MAX_RESPONSE_BYTES=2097152` remain Tools consumer controls rather than provider-container limits.
-
-Use the `lds` wrapper for provider commands. LocalDevStack intentionally has no repository-root `compose.yml`; its effective Compose project is assembled from `docker/compose/main.yaml`, release/user env files, optional extras, and temporary runtime-specific overrides. Therefore a bare command such as `docker compose exec llm-ollama ...` from the LocalDevStack root is not equivalent and fails before reaching the container. Use `lds llm ...` instead.
-
-The `llm-ollama` container receives **no Docker socket and no project/repository bind mount** by default. Current published `llm-ollama` images are `linux/amd64`; the rest of LocalDevStack can still run on arm64 with the AI profile disabled.
-
+See `docs/guides/local-ai.rst` for the full runtime, model, Graphify, and trust-boundary contract.
 ## Storage and trust boundaries
 
 Important named volumes include `NginxHosts`, `ApacheHosts`, `SSLKeys`, `SSLRootCA`, `FPMPools`, `FPMSocks`, `ComposerGlobal`, `GitConfig`, `ToolsState`, database/admin stores, `EmailStore`, and `LLMModels`.
