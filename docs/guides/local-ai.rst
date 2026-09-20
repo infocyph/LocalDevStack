@@ -345,10 +345,20 @@ structured extraction path. ``LDS_GRAPHIFY_THINK=on`` and
 ``LDS_GRAPHIFY_THINK=auto`` remain diagnostic overrides, not recommended defaults.
 
 Before extraction, LocalDevStack checks ``/v1/models`` and fails fast when the
-selected model is absent. Override the local chunk defaults with explicit Graphify
-flags, or set ``LDS_GRAPHIFY_TOKEN_BUDGET`` /
-``LDS_GRAPHIFY_MAX_CONCURRENCY``. If a local model reports ``Max length reached!``,
-reduce the token budget further, for example:
+selected model is absent.
+
+When ``<target>/graphify-out/graph.json`` already exists, ``lds graphify`` keeps
+using Graphify's lower-level ``extract`` pipeline, which automatically switches to
+incremental mode: only changed code/docs/papers/images are re-extracted, deleted or
+excluded sources are reconciled, and the result is merged into the existing graph.
+This is intentionally preferred over the literal ``graphify update`` CLI command,
+because current Graphify ``update`` refreshes code only and delegates semantic
+document refreshes to the assistant update workflow. Pass ``--force`` only when a
+full rebuild is intentionally required.
+
+Override the local chunk defaults with explicit Graphify flags, or set
+``LDS_GRAPHIFY_TOKEN_BUDGET`` / ``LDS_GRAPHIFY_MAX_CONCURRENCY``. If a local
+model reports ``Max length reached!``, reduce the token budget further, for example:
 
 .. code-block:: bash
 
