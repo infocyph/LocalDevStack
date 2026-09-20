@@ -48,7 +48,7 @@ moving_images=(
 
 for image in "${moving_images[@]}"; do
   printf 'Checking configured image reference %s\n' "$image"
-  docker manifest inspect "$image" >/dev/null
+  docker buildx imagetools inspect "$image" >/dev/null
 done
 pass "all configured current image references resolve"
 
