@@ -220,7 +220,7 @@ cmd_graphify() {
   [[ $# -eq 0 ]] || shift
   [[ -e "$target" ]] || die "Graphify target does not exist: $target"
 
-  local runtime provider backend base_url timeout model api_key graphify_bin arg provider_dir target_abs
+  local runtime provider backend base_url timeout model api_key graphify_bin arg provider_dir target_abs graphify_target
   local graphify_python="" diagnostic_root="" diagnostic_log="" diagnostic_preview="4096" graphify_think="off"
   local diagnostic_mode="off" structured_timeout="" graphify_sdk_retries="" graphify_retry_depth=""
   local local_provider=0 force_rebuild=0
@@ -374,6 +374,7 @@ cmd_graphify() {
 
   graphify_bin="$(bin_path graphify)"
   target_abs="$(_realpath "$target")"
+  graphify_target="$target"
   provider_dir=""
 
   if [[ -d "$target_abs" && -f "$target_abs/graphify-out/graph.json" ]]; then
@@ -387,6 +388,7 @@ cmd_graphify() {
   fi
 
   if ((local_provider)); then
+    graphify_target="$target_abs"
     provider_dir="$(mktemp -d)" || die "Unable to create temporary Graphify provider directory"
 
     graphify_python="$(_graphify_python_bin "$graphify_bin")" ||
@@ -485,8 +487,8 @@ cmd_graphify() {
       esac
     fi
 
-    "$graphify_bin" extract "$target_abs" --backend "$backend" --no-cluster "${graphify_defaults[@]}" "$@" &&
-      "$graphify_bin" cluster-only "$target_abs" --backend "$backend"
+    "$graphify_bin" extract "$graphify_target" --backend "$backend" --no-cluster "${graphify_defaults[@]}" "$@" &&
+      "$graphify_bin" cluster-only "$graphify_target" --backend "$backend"
   )
 }
 
