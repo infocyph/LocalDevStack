@@ -363,7 +363,6 @@ cmd_llm() {
     case "${mode,,}" in
     auto)
       update_env "$ENV_DOCKER" LDS_AI_RUNTIME ""
-      remove_env "$ENV_DOCKER" LDS_LLM_ARCH
       update_env "$ENV_DOCKER" LDS_AI_IGPU_ENABLE ""
       local detected
       detected="$(detect_ai_runtime)"
@@ -380,7 +379,6 @@ cmd_llm() {
       fi
 
       update_env "$ENV_DOCKER" LDS_AI_RUNTIME "$normalized"
-      remove_env "$ENV_DOCKER" LDS_LLM_ARCH
       update_env "$ENV_DOCKER" LDS_AI_IGPU_ENABLE "$igpu_enable"
 
       if [[ "$provider" == "fastflow" ]]; then
