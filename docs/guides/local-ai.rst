@@ -305,18 +305,21 @@ A structurally valid all-empty graph remains valid and is passed back to Graphif
 unchanged; Graphify then decides whether to retry it as a hollow extraction.
 
 Structured generations are deliberately bounded independently of Graphify's larger
-general output allowance. LocalDevStack caps a structured extraction at 4096 output
-tokens and defaults each structured request to a 300-second timeout
+general output allowance. LocalDevStack caps a structured extraction at 2048 output
+tokens and defaults each structured request to a 120-second timeout
 (``LDS_GRAPHIFY_STRUCTURED_TIMEOUT``). This is important for FastFlow because its
 Qwen3.5 non-stream tool parser recognizes ``<tool_call>`` only after generation
 finishes; without a smaller bound, a malformed/non-terminating tool response can run
 toward Graphify's 16384-token completion cap for many minutes.
 
-FastFlow accepts one additional bounded structured retry when the first response has
-neither a usable ``submit_graph`` call nor a valid graph in ``message.content``.
-Only after those structured attempts fail does LocalDevStack make one bounded
-free-form fallback request. Ollama uses the same output/timeout bounds on its native
-JSON-schema request. Graphify's own retry policy remains the final fallback.
+LocalDevStack deliberately performs exactly one provider-native structured request
+per Graphify extraction attempt. It does not add its own structured retry or
+free-form fallback chain. If the provider times out or returns an unusable structured
+response, the proxy returns a bounded ``finish_reason=length`` signal so Graphify
+can split the offending chunk through its existing adaptive-retry logic. For local
+providers the OpenAI SDK retry layer also defaults to zero
+(``LDS_GRAPHIFY_SDK_RETRIES=0``) to avoid hidden retry amplification; an explicit
+``GRAPHIFY_MAX_RETRIES`` still wins.
 
 Detailed suspect-response logging is optional and does not control the compatibility
 proxy. Enable it with:
