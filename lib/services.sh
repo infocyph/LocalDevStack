@@ -412,8 +412,13 @@ cmd_profiles() {
 " "$CYAN" "$NC" "${cur:-<none>}"
     printf "%bAvailable profiles:%b
 " "$CYAN" "$NC"
-    printf '  - %s
-' "${SERVICES[@]}" | LC_ALL=C sort -u
+    local available
+    available="$(docker_compose config --profiles 2>/dev/null || true)"
+    if [[ -n "$available" ]]; then
+      printf '%s\n' "$available" | sed '/^[[:space:]]*$/d' | LC_ALL=C sort -fu | sed 's/^/  - /'
+    else
+      printf '  %b<none>%b\n' "$DIM" "$NC"
+    fi
     # warn if enabled profile has no mention in compose
     if [[ -n "$cur" ]]; then
       local p
@@ -428,7 +433,9 @@ cmd_profiles() {
     ;;
   add)
     [[ $# -gt 0 ]] || die "profiles add <profile...>"
+    local p
     for p in "$@"; do
+      _known_profile "$p" || die "Unknown profile: $p"
       modify_profiles add "$p"
     done
     ;;
