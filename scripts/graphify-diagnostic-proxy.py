@@ -292,7 +292,10 @@ def _build_tool_recovery_request(body: bytes) -> bytes | None:
     # FastFlow currently supports tool_choice=auto|none only. The explicit
     # system instruction is therefore what makes submit_graph mandatory.
     request["tool_choice"] = "auto"
-    request["stream"] = False
+    # FastFlow's Qwen3.5 streaming parser emits a complete tool-call delta as
+    # soon as </tool_call>/</function> is parsed. Using streaming here avoids
+    # waiting for model EOS on the non-stream path.
+    request["stream"] = True
     request["temperature"] = 0
     request.pop("max_tokens", None)
     request["max_completion_tokens"] = _bounded_completion_cap(request)
@@ -426,6 +429,98 @@ def _extract_fastflow_structured_graph(body: bytes) -> dict[str, Any] | None:
         return graph
     _meta, content = _response_metadata(body)
     return parse_graph_content(content)
+
+
+def _fastflow_stream_completion(upstream_response, model: str | None) -> bytes:
+    """Collapse FastFlow SSE into one OpenAI completion, returning on a tool call."""
+    content_parts: list[str] = []
+    last_id = "chatcmpl-lds-fastflow"
+    finish_reason = "stop"
+    usage: dict[str, Any] = {}
+
+    while True:
+        raw_line = upstream_response.readline()
+        if not raw_line:
+            break
+        try:
+            line = raw_line.decode("utf-8", errors="replace").strip()
+        except AttributeError:
+            line = str(raw_line).strip()
+        if not line.startswith("data:"):
+            continue
+
+        payload = line[5:].strip()
+        if not payload:
+            continue
+        if payload == "[DONE]":
+            break
+
+        try:
+            event = json.loads(payload)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict):
+            continue
+
+        if isinstance(event.get("id"), str) and event["id"]:
+            last_id = event["id"]
+        if isinstance(event.get("usage"), dict):
+            usage = event["usage"]
+
+        choices = event.get("choices")
+        if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+            continue
+        choice = choices[0]
+        if isinstance(choice.get("finish_reason"), str):
+            finish_reason = choice["finish_reason"]
+
+        delta = choice.get("delta")
+        if not isinstance(delta, dict):
+            continue
+
+        content = delta.get("content")
+        if isinstance(content, str) and content:
+            content_parts.append(content)
+
+        calls = delta.get("tool_calls")
+        if isinstance(calls, list) and calls:
+            normalized_calls = [call for call in calls if isinstance(call, dict)]
+            if normalized_calls:
+                # FastFlow emits the complete function arguments in TOOL_DONE,
+                # not incremental argument fragments. Stop reading immediately
+                # so a model that fails to emit EOS cannot hold Graphify open.
+                response = {
+                    "id": last_id,
+                    "object": "chat.completion",
+                    "model": model,
+                    "choices": [{
+                        "index": 0,
+                        "message": {
+                            "role": "assistant",
+                            "content": "".join(content_parts) or None,
+                            "tool_calls": normalized_calls,
+                        },
+                        "finish_reason": "tool_calls",
+                    }],
+                    "usage": usage,
+                }
+                return json.dumps(response, ensure_ascii=False).encode("utf-8")
+
+    response = {
+        "id": last_id,
+        "object": "chat.completion",
+        "model": model,
+        "choices": [{
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "content": "".join(content_parts),
+            },
+            "finish_reason": finish_reason,
+        }],
+        "usage": usage,
+    }
+    return json.dumps(response, ensure_ascii=False).encode("utf-8")
 
 
 def _graphify_split_response(body: bytes, model: str | None) -> bytes:
@@ -626,6 +721,9 @@ class DiagnosticHandler(BaseHTTPRequestHandler):
                 structured_primary = "ollama-schema"
 
         upstream_url = self.upstream.rstrip("/") + self.path
+        if structured_primary == "fastflow-tool":
+            request_headers["Accept"] = "text/event-stream"
+
         request = urllib.request.Request(
             upstream_url,
             data=upstream_body if self.command not in ("GET", "HEAD") else None,
@@ -641,10 +739,16 @@ class DiagnosticHandler(BaseHTTPRequestHandler):
             request_timeout = self.structured_timeout if structured_primary else self.upstream_timeout
             with urllib.request.urlopen(request, timeout=request_timeout) as upstream_response:
                 status = upstream_response.status
-                response_body = upstream_response.read()
-                content_type = upstream_response.headers.get("Content-Type")
-                if content_type:
-                    response_headers["Content-Type"] = content_type
+                if structured_primary == "fastflow-tool":
+                    response_body = _fastflow_stream_completion(
+                        upstream_response, metadata.get("model")
+                    )
+                    response_headers["Content-Type"] = "application/json"
+                else:
+                    response_body = upstream_response.read()
+                    content_type = upstream_response.headers.get("Content-Type")
+                    if content_type:
+                        response_headers["Content-Type"] = content_type
         except urllib.error.HTTPError as exc:
             status = exc.code
             response_body = exc.read()
