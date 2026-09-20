@@ -223,7 +223,7 @@ cmd_graphify() {
   local runtime provider backend base_url timeout model api_key graphify_bin arg provider_dir target_abs
   local graphify_python="" diagnostic_root="" diagnostic_log="" diagnostic_preview="4096" graphify_think="off"
   local diagnostic_mode="off" structured_timeout=""
-  local local_provider=0
+  local local_provider=0 existing_graph=0 force_rebuild=0
   local next_is_model=0 next_is_timeout=0 next_is_token_budget=0 next_is_max_concurrency=0
   local has_token_budget=0 has_max_concurrency=0
   local token_budget_value="" max_concurrency_value=""
@@ -315,6 +315,9 @@ cmd_graphify() {
       has_max_concurrency=1
       max_concurrency_value="${arg#--max-concurrency=}"
       ;;
+    --force)
+      force_rebuild=1
+      ;;
     --backend | --backend=*)
       die "lds graphify selects the Graphify backend from the active LLM provider; do not pass --backend"
       ;;
@@ -362,11 +365,21 @@ cmd_graphify() {
   ((local_provider == 0)) || _graphify_local_model_preflight "$model"
 
   graphify_bin="$(bin_path graphify)"
-  target_abs="$target"
+  target_abs="$(_realpath "$target")"
   provider_dir=""
 
+  if [[ -d "$target_abs" && -f "$target_abs/graphify-out/graph.json" ]]; then
+    existing_graph=1
+    if ((force_rebuild)); then
+      printf '%s\n' "[lds graphify] existing graph detected; --force requested, performing a full rebuild" >&2
+    else
+      printf '%s\n' "[lds graphify] existing graph detected; using Graphify incremental update (changed files only)" >&2
+    fi
+  else
+    printf '%s\n' "[lds graphify] no existing graph detected; performing initial full build" >&2
+  fi
+
   if ((local_provider)); then
-    target_abs="$(_realpath "$target")"
     provider_dir="$(mktemp -d)" || die "Unable to create temporary Graphify provider directory"
 
     graphify_python="$(_graphify_python_bin "$graphify_bin")" ||
