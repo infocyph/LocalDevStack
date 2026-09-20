@@ -39,15 +39,15 @@ moving_images=(
   "dbeaver/cloudbeaver:latest"
   "mongo-express:latest"
   "axllent/mailpit:latest"
-  "elasticsearch:latest"
-  "kibana:latest"
-  "docker.elastic.co/beats/filebeat:latest"
+  "elasticsearch:9.5.4"
+  "kibana:9.5.4"
+  "docker.elastic.co/beats/filebeat:9.5.4"
   "infocyph/llm-ollama:latest"
   "infocyph/llm-ollama:amd-latest"
 )
 
 for image in "${moving_images[@]}"; do
-  printf 'Checking moving image alias %s\n' "$image"
+  printf 'Checking configured image reference %s\n' "$image"
   docker manifest inspect "$image" >/dev/null
 done
 pass "all configured current image references resolve"
