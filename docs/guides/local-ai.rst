@@ -254,9 +254,12 @@ preflight. Extraction still uses ``--backend ollama --no-cluster`` followed by
 Trust Boundary
 --------------
 
-Neither provider receives the Docker socket or a project/repository bind mount by default.
-LocalDevStack does not automatically execute model-generated shell commands, SQL or code,
-and the common Tools AI client does not silently fall back to cloud AI.
+Provider images have:
+
+- no Docker socket;
+- no project/repository bind mount by default;
+- no automatic execution of model-generated shell commands, SQL or code;
+- no silent cloud fallback in the common Tools AI client.
 
 Repository-aware analysis should normally flow through Tools or an explicit provider
 workspace override.
