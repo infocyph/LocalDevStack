@@ -66,3 +66,7 @@ pass "Graphify host workflow wrapper"
 
 assert_file_contains "$ROOT/lds" 'exec "$DIR/bin/tool-runner" "$cmd" "$@"'
 pass "unknown command fallback remains delegated to tool-runner"
+
+assert_file_contains "$ROOT/lds" 'local -a flags=(-i)'
+assert_file_contains "$ROOT/lds" '[[ -t 0 && -t 1 ]] && flags+=(-t)'
+pass "proxied host tools preserve piped stdin without forcing a TTY"
