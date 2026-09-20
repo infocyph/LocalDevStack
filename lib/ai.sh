@@ -401,6 +401,7 @@ cmd_graphify() {
 
         "$graphify_python" "$DIR/scripts/graphify-diagnostic-proxy.py" \
           --upstream "${base_url%/v1}" \
+          --provider "$provider" \
           --ready-file "$ready_file" \
           --log-file "$diagnostic_log" \
           --preview-chars "$diagnostic_preview" &
