@@ -84,7 +84,15 @@ assert_file_contains "$ai" 'lds logs llm'
 assert_file_contains "$cli" 'lds restart llm'
 assert_file_contains "$cli" 'lds exec llm'
 assert_file_contains "$cli" 'lds rebuild llm'
-assert_file_contains "$ai" 'OLLAMA_BASE_URL=http://llm.localhost:11434/v1'
+assert_file_contains "$ai" 'backend=lds-fastflow'
+assert_file_contains "$ai" 'backend=lds-ollama'
+assert_file_contains "$ai" 'extra_body={"think": false}'
+assert_file_contains "$ai" 'reasoning_effort=none'
+assert_file_contains "$ai" 'lds llm think'
+assert_file_contains "$ai" 'LDS_AI_THINK'
+if grep -RqsF 'LDS_LLM_ARCH' "$ROOT/README.md" "$ROOT/docs" --exclude-dir=plans; then
+  fail "user-facing docs expose removed LDS_LLM_ARCH setting"
+fi
 assert_file_contains "$profiles" 'LDS_AI_PROVIDER=llm'
 assert_file_contains "$profiles" 'LDS_AI_URL=http://llm:11434'
 assert_file_contains "$profiles" 'infocyph/llm-fastflow:latest'
