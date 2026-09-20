@@ -141,6 +141,7 @@ setup_menu_parse() {
     /^[0-9]+$/ { print $0; next }
     /^[aA]$/ { print "ALL"; next }
     /^[nN]$/ { print "NONE"; next }
+    /^[qQbB]$/ { print "CANCEL"; next }
     { ok=0 }
     END { if (!ok) exit 2 }
   '
