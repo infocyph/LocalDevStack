@@ -225,8 +225,69 @@ metadata = module._request_metadata(body)
 assert metadata["_extraction_request"] is True
 assert metadata["think"] is False
 assert "private corpus content" not in json.dumps(metadata)
+
+recovery = module._build_tool_recovery_request(body)
+assert recovery is not None
+recovery_json = json.loads(recovery)
+assert recovery_json["tools"][0]["function"]["name"] == "submit_graph"
+assert recovery_json["tool_choice"] == "auto"
+assert recovery_json["think"] is False
+assert "STRUCTURED RECOVERY" in recovery_json["messages"][0]["content"]
+
+tool_response = {
+    "id": "chatcmpl-test",
+    "object": "chat.completion",
+    "choices": [{
+        "index": 0,
+        "finish_reason": "tool_calls",
+        "message": {
+            "role": "assistant",
+            "reasoning_content": "private reasoning",
+            "content": "<think>private reasoning</think>",
+            "tool_calls": [{
+                "id": "call_1",
+                "type": "function",
+                "function": {
+                    "name": "submit_graph",
+                    "arguments": json.dumps({
+                        "nodes": [{"id": "readme_pathwise", "label": "Pathwise"}],
+                        "edges": [],
+                        "hyperedges": [],
+                    }),
+                },
+            }],
+        },
+    }],
+    "usage": {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
+}
+graph = module._extract_graph_tool_result(json.dumps(tool_response).encode())
+assert graph == {
+    "nodes": [{"id": "readme_pathwise", "label": "Pathwise"}],
+    "edges": [],
+    "hyperedges": [],
+}
+replacement = module._replace_response_content(json.dumps(tool_response).encode(), graph)
+assert replacement is not None
+replacement_json = json.loads(replacement)
+message = replacement_json["choices"][0]["message"]
+assert json.loads(message["content"]) == graph
+assert "tool_calls" not in message
+assert "reasoning_content" not in message
+assert replacement_json["choices"][0]["finish_reason"] == "stop"
+
+string_array_response = json.loads(json.dumps(tool_response))
+string_array_response["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"] = json.dumps({
+    "nodes": json.dumps([{"id": "a"}]),
+    "edges": "[]",
+    "hyperedges": "[]",
+})
+assert module._extract_graph_tool_result(json.dumps(string_array_response).encode()) == {
+    "nodes": [{"id": "a"}],
+    "edges": [],
+    "hyperedges": [],
+}
 PY
-pass "Graphify diagnostic proxy identifies suspect responses without logging prompts"
+pass "Graphify diagnostic proxy identifies and structurally recovers suspect responses"
 
 
 (
