@@ -47,6 +47,15 @@ _graphify_local_base_url() {
   printf '%s' 'http://llm-ollama.localhost:11434/v1'
 }
 
+_graphify_local_model_preflight() {
+  local model="${1:-}"
+  [[ -n "$model" ]] || return 1
+
+  if ! docker_compose exec -T llm-ollama /bin/ollama show "$model" >/dev/null 2>&1; then
+    die "Ollama model '$model' is not available in LocalDevStack. Run: lds llm pull $model"
+  fi
+}
+
 cmd_graphify() {
   need_bin graphify "install the Graphify CLI on the host first"
 
@@ -54,8 +63,13 @@ cmd_graphify() {
   [[ $# -eq 0 ]] || shift
   [[ -e "$target" ]] || die "Graphify target does not exist: $target"
 
-  local base_url timeout model api_key graphify_bin arg next_is_model=0 next_is_timeout=0
-  base_url="${OLLAMA_BASE_URL:-$(_graphify_local_base_url)}"
+  local base_url timeout model api_key graphify_bin arg next_is_model=0 next_is_timeout=0 local_provider=0
+  if [[ -n "${OLLAMA_BASE_URL:-}" ]]; then
+    base_url="$OLLAMA_BASE_URL"
+  else
+    base_url="$(_graphify_local_base_url)"
+    local_provider=1
+  fi
   timeout="${GRAPHIFY_API_TIMEOUT:-$(compose_control_value LDS_AI_TIMEOUT 1800)}"
   model="${OLLAMA_MODEL:-$(compose_control_value LDS_AI_MODEL qwen3:14b)}"
   api_key="${OLLAMA_API_KEY:-local}"
@@ -90,6 +104,8 @@ cmd_graphify() {
   [[ -n "$model" ]] || die "Graphify model cannot be empty"
   [[ "$timeout" =~ ^[0-9]+$ ]] && ((timeout >= 1)) ||
     die "GRAPHIFY_API_TIMEOUT/--api-timeout must be a positive integer"
+
+  ((local_provider == 0)) || _graphify_local_model_preflight "$model"
 
   graphify_bin="$(bin_path graphify)"
 
