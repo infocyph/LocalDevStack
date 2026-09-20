@@ -101,6 +101,10 @@ assert_file_contains "$ROOT/lib/ai.sh" 'lds-fastflow'
 assert_file_contains "$ROOT/lib/ai.sh" 'lds-ollama'
 assert_file_contains "$ROOT/lib/ai.sh" 'extra_body: {think: false}'
 assert_file_contains "$ROOT/lib/ai.sh" 'reasoning_effort: "none"'
+assert_file_contains "$ROOT/lib/ai.sh" 'graphify-diagnostic-proxy.py'
+assert_file_contains "$ROOT/lib/ai.sh" 'http://127.0.0.1:${proxy_port}/v1'
+assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_DIAGNOSTICS:-1'
+assert_file_contains "$ROOT/lib/ai.sh" 'lds-graphify-diagnostics.jsonl'
 assert_file_contains "$ROOT/lib/ai.sh" 'llm think <auto|on|off>'
 pass "LLM CLI and Graphify resolve through provider-aware common endpoint"
 
@@ -158,6 +162,55 @@ pass "Graphify backend selection follows active LLM provider"
     fail "Ollama local Graphify provider must disable thinking and retain context headroom"
 )
 pass "Graphify local providers enforce structured no-thinking contracts"
+
+python3 -m py_compile "$ROOT/scripts/graphify-diagnostic-proxy.py"
+python3 - "$ROOT/scripts/graphify-diagnostic-proxy.py" <<'PY'
+import importlib.util
+import json
+import sys
+
+path = sys.argv[1]
+spec = importlib.util.spec_from_file_location("lds_graphify_diagnostic_proxy", path)
+module = importlib.util.module_from_spec(spec)
+assert spec and spec.loader
+spec.loader.exec_module(module)
+
+suspect, reason = module.classify_graph_content('{"nodes":[],"edges":[],"hyperedges":[]}')
+assert suspect and reason == "valid but empty graph fragment"
+
+suspect, reason = module.classify_graph_content('{"nodes":["A","B"],"edges":[]}')
+assert suspect and "no usable object entries" in reason
+
+suspect, _ = module.classify_graph_content(
+    '{"nodes":[{"id":"a","label":"A"}],"edges":[],"hyperedges":[]}'
+)
+assert not suspect
+
+fence = chr(96) * 3
+suspect, _ = module.classify_graph_content(
+    "answer follows\n" + fence + "json\n" +
+    '{"nodes":[{"id":"a"}],"edges":[]}' + "\n" + fence
+)
+assert not suspect
+
+suspect, reason = module.classify_graph_content("I found nothing useful in these documents.")
+assert suspect and "not parseable" in reason
+
+body = json.dumps({
+    "model": "qwen3.5:9b",
+    "messages": [
+        {"role": "system", "content": "You are a graphify semantic extraction agent."},
+        {"role": "user", "content": "private corpus content"}
+    ],
+    "think": False,
+    "stream": False
+}).encode()
+metadata = module._request_metadata(body)
+assert metadata["_extraction_request"] is True
+assert metadata["think"] is False
+assert "private corpus content" not in json.dumps(metadata)
+PY
+pass "Graphify diagnostic proxy identifies suspect responses without logging prompts"
 
 
 (
