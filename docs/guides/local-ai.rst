@@ -258,14 +258,18 @@ Graphify
 Graphify backend from the active provider.
 
 For the built-in LocalDevStack endpoint, Graphify runs through an ephemeral
-provider definition created only for that invocation. Nothing is written into the
-target repository or ``~/.graphify/providers.json``.
+provider definition created only for that invocation. The provider definition itself
+is never written into the target repository or ``~/.graphify/providers.json``.
+
+Local Graphify runs enable a localhost diagnostic proxy by default. The temporary
+provider points to ``127.0.0.1:<ephemeral>/v1``, and the proxy forwards the request
+body unchanged to ``http://llm.localhost:11434/v1``. It inspects semantic-extraction
+responses only; community-label requests are ignored.
 
 FastFlow / NPU:
 
 .. code-block:: text
 
-   base_url=http://llm.localhost:11434/v1
    backend=lds-fastflow
    model=<effective FastFlow model>
    extra_body={"think": false}
@@ -274,7 +278,6 @@ Ollama / CPU, NVIDIA or ROCm:
 
 .. code-block:: text
 
-   base_url=http://llm.localhost:11434/v1
    backend=lds-ollama
    model=<effective Ollama model>
    reasoning_effort=none
@@ -283,8 +286,22 @@ The Ollama provider definition also keeps explicit context headroom for Graphify
 local chunks. Both local providers default to ``--token-budget 4000
 --max-concurrency 1`` unless the caller supplied those flags. These limits and the
 no-thinking request are separate protections: the former prevents local context/resource
-pressure, while the latter prevents reasoning output from producing hollow structured
-responses.
+pressure, while the latter keeps reasoning out of the structured response channel.
+
+When a semantic response itself looks suspect (empty content, valid-but-empty graph
+JSON, malformed/non-graph JSON, or graph arrays with no object entries), LocalDevStack
+prints a bounded assistant-content preview and stores the full suspect assistant
+response as JSON Lines in:
+
+.. code-block:: text
+
+   <target>/graphify-out/lds-graphify-diagnostics.jsonl
+
+The diagnostic record contains request controls such as model, ``think``,
+``reasoning_effort``, finish reason, and token usage, but never stores the Graphify
+prompt or source corpus. Set ``LDS_GRAPHIFY_DIAGNOSTICS=0`` to bypass the proxy.
+``LDS_GRAPHIFY_DIAGNOSTIC_PREVIEW`` controls the terminal preview size (minimum 256,
+default 4096). ``LDS_GRAPHIFY_DIAGNOSTIC_LOG`` overrides the JSONL path.
 
 Before extraction, LocalDevStack checks ``/v1/models`` and fails fast when the
 selected model is absent. Override the local chunk defaults with explicit Graphify
