@@ -427,10 +427,11 @@ class DiagnosticHandler(BaseHTTPRequestHandler):
         is_chat = self.command == "POST" and self.path.rstrip("/").endswith("/v1/chat/completions")
         metadata = _request_metadata(body) if is_chat else {}
         extraction_request = bool(metadata.get("_extraction_request"))
+        fastflow_request = metadata.get("think", "<omitted>") != "<omitted>"
 
         upstream_body = body
         structured_primary = False
-        if extraction_request:
+        if extraction_request and fastflow_request:
             candidate = _build_tool_recovery_request(body)
             if candidate is not None:
                 upstream_body = candidate
