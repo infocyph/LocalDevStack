@@ -132,5 +132,5 @@ for stale in LDS_TOOLS_IMAGE LDS_RUNNER_IMAGE LDS_NGINX_IMAGE LDS_APACHE_IMAGE; 
     fail "user-facing docs expose obsolete fixed-image variable: $stale"
   fi
 done
-assert_file_contains "$ai" 'no separate tracked AI Compose variants exist'
+assert_file_contains "$ai" 'Both provider definitions live in ``docker/compose/companion.yaml``'
 pass "docs reflect fixed infrastructure images and ephemeral AI overrides"
