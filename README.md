@@ -112,7 +112,7 @@ The exact optional endpoints shown by `lds urls` depend on enabled profiles.
 | RedisInsight | `https://ri.localhost` |
 | Mongo Express | `https://me.localhost` |
 | Kibana | `https://kibana.localhost` |
-| Local AI | `https://llm-ollama.localhost` |
+| Local AI | `https://llm.localhost` |
 
 Use `lds open admin`, `lds open mail`, `lds open db`, `lds open redis`, `lds open mongo`, `lds open kibana`, or `lds open ai` to open a known endpoint.
 
@@ -228,8 +228,8 @@ See `docs/guides/databases-and-clients.rst` for the profile/client map.
 Enable the `ai` profile through `lds setup profile`.
 
 ```text
-Tools consumer -> http://llm-ollama:11434
-User HTTPS     -> https://llm-ollama.localhost
+Tools consumer -> http://llm:11434
+User HTTPS     -> https://llm.localhost
 Default model  -> qwen3:14b
 Model store    -> LLMModels
 ```
