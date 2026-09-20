@@ -18,8 +18,8 @@ services:
       - SOPS_REPO_DIR=/etc/share/vhosts/sops
       - COMPOSE_PROFILES=${COMPOSE_PROFILES:-}
       - LDS_AI_ENABLED=${LDS_AI_ENABLED:-auto}
-      - LDS_AI_PROVIDER=${LDS_AI_PROVIDER:-ollama}
-      - LDS_AI_URL=${LDS_AI_URL:-http://llm-ollama:11434}
+      - LDS_AI_PROVIDER=${LDS_AI_PROVIDER:-llm}
+      - LDS_AI_URL=${LDS_AI_URL:-http://llm:11434}
       - LDS_AI_MODEL=${LDS_AI_MODEL:-qwen3:14b}
       - LDS_AI_CONNECT_TIMEOUT=${LDS_AI_CONNECT_TIMEOUT:-2}
       - LDS_AI_PREFLIGHT_TIMEOUT=${LDS_AI_PREFLIGHT_TIMEOUT:-5}
@@ -59,7 +59,7 @@ services:
     hostname: llm-ollama
     image: infocyph/llm-ollama:${LDS_LLM_ARCH}
     restart: unless-stopped
-    profiles: [ai]
+    profiles: ["${LDS_AI_OLLAMA_PROFILE:-__lds-ai-disabled-ollama}"]
     environment:
       - LLM_OLLAMA_MODEL=${LDS_AI_MODEL:-qwen3:14b}
       - LLM_OLLAMA_SYSTEM=${LLM_OLLAMA_SYSTEM:-}
@@ -79,8 +79,45 @@ services:
     volumes:
       - lds_llm:/root/.ollama
     networks:
-      - frontend
-      - backend
+      frontend:
+        aliases: [llm]
+      backend:
+        aliases: [llm]
+
+  llm-fastflow:
+    container_name: LLM_FASTFLOW
+    hostname: llm-fastflow
+    image: infocyph/llm-fastflow:latest
+    restart: unless-stopped
+    profiles: ["${LDS_AI_FASTFLOW_PROFILE:-__lds-ai-disabled-fastflow}"]
+    environment:
+      - LLM_FASTFLOW_MODEL=${LDS_AI_MODEL:-qwen3.5:9b}
+      - FLM_MODEL_PATH=/models
+      - FLM_SERVE_PORT=11434
+      - FLM_HOST=0.0.0.0
+      - FLM_CORS=0
+      - FLM_DISABLE_UPDATE_CHECK=1
+      - LLM_FASTFLOW_INPUT_WARN_BYTES=${LLM_FASTFLOW_INPUT_WARN_BYTES:-1048576}
+      - LLM_FASTFLOW_INPUT_MAX_BYTES=${LLM_FASTFLOW_INPUT_MAX_BYTES:-0}
+      - LLM_FASTFLOW_ATTACHMENT_MAX_BYTES=${LLM_FASTFLOW_ATTACHMENT_MAX_BYTES:-16777216}
+      - LLM_FASTFLOW_ATTACHMENTS_MAX_BYTES=${LLM_FASTFLOW_ATTACHMENTS_MAX_BYTES:-33554432}
+      - LLM_FASTFLOW_ATTACHMENT_MAX_COUNT=${LLM_FASTFLOW_ATTACHMENT_MAX_COUNT:-16}
+      - LLM_FASTFLOW_PDF_MAX_PAGES=${LLM_FASTFLOW_PDF_MAX_PAGES:-24}
+      - LLM_FASTFLOW_PDF_DPI=${LLM_FASTFLOW_PDF_DPI:-120}
+      - LLM_FASTFLOW_ALLOW_LARGE_INPUT=${LLM_FASTFLOW_ALLOW_LARGE_INPUT:-0}
+    devices:
+      - "${LDS_AI_ACCEL_DEVICE:-/dev/accel/accel0}:/dev/accel/accel0"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - lds_llm_fastflow:/models
+    networks:
+      frontend:
+        aliases: [llm]
+      backend:
+        aliases: [llm]
 
   runner:
     container_name: RUNNER
