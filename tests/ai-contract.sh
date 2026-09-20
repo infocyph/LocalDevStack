@@ -249,7 +249,9 @@ recovery_json = json.loads(recovery)
 assert recovery_json["tools"][0]["function"]["name"] == "submit_graph"
 assert recovery_json["tool_choice"] == "auto"
 assert recovery_json["think"] is False
-assert "STRUCTURED RECOVERY" in recovery_json["messages"][0]["content"]
+assert "STRUCTURED OUTPUT" in recovery_json["messages"][0]["content"]
+assert recovery_json["temperature"] == 0
+assert recovery_json["max_completion_tokens"] == 4096
 
 assert recovery_json["tools"][0]["function"]["parameters"] == module._GRAPH_SCHEMA
 assert "rationale_for" not in module._GRAPH_SCHEMA["properties"]["edges"]["items"]["properties"]["relation"]["enum"]
@@ -271,6 +273,7 @@ ollama_json = json.loads(ollama_request)
 assert ollama_json["reasoning_effort"] == "none"
 assert ollama_json["options"]["num_ctx"] == 8192
 assert ollama_json["temperature"] == 0
+assert ollama_json["max_completion_tokens"] == 4096
 assert ollama_json["response_format"]["type"] == "json_schema"
 assert ollama_json["response_format"]["json_schema"]["strict"] is True
 assert ollama_json["response_format"]["json_schema"]["schema"] == module._GRAPH_SCHEMA
@@ -307,6 +310,29 @@ assert graph == {
     "edges": [],
     "hyperedges": [],
 }
+
+assert module._extract_fastflow_structured_graph(json.dumps(tool_response).encode()) == graph
+
+content_only_response = {
+    "choices": [{
+        "index": 0,
+        "finish_reason": "stop",
+        "message": {
+            "role": "assistant",
+            "content": json.dumps(graph),
+        },
+    }],
+    "usage": {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
+}
+assert module._extract_fastflow_structured_graph(
+    json.dumps(content_only_response).encode()
+) == graph
+
+retry = module._build_tool_recovery_request(body, retry=True)
+assert retry is not None
+retry_json = json.loads(retry)
+assert "previous structured attempt" in retry_json["messages"][0]["content"]
+assert retry_json["max_completion_tokens"] == 4096
 replacement = module._replace_response_content(json.dumps(tool_response).encode(), graph)
 assert replacement is not None
 replacement_json = json.loads(replacement)
