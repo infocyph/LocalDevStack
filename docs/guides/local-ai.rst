@@ -234,22 +234,48 @@ service definition.
 Graphify
 --------
 
-``lds graphify [path]`` uses the common LocalDevStack endpoint:
+``lds graphify [path]`` uses the common LocalDevStack endpoint and selects the
+Graphify backend from the active provider.
+
+FastFlow / NPU:
+
+.. code-block:: text
+
+   OPENAI_BASE_URL=http://llm.localhost:11434/v1
+   OPENAI_MODEL=<effective FastFlow model>
+   OPENAI_API_KEY=local
+   GRAPHIFY_API_TIMEOUT=<LDS_AI_TIMEOUT>
+   backend=openai
+   default token budget=4000
+   default max concurrency=1
+
+Ollama / CPU, NVIDIA or ROCm:
 
 .. code-block:: text
 
    OLLAMA_BASE_URL=http://llm.localhost:11434/v1
-   OLLAMA_MODEL=<effective provider model>
+   OLLAMA_MODEL=<effective Ollama model>
    OLLAMA_API_KEY=local
    GRAPHIFY_API_TIMEOUT=<LDS_AI_TIMEOUT>
+   backend=ollama
 
-Graphify currently calls this backend ``ollama``. That is Graphify terminology; the
-LocalDevStack route is provider-neutral and OpenAI-compatible. Before extraction,
-LocalDevStack checks ``/v1/models`` and fails fast when the selected model is absent.
+Before extraction, LocalDevStack checks ``/v1/models`` and fails fast when the
+selected model is absent. FastFlow uses Graphify's generic OpenAI-compatible backend;
+Ollama continues to use Graphify's native Ollama backend.
 
-An explicit ``OLLAMA_BASE_URL`` remains caller-controlled and bypasses the local-provider
-preflight. Extraction still uses ``--backend ollama --no-cluster`` followed by
-``cluster-only`` so clustering occurs once.
+For FastFlow, LocalDevStack adds ``--token-budget 4000 --max-concurrency 1`` unless
+the caller already supplied those flags. Override the defaults with explicit Graphify
+flags, or set ``LDS_GRAPHIFY_TOKEN_BUDGET`` /
+``LDS_GRAPHIFY_MAX_CONCURRENCY``. If FastFlow reports ``Max length reached!``,
+reduce the token budget further, for example:
+
+.. code-block:: bash
+
+   lds graphify . --token-budget 3000 --max-concurrency 1
+
+Explicit ``OPENAI_BASE_URL`` (FastFlow path) or ``OLLAMA_BASE_URL`` (Ollama path)
+remains caller-controlled and bypasses the local-provider preflight. Extraction still
+uses ``--no-cluster`` followed by ``cluster-only`` so clustering occurs once.
 
 Trust Boundary
 --------------
