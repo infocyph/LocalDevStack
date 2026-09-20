@@ -25,6 +25,7 @@ trap cleanup EXIT
 
 cat >"$user_env" <<EOF
 COMPOSE_PROFILES=postgresql,redis,ai,mysql
+LDS_AI_RUNTIME=cpu
 MYSQL_ROOT_PASSWORD=supersecret-ci-value
 EOF
 
@@ -44,6 +45,9 @@ assert_contains "$images" "infocyph/nginx:latest"
 assert_contains "$images" "infocyph/apache:latest"
 assert_contains "$images" "postgres:alpine"
 assert_contains "$images" "docker.elastic.co/elasticsearch/elasticsearch:9.5.4"
+assert_contains "$images" "infocyph/llm-ollama:latest"
+assert_contains "$images" "LLM provider"
+assert_contains "$images" "ollama"
 assert_contains "$images" "localdevstack-php:<selected-version> (Alpine)"
 pass "images is offline-safe and reports fixed plus configurable image selections"
 
@@ -52,7 +56,7 @@ assert_contains "$urls" "https://admin.localhost"
 assert_contains "$urls" "https://webmail.localhost"
 assert_contains "$urls" "https://db.localhost"
 assert_contains "$urls" "https://ri.localhost"
-assert_contains "$urls" "https://llm-ollama.localhost"
+assert_contains "$urls" "https://llm.localhost"
 if grep -Fq "https://kibana.localhost" <<<"$urls"; then
   fail "urls must not show disabled Elasticsearch profile URL"
 fi
