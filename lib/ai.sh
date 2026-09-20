@@ -90,6 +90,64 @@ _graphify_backend_for_provider() {
   esac
 }
 
+_graphify_local_backend_for_provider() {
+  case "${1,,}" in
+  fastflow) printf '%s' lds-fastflow ;;
+  ollama) printf '%s' lds-ollama ;;
+  *) return 1 ;;
+  esac
+}
+
+_graphify_write_local_provider() {
+  local dir="$1" provider="$2" base_url="$3" model="$4" token_budget="$5"
+  local backend num_ctx
+  backend="$(_graphify_local_backend_for_provider "$provider")" || return 1
+
+  mkdir -p "$dir/.graphify"
+  case "$provider" in
+  fastflow)
+    jq -n \
+      --arg backend "$backend" \
+      --arg base_url "$base_url" \
+      --arg model "$model" \
+      '{
+        ($backend): {
+          base_url: $base_url,
+          default_model: $model,
+          env_key: "LDS_GRAPHIFY_API_KEY",
+          extra_body: {think: false}
+        }
+      }' >"$dir/.graphify/providers.json"
+    ;;
+  ollama)
+    num_ctx=$((token_budget + 8192 + 2400))
+    ((num_ctx < 8192)) && num_ctx=8192
+    ((num_ctx > 131072)) && num_ctx=131072
+    num_ctx=$((((num_ctx + 1023) / 1024) * 1024))
+    jq -n \
+      --arg backend "$backend" \
+      --arg base_url "$base_url" \
+      --arg model "$model" \
+      --argjson num_ctx "$num_ctx" \
+      '{
+        ($backend): {
+          base_url: $base_url,
+          default_model: $model,
+          env_key: "LDS_GRAPHIFY_API_KEY",
+          reasoning_effort: "none",
+          extra_body: {
+            options: {num_ctx: $num_ctx},
+            keep_alive: "30m"
+          }
+        }
+      }' >"$dir/.graphify/providers.json"
+    ;;
+  *) return 1 ;;
+  esac
+
+  printf '%s' "$backend"
+}
+
 cmd_graphify() {
   need_bin graphify "install the Graphify CLI on the host first"
 
@@ -97,7 +155,7 @@ cmd_graphify() {
   [[ $# -eq 0 ]] || shift
   [[ -e "$target" ]] || die "Graphify target does not exist: $target"
 
-  local runtime provider backend base_url timeout model api_key graphify_bin arg
+  local runtime provider backend base_url timeout model api_key graphify_bin arg provider_dir target_abs
   local local_provider=0
   local next_is_model=0 next_is_timeout=0 next_is_token_budget=0 next_is_max_concurrency=0
   local has_token_budget=0 has_max_concurrency=0
@@ -206,10 +264,9 @@ cmd_graphify() {
       die "--max-concurrency must be a positive integer"
   fi
 
-  # FastFlow's Qwen3.5 9B path is OpenAI-compatible but has a smaller practical
-  # context budget than the old Ollama default. Keep semantic chunks conservative
-  # unless the caller explicitly chooses different Graphify limits.
-  if [[ "$provider" == fastflow ]]; then
+  # Local models are more reliable with conservative semantic chunking and
+  # serialized requests. Callers can still override both limits explicitly.
+  if ((local_provider)); then
     if ((has_token_budget == 0)); then
       token_budget_value="${LDS_GRAPHIFY_TOKEN_BUDGET:-4000}"
       [[ "$token_budget_value" =~ ^[0-9]+$ ]] && ((token_budget_value >= 1)) ||
@@ -227,27 +284,45 @@ cmd_graphify() {
   ((local_provider == 0)) || _graphify_local_model_preflight "$model"
 
   graphify_bin="$(bin_path graphify)"
+  target_abs="$(_realpath "$target")"
+  provider_dir=""
+
+  if ((local_provider)); then
+    provider_dir="$(mktemp -d)" || die "Unable to create temporary Graphify provider directory"
+    backend="$(_graphify_write_local_provider "$provider_dir" "$provider" "$base_url" "$model" "$token_budget_value")" || {
+      rm -rf "$provider_dir"
+      die "Unable to build LocalDevStack Graphify provider configuration"
+    }
+  fi
 
   (
+    [[ -z "$provider_dir" ]] || trap 'rm -rf "$provider_dir"' EXIT
     export GRAPHIFY_API_TIMEOUT="$timeout"
 
-    case "$backend" in
-    openai)
-      unset OLLAMA_BASE_URL OLLAMA_API_KEY OLLAMA_MODEL
-      export OPENAI_BASE_URL="$base_url"
-      export OPENAI_API_KEY="$api_key"
-      export OPENAI_MODEL="$model"
-      ;;
-    ollama)
-      unset OPENAI_BASE_URL OPENAI_API_KEY OPENAI_MODEL
-      export OLLAMA_BASE_URL="$base_url"
-      export OLLAMA_API_KEY="$api_key"
-      export OLLAMA_MODEL="$model"
-      ;;
-    esac
+    if ((local_provider)); then
+      unset OPENAI_BASE_URL OPENAI_API_KEY OPENAI_MODEL OLLAMA_BASE_URL OLLAMA_API_KEY OLLAMA_MODEL
+      export LDS_GRAPHIFY_API_KEY=local
+      export GRAPHIFY_ALLOW_LOCAL_PROVIDERS=1
+      cd "$provider_dir"
+    else
+      case "$backend" in
+      openai)
+        unset OLLAMA_BASE_URL OLLAMA_API_KEY OLLAMA_MODEL
+        export OPENAI_BASE_URL="$base_url"
+        export OPENAI_API_KEY="$api_key"
+        export OPENAI_MODEL="$model"
+        ;;
+      ollama)
+        unset OPENAI_BASE_URL OPENAI_API_KEY OPENAI_MODEL
+        export OLLAMA_BASE_URL="$base_url"
+        export OLLAMA_API_KEY="$api_key"
+        export OLLAMA_MODEL="$model"
+        ;;
+      esac
+    fi
 
-    "$graphify_bin" extract "$target" --backend "$backend" --no-cluster "${graphify_defaults[@]}" "$@" &&
-      "$graphify_bin" cluster-only "$target" --backend "$backend"
+    "$graphify_bin" extract "$target_abs" --backend "$backend" --model "$model" --no-cluster "${graphify_defaults[@]}" "$@" &&
+      "$graphify_bin" cluster-only "$target_abs" --backend "$backend" --model "$model"
   )
 }
 
@@ -288,16 +363,15 @@ cmd_llm() {
     case "${mode,,}" in
     auto)
       update_env "$ENV_DOCKER" LDS_AI_RUNTIME ""
-      update_env "$ENV_DOCKER" LDS_LLM_ARCH ""
+      remove_env "$ENV_DOCKER" LDS_LLM_ARCH
       update_env "$ENV_DOCKER" LDS_AI_IGPU_ENABLE ""
       local detected
       detected="$(detect_ai_runtime)"
       ok "LLM runtime set to auto; detected $detected ($(ai_provider_for_runtime "$detected")). Recreate the AI service to apply it."
       ;;
     cpu | nvidia | amd | npu)
-      local normalized arch igpu_enable provider image
+      local normalized igpu_enable provider image
       normalized="${mode,,}"
-      arch="$(llm_arch_for_runtime "$normalized")"
       igpu_enable="$(ai_igpu_default_for_runtime "$normalized")"
       provider="$(ai_provider_for_runtime "$normalized")"
 
@@ -306,13 +380,15 @@ cmd_llm() {
       fi
 
       update_env "$ENV_DOCKER" LDS_AI_RUNTIME "$normalized"
-      update_env "$ENV_DOCKER" LDS_LLM_ARCH "$arch"
+      remove_env "$ENV_DOCKER" LDS_LLM_ARCH
       update_env "$ENV_DOCKER" LDS_AI_IGPU_ENABLE "$igpu_enable"
 
       if [[ "$provider" == "fastflow" ]]; then
         image="infocyph/llm-fastflow:latest"
+      elif [[ "$normalized" == "amd" ]]; then
+        image="infocyph/llm-ollama:amd-latest"
       else
-        image="infocyph/llm-ollama:$arch"
+        image="infocyph/llm-ollama:latest"
       fi
       ok "LLM runtime set to $normalized ($provider, $image). Recreate the AI service to apply the change."
       ;;
