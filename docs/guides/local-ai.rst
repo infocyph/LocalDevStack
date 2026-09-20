@@ -302,10 +302,21 @@ Structured extraction is provider-specific:
   native structured-output ``format`` field.
 
 A structurally valid all-empty graph remains valid and is passed back to Graphify
-unchanged; Graphify then decides whether to retry it as a hollow extraction. If a
-provider's structured path itself fails or returns malformed data, LocalDevStack
-falls back once to the original free-form Graphify request and leaves Graphify's
-normal retry policy intact.
+unchanged; Graphify then decides whether to retry it as a hollow extraction.
+
+Structured generations are deliberately bounded independently of Graphify's larger
+general output allowance. LocalDevStack caps a structured extraction at 4096 output
+tokens and defaults each structured request to a 300-second timeout
+(``LDS_GRAPHIFY_STRUCTURED_TIMEOUT``). This is important for FastFlow because its
+Qwen3.5 non-stream tool parser recognizes ``<tool_call>`` only after generation
+finishes; without a smaller bound, a malformed/non-terminating tool response can run
+toward Graphify's 16384-token completion cap for many minutes.
+
+FastFlow accepts one additional bounded structured retry when the first response has
+neither a usable ``submit_graph`` call nor a valid graph in ``message.content``.
+Only after those structured attempts fail does LocalDevStack make one bounded
+free-form fallback request. Ollama uses the same output/timeout bounds on its native
+JSON-schema request. Graphify's own retry policy remains the final fallback.
 
 Detailed suspect-response logging is optional and does not control the compatibility
 proxy. Enable it with:
