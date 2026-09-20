@@ -123,7 +123,7 @@ setup_menu_print() {
   } >&2
 }
 
-# Parse user selection into indices or ALL/NONE (prints one token per line)
+# Parse user selection into indices or ALL/NONE/CANCEL (prints one token per line)
 setup_menu_parse() {
   local input="${1//[[:space:]]/}"
   [[ -n "$input" ]] || return 1
@@ -157,8 +157,13 @@ setup_choose_services() {
       continue
     fi
 
-    if grep -qx "NONE" <<<"$parsed"; then
+    if grep -qx "CANCEL" <<<"$parsed"; then
       return 1
+    fi
+
+    if grep -qx "NONE" <<<"$parsed"; then
+      printf '%s\n' "__NONE__"
+      return 0
     fi
 
     if grep -qx "ALL" <<<"$parsed"; then
@@ -214,13 +219,30 @@ setup_service() {
   IFS=';' read -r -a pairs <<<"$defaults"
   IFS=';' read -r -a prompts <<<"${PROFILE_PROMPTS[$profile]:-}"
 
-  local i pair key def val prompt
+  local i pair key def val prompt current input
   for i in "${!pairs[@]}"; do
     pair="${pairs[$i]}"
     [[ -n "$pair" ]] || continue
     IFS='=' read -r key def <<<"$pair"
     prompt="${prompts[$i]:-$key}"
-    val="$(read_default "$prompt" "$def")"
+    current="$(dotenv_value "$ENV_DOCKER" "$key" 2>/dev/null || true)"
+
+    # Re-running setup must not reset a user's selected versions or credentials.
+    # Secret-like values are preserved without printing their current/default value.
+    case "$key" in
+    *PASSWORD* | *SECRET* | *TOKEN* | *PRIVATE_KEY* | *API_KEY* | *ACCESS_KEY*)
+      if [[ -n "$current" ]]; then
+        tty_readline input "$(printf '%b%s [configured; Enter keeps current]:%b ' "$CYAN" "$prompt" "$NC")" || return 1
+        val="${input:-$current}"
+      else
+        tty_readline input "$(printf '%b%s [Enter uses catalog default]:%b ' "$CYAN" "$prompt" "$NC")" || return 1
+        val="${input:-$def}"
+      fi
+      ;;
+    *)
+      val="$(read_default "$prompt" "${current:-$def}")"
+      ;;
+    esac
 
     case "$key" in
     LDS_AI_RUNTIME)
@@ -238,8 +260,17 @@ setup_service() {
 
 process_all() {
   local selected
+  PENDING_ENVS=()
+  PENDING_PROFILES=()
+
   if ! selected="$(setup_choose_services)"; then
     printf "\n%bSetup cancelled.%b\n" "$YELLOW" "$NC"
+    return 0
+  fi
+
+  if [[ "$selected" == "__NONE__" ]]; then
+    flush_profiles
+    printf "\n%b✅ Catalog-managed service profiles cleared; generated runtime/domain profiles preserved.%b\n" "$GREEN" "$NC"
     return 0
   fi
 
