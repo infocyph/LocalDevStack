@@ -222,7 +222,7 @@ cmd_graphify() {
 
   local runtime provider backend base_url timeout model api_key graphify_bin arg provider_dir target_abs
   local graphify_python="" diagnostic_root="" diagnostic_log="" diagnostic_preview="4096" graphify_think="off"
-  local diagnostic_mode="off" structured_timeout=""
+  local diagnostic_mode="off" structured_timeout="" graphify_sdk_retries=""
   local local_provider=0 force_rebuild=0
   local next_is_model=0 next_is_timeout=0 next_is_token_budget=0 next_is_max_concurrency=0
   local has_token_budget=0 has_max_concurrency=0
@@ -259,9 +259,13 @@ cmd_graphify() {
 
   timeout="${GRAPHIFY_API_TIMEOUT:-$(compose_control_value LDS_AI_TIMEOUT 1800)}"
 
-  structured_timeout="${LDS_GRAPHIFY_STRUCTURED_TIMEOUT:-300}"
+  structured_timeout="${LDS_GRAPHIFY_STRUCTURED_TIMEOUT:-120}"
   [[ "$structured_timeout" =~ ^[0-9]+$ ]] && ((structured_timeout >= 1)) ||
     die "LDS_GRAPHIFY_STRUCTURED_TIMEOUT must be a positive integer"
+
+  graphify_sdk_retries="${GRAPHIFY_MAX_RETRIES:-${LDS_GRAPHIFY_SDK_RETRIES:-0}}"
+  [[ "$graphify_sdk_retries" =~ ^[0-9]+$ ]] ||
+    die "GRAPHIFY_MAX_RETRIES/LDS_GRAPHIFY_SDK_RETRIES must be a non-negative integer"
 
   case "${LDS_GRAPHIFY_THINK:-off}" in
   off | false | 0) graphify_think=off ;;
@@ -412,6 +416,7 @@ cmd_graphify() {
     export GRAPHIFY_API_TIMEOUT="$timeout"
 
     if ((local_provider)); then
+      export GRAPHIFY_MAX_RETRIES="$graphify_sdk_retries"
       local_provider_base_url="$base_url"
 
       if [[ -n "$graphify_python" ]]; then
