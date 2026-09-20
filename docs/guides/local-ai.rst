@@ -303,6 +303,21 @@ prompt or source corpus. Set ``LDS_GRAPHIFY_DIAGNOSTICS=0`` to bypass the proxy.
 ``LDS_GRAPHIFY_DIAGNOSTIC_PREVIEW`` controls the terminal preview size (minimum 256,
 default 4096). ``LDS_GRAPHIFY_DIAGNOSTIC_LOG`` overrides the JSONL path.
 
+FastFlow Graphify defaults to ``LDS_GRAPHIFY_THINK=off``. For a controlled
+instruction-following A/B test, run the same corpus once with thinking enabled:
+
+.. code-block:: bash
+
+   LDS_GRAPHIFY_THINK=on lds graphify .
+
+The ``on`` mode sends both ``think=true`` and
+``reasoning_effort=high``. FastFlow keeps reasoning in
+``reasoning_content`` and the final answer in ``message.content``, so the
+Graphify parser still receives only the final graph JSON. Use
+``LDS_GRAPHIFY_THINK=auto`` to omit both controls and return to the model/provider
+default. This switch is intended for diagnosis until the better-performing mode is
+confirmed on the real corpus.
+
 Before extraction, LocalDevStack checks ``/v1/models`` and fails fast when the
 selected model is absent. Override the local chunk defaults with explicit Graphify
 flags, or set ``LDS_GRAPHIFY_TOKEN_BUDGET`` /
