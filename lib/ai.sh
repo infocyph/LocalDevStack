@@ -148,6 +148,38 @@ _graphify_write_local_provider() {
   printf '%s' "$backend"
 }
 
+_graphify_python_bin() {
+  local graphify_bin="${1:-}" first_line="" candidate=""
+
+  if [[ -n "$graphify_bin" && -f "$graphify_bin" ]]; then
+    IFS= read -r first_line <"$graphify_bin" || true
+    if [[ "$first_line" == '#!'* ]]; then
+      candidate="${first_line#\#!}"
+      candidate="${candidate%% *}"
+      if [[ -x "$candidate" ]]; then
+        printf '%s' "$candidate"
+        return 0
+      fi
+    fi
+  fi
+
+  for candidate in python3 python; do
+    if type -P -- "$candidate" >/dev/null 2>&1; then
+      type -P -- "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+_graphify_diagnostics_enabled() {
+  case "${LDS_GRAPHIFY_DIAGNOSTICS:-1}" in
+  1 | true | TRUE | yes | YES | on | ON) return 0 ;;
+  0 | false | FALSE | no | NO | off | OFF) return 1 ;;
+  *) die "LDS_GRAPHIFY_DIAGNOSTICS must be true/false" ;;
+  esac
+}
+
 cmd_graphify() {
   need_bin graphify "install the Graphify CLI on the host first"
 
@@ -156,6 +188,7 @@ cmd_graphify() {
   [[ -e "$target" ]] || die "Graphify target does not exist: $target"
 
   local runtime provider backend base_url timeout model api_key graphify_bin arg provider_dir target_abs
+  local graphify_python="" diagnostic_root="" diagnostic_log="" diagnostic_preview=""
   local local_provider=0
   local next_is_model=0 next_is_timeout=0 next_is_token_budget=0 next_is_max_concurrency=0
   local has_token_budget=0 has_max_concurrency=0
@@ -290,17 +323,69 @@ cmd_graphify() {
   if ((local_provider)); then
     target_abs="$(_realpath "$target")"
     provider_dir="$(mktemp -d)" || die "Unable to create temporary Graphify provider directory"
-    backend="$(_graphify_write_local_provider "$provider_dir" "$provider" "$base_url" "$model" "$token_budget_value")" || {
-      rm -rf "$provider_dir"
-      die "Unable to build LocalDevStack Graphify provider configuration"
-    }
+
+    if _graphify_diagnostics_enabled; then
+      graphify_python="$(_graphify_python_bin "$graphify_bin")" ||
+        die "Unable to find the Python interpreter required for Graphify diagnostics"
+      if [[ -d "$target_abs" ]]; then
+        diagnostic_root="$target_abs"
+      else
+        diagnostic_root="$(dirname "$target_abs")"
+      fi
+      diagnostic_log="${LDS_GRAPHIFY_DIAGNOSTIC_LOG:-$diagnostic_root/graphify-out/lds-graphify-diagnostics.jsonl}"
+      diagnostic_preview="${LDS_GRAPHIFY_DIAGNOSTIC_PREVIEW:-4096}"
+      [[ "$diagnostic_preview" =~ ^[0-9]+$ ]] && ((diagnostic_preview >= 256)) ||
+        die "LDS_GRAPHIFY_DIAGNOSTIC_PREVIEW must be an integer >= 256"
+    fi
   fi
 
   (
-    [[ -z "$provider_dir" ]] || trap 'rm -rf "$provider_dir"' EXIT
+    proxy_pid=""
+    cleanup_graphify_local() {
+      if [[ -n "${proxy_pid:-}" ]]; then
+        kill "$proxy_pid" >/dev/null 2>&1 || true
+        wait "$proxy_pid" >/dev/null 2>&1 || true
+      fi
+      [[ -z "$provider_dir" ]] || rm -rf "$provider_dir"
+    }
+    [[ -z "$provider_dir" ]] || trap cleanup_graphify_local EXIT
     export GRAPHIFY_API_TIMEOUT="$timeout"
 
     if ((local_provider)); then
+      local_provider_base_url="$base_url"
+
+      if [[ -n "$graphify_python" ]]; then
+        ready_file="$provider_dir/diagnostic-proxy.port"
+        mkdir -p "$(dirname "$diagnostic_log")"
+        : >"$diagnostic_log"
+
+        "$graphify_python" "$DIR/scripts/graphify-diagnostic-proxy.py" \
+          --upstream "${base_url%/v1}" \
+          --ready-file "$ready_file" \
+          --log-file "$diagnostic_log" \
+          --preview-chars "$diagnostic_preview" &
+        proxy_pid=$!
+
+        proxy_port=""
+        for _ in {1..100}; do
+          if [[ -s "$ready_file" ]]; then
+            proxy_port="$(cat "$ready_file")"
+            break
+          fi
+          kill -0 "$proxy_pid" >/dev/null 2>&1 ||
+            die "Local Graphify diagnostic proxy exited before becoming ready"
+          sleep 0.05
+        done
+        [[ "$proxy_port" =~ ^[0-9]+$ ]] ||
+          die "Local Graphify diagnostic proxy did not become ready"
+
+        local_provider_base_url="http://127.0.0.1:${proxy_port}/v1"
+        printf '%s\n' "[lds graphify] suspect-response diagnostics enabled: $diagnostic_log" >&2
+      fi
+
+      backend="$(_graphify_write_local_provider "$provider_dir" "$provider" "$local_provider_base_url" "$model" "$token_budget_value")" ||
+        die "Unable to build LocalDevStack Graphify provider configuration"
+
       unset OPENAI_BASE_URL OPENAI_API_KEY OPENAI_MODEL OLLAMA_BASE_URL OLLAMA_API_KEY OLLAMA_MODEL
       export LDS_GRAPHIFY_API_KEY=local
       export GRAPHIFY_ALLOW_LOCAL_PROVIDERS=1
