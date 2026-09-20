@@ -139,50 +139,32 @@ ai_json="$("${compose[@]}" --profile ai config --format json)"
 python3 -c '
 import json,sys
 d=json.load(sys.stdin)
-s=d["services"]["llm-ollama"]
+services=d["services"]
+assert "llm-ollama" in services
+assert "llm-fastflow" not in services
+s=services["llm-ollama"]
 assert s["image"] == "infocyph/llm-ollama:latest"
 assert s["container_name"] == "LLM_OLLAMA"
 assert not s.get("ports")
 assert set(s["networks"]) == {"frontend","backend"}
-targets={v["target"] for v in s["volumes"]}
-assert targets == {"/root/.ollama"}
+assert {v["target"] for v in s["volumes"]} == {"/root/.ollama"}
 assert d["volumes"]["lds_llm"]["name"] == "LLMModels"
 env=s["environment"]
 assert env["LLM_OLLAMA_MODEL"] == "qwen3:14b"
-assert env["LLM_OLLAMA_SYSTEM"] == ""
-assert env["LLM_OLLAMA_INPUT_WARN_BYTES"] == "1048576"
-assert env["LLM_OLLAMA_INPUT_MAX_BYTES"] == "0"
-assert env["LLM_OLLAMA_ATTACHMENT_MAX_BYTES"] == "16777216"
-assert env["LLM_OLLAMA_ATTACHMENTS_MAX_BYTES"] == "33554432"
-assert env["LLM_OLLAMA_ATTACHMENT_MAX_COUNT"] == "16"
-assert env["LLM_OLLAMA_PDF_MAX_PAGES"] == "24"
-assert env["LLM_OLLAMA_PDF_DPI"] == "120"
-assert env["LLM_OLLAMA_ALLOW_LARGE_INPUT"] == "0"
-assert env["OLLAMA_NUM_PARALLEL"] == "1"
-assert env["OLLAMA_MAX_LOADED_MODELS"] == "1"
-assert env["OLLAMA_KEEP_ALIVE"] == "5m"
 assert env["OLLAMA_NO_CLOUD"] == "1"
-assert env["OLLAMA_IGPU_ENABLE"] == "0"
-tools=d["services"]["server-tools"]["environment"]
+tools=services["server-tools"]["environment"]
 assert tools["LDS_AI_ENABLED"] == "auto"
-assert tools["LDS_AI_PROVIDER"] == "ollama"
-assert tools["LDS_AI_URL"] == "http://llm-ollama:11434"
+assert tools["LDS_AI_PROVIDER"] == "llm"
+assert tools["LDS_AI_URL"] == "http://llm:11434"
 assert tools["LDS_AI_MODEL"] == "qwen3:14b"
-assert tools["LDS_AI_CONNECT_TIMEOUT"] == "2"
-assert tools["LDS_AI_PREFLIGHT_TIMEOUT"] == "5"
-assert tools["LDS_AI_TIMEOUT"] == "1800"
-assert tools["LDS_AI_AVAILABILITY_TTL"] == "5"
-assert tools["LDS_AI_MAX_CONTEXT_BYTES"] == "524288"
-assert tools["LDS_AI_MAX_REQUEST_BYTES"] == "1048576"
-assert tools["LDS_AI_MAX_RESPONSE_BYTES"] == "2097152"
-nginx=d["services"]["nginx"]
+nginx=services["nginx"]
 assert nginx["environment"]["LLM_PROXY_TIMEOUT_SECONDS"] == "1800"
 native=[p for p in nginx.get("ports", []) if int(p["target"]) == 11434]
 assert len(native) == 1
 assert native[0]["host_ip"] == "127.0.0.1"
 assert int(native[0]["published"]) == 11434
 ' <<<"$ai_json"
-pass "companion-owned AI profile is internal-only and deterministic"
+pass "bare Compose AI profile keeps Ollama compatibility fallback behind common llm identity"
 
 printf '%s\n' 'LDS_AI_MODEL=qwen2.5:1.5b' 'LLM_OLLAMA_PDF_MAX_PAGES=12' 'LLM_OLLAMA_SYSTEM=Answer briefly.' 'LDS_AI_TIMEOUT=2400' 'LDS_AI_IGPU_ENABLE=1' >>"$user_env"
 ai_override_json="$("${compose[@]}" --profile ai config --format json)"
@@ -195,30 +177,85 @@ assert llm["LLM_OLLAMA_PDF_MAX_PAGES"] == "12"
 assert llm["LLM_OLLAMA_SYSTEM"] == "Answer briefly."
 assert llm["OLLAMA_IGPU_ENABLE"] == "1"
 tools=d["services"]["server-tools"]["environment"]
+assert tools["LDS_AI_PROVIDER"] == "llm"
+assert tools["LDS_AI_URL"] == "http://llm:11434"
 assert tools["LDS_AI_TIMEOUT"] == "2400"
 nginx=d["services"]["nginx"]["environment"]
 assert nginx["LLM_PROXY_TIMEOUT_SECONDS"] == "2400"
 ' <<<"$ai_override_json"
-pass "LocalDevStack forwards configured provider and generation-timeout options"
+pass "LocalDevStack forwards common Tools routing and Ollama-specific generation options"
+
+grep -v '^LDS_AI_MODEL=' "$user_env" >"$user_env.tmp"
+mv "$user_env.tmp" "$user_env"
+
+npu_json="$(COMPOSE_PROFILES=ai LDS_AI_RUNTIME=npu "$ROOT/lds" --quiet config show --json --raw 2>/dev/null | sed -n '/^[[:space:]]*{/,$p')"
+python3 -c '
+import json,sys
+d=json.load(sys.stdin)
+services=d["services"]
+assert "llm-fastflow" in services
+assert "llm-ollama" not in services
+s=services["llm-fastflow"]
+assert s["image"] == "infocyph/llm-fastflow:latest"
+assert s["container_name"] == "LLM_FASTFLOW"
+assert not s.get("ports")
+assert set(s["networks"]) == {"frontend","backend"}
+assert s["environment"]["LLM_FASTFLOW_MODEL"] == "qwen3.5:9b"
+assert s["environment"]["FLM_MODEL_PATH"] == "/models"
+assert s["environment"]["FLM_SERVE_PORT"] == "11434"
+assert s["environment"]["FLM_HOST"] == "0.0.0.0"
+assert s["environment"]["FLM_CORS"] == "0"
+assert "/dev/accel/accel0" in " ".join(str(x) for x in s.get("devices", []))
+assert s["ulimits"]["memlock"]["soft"] == -1
+assert s["ulimits"]["memlock"]["hard"] == -1
+assert {v["target"] for v in s["volumes"]} == {"/models"}
+assert d["volumes"]["lds_llm_fastflow"]["name"] == "LLMFastFlowModels"
+tools=services["server-tools"]["environment"]
+assert tools["LDS_AI_PROVIDER"] == "llm"
+assert tools["LDS_AI_URL"] == "http://llm:11434"
+assert tools["LDS_AI_MODEL"] == "qwen3.5:9b"
+' <<<"$npu_json"
+pass "NPU runtime selects only FastFlow with its provider default model"
 
 amd_json="$(COMPOSE_PROFILES=ai LDS_AI_RUNTIME=amd "$ROOT/lds" --quiet config show --json --raw 2>/dev/null | sed -n '/^[[:space:]]*{/,$p')"
 python3 -c '
 import json,sys
-s=json.load(sys.stdin)["services"]["llm-ollama"]
+d=json.load(sys.stdin)
+services=d["services"]
+assert "llm-ollama" in services
+assert "llm-fastflow" not in services
+s=services["llm-ollama"]
 assert s["image"] == "infocyph/llm-ollama:amd-latest"
 devices=" ".join(str(x) for x in s.get("devices", []))
 assert "/dev/kfd" in devices and "/dev/dri" in devices
+assert s["environment"]["LLM_OLLAMA_MODEL"] == "qwen3:14b"
 ' <<<"$amd_json"
-pass "AMD AI runtime is generated dynamically"
+pass "AMD runtime selects only Ollama with generated ROCm devices"
 
 nvidia_json="$(COMPOSE_PROFILES=ai LDS_AI_RUNTIME=nvidia "$ROOT/lds" --quiet config show --json --raw 2>/dev/null | sed -n '/^[[:space:]]*{/,$p')"
 python3 -c '
 import json,sys
-s=json.load(sys.stdin)["services"]["llm-ollama"]
+d=json.load(sys.stdin)
+services=d["services"]
+assert "llm-ollama" in services
+assert "llm-fastflow" not in services
+s=services["llm-ollama"]
 assert s["image"] == "infocyph/llm-ollama:latest"
 assert s.get("gpus")
+assert s["environment"]["LLM_OLLAMA_MODEL"] == "qwen3:14b"
 ' <<<"$nvidia_json"
-pass "NVIDIA AI runtime is generated dynamically"
+pass "NVIDIA runtime selects only Ollama with GPU augmentation"
+
+cpu_json="$(COMPOSE_PROFILES=ai LDS_AI_RUNTIME=cpu "$ROOT/lds" --quiet config show --json --raw 2>/dev/null | sed -n '/^[[:space:]]*{/,$p')"
+python3 -c '
+import json,sys
+d=json.load(sys.stdin)
+services=d["services"]
+assert "llm-ollama" in services
+assert "llm-fastflow" not in services
+assert services["llm-ollama"]["environment"]["LLM_OLLAMA_MODEL"] == "qwen3:14b"
+' <<<"$cpu_json"
+pass "CPU runtime selects only Ollama"
 
 if find "$ROOT/docker/compose" -maxdepth 1 -type f -name 'ai-*.yaml' -print -quit | grep -q .; then
   fail "AI-specific Compose files must not exist"
@@ -227,4 +264,6 @@ if [[ -d "$ROOT/docker/.runtime" ]] && find "$ROOT/docker/.runtime" -type f -pri
   fail "temporary AI Compose overrides were not cleaned up"
 fi
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'image: infocyph/llm-ollama:${LDS_LLM_ARCH}'
-pass "single LLM service plus ephemeral hardware overrides"
+assert_file_contains "$ROOT/docker/compose/companion.yaml" 'image: infocyph/llm-fastflow:latest'
+assert_file_contains "$ROOT/docker/compose/companion.yaml" 'aliases: [llm]'
+pass "mutually exclusive LLM providers share one common llm network identity"
