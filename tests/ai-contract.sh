@@ -104,6 +104,7 @@ assert_file_contains "$ROOT/lib/ai.sh" 'reasoning_effort: "none"'
 assert_file_contains "$ROOT/lib/ai.sh" 'graphify-diagnostic-proxy.py'
 assert_file_contains "$ROOT/lib/ai.sh" 'http://127.0.0.1:${proxy_port}/v1'
 assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_DIAGNOSTICS:-1'
+assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_THINK:-off'
 assert_file_contains "$ROOT/lib/ai.sh" 'lds-graphify-diagnostics.jsonl'
 assert_file_contains "$ROOT/lib/ai.sh" 'llm think <auto|on|off>'
 pass "LLM CLI and Graphify resolve through provider-aware common endpoint"
@@ -151,10 +152,20 @@ pass "Graphify backend selection follows active LLM provider"
   tmp="$(mktemp -d)"
   trap 'rm -rf "$tmp"' EXIT
 
-  [[ "$(_graphify_write_local_provider "$tmp" fastflow http://llm.localhost:11434/v1 qwen3.5:9b 4000)" == lds-fastflow ]] ||
+  [[ "$(_graphify_write_local_provider "$tmp" fastflow http://llm.localhost:11434/v1 qwen3.5:9b 4000 off)" == lds-fastflow ]] ||
     fail "FastFlow local Graphify provider name drifted"
-  jq -e '."lds-fastflow".extra_body.think == false' "$tmp/.graphify/providers.json" >/dev/null ||
-    fail "FastFlow local Graphify provider must disable thinking"
+  jq -e '."lds-fastflow".extra_body.think == false and (."lds-fastflow" | has("reasoning_effort") | not)' "$tmp/.graphify/providers.json" >/dev/null ||
+    fail "FastFlow local Graphify provider must default to no-thinking"
+
+  [[ "$(_graphify_write_local_provider "$tmp" fastflow http://llm.localhost:11434/v1 qwen3.5:9b 4000 on)" == lds-fastflow ]] ||
+    fail "FastFlow local Graphify thinking-on provider name drifted"
+  jq -e '."lds-fastflow".extra_body.think == true and ."lds-fastflow".reasoning_effort == "high"' "$tmp/.graphify/providers.json" >/dev/null ||
+    fail "FastFlow Graphify thinking-on override did not map to think=true/high"
+
+  [[ "$(_graphify_write_local_provider "$tmp" fastflow http://llm.localhost:11434/v1 qwen3.5:9b 4000 auto)" == lds-fastflow ]] ||
+    fail "FastFlow local Graphify auto provider name drifted"
+  jq -e '(."lds-fastflow" | has("extra_body") | not) and (."lds-fastflow" | has("reasoning_effort") | not)' "$tmp/.graphify/providers.json" >/dev/null ||
+    fail "FastFlow Graphify auto override must omit thinking controls"
 
   [[ "$(_graphify_write_local_provider "$tmp" ollama http://llm.localhost:11434/v1 qwen3:14b 4000)" == lds-ollama ]] ||
     fail "Ollama local Graphify provider name drifted"
