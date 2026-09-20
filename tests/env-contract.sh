@@ -40,7 +40,10 @@ pass "release env contains only genuinely variable release defaults"
 assert_file_contains "$ROOT/lib/profiles.sh" 'CATALOG_FILE="$CFG/catalog/services.psv"'
 assert_file_contains "$ROOT/lib/profiles.sh" 'load_service_catalog()'
 assert_file_contains "$ROOT/lib/profiles.sh" 'load_service_catalog'
-pass "profile setup loads the tracked host catalog"
+assert_file_contains "$ROOT/lib/profiles.sh" 'configured; Enter keeps current'
+assert_file_contains "$ROOT/lib/services.sh" 'docker_compose config --profiles'
+assert_file_contains "$ROOT/lib/services.sh" 'Unknown profile: $p'
+pass "profile setup loads the catalog, preserves user state, and validates effective profiles"
 
 assert_file_contains "$ROOT/lib/ai.sh" 'cmd_ai()'
 assert_file_contains "$ROOT/lib/ai.sh" 'cmd_llm()'
@@ -82,9 +85,27 @@ profile_tmp="$(mktemp -d)"
   actual="$(grep '^COMPOSE_PROFILES=' "$ENV_DOCKER" | tail -n1)"
   [[ "$actual" == 'COMPOSE_PROFILES=postgresql,apache,php84' ]] ||
     fail "profile reselection drifted: $actual"
+
+  printf '%s\n' 'COMPOSE_PROFILES=mysql,redis,ai,apache,php84' >"$ENV_DOCKER"
+  PENDING_PROFILES=()
+  flush_profiles
+  actual="$(grep '^COMPOSE_PROFILES=' "$ENV_DOCKER" | tail -n1)"
+  [[ "$actual" == 'COMPOSE_PROFILES=apache,php84' ]] ||
+    fail "NONE selection did not clear only catalog-managed profiles: $actual"
+
+  [[ "$(setup_menu_parse n)" == "NONE" ]] || fail "profile menu NONE token drifted"
+  [[ "$(setup_menu_parse q)" == "CANCEL" ]] || fail "profile menu CANCEL token drifted"
+
+  printf '%s\n' 'REDIS_VERSION=7.4-alpine' >>"$ENV_DOCKER"
+  read_default() { printf '%s' "$2"; }
+  PENDING_ENVS=()
+  PENDING_PROFILES=()
+  setup_service REDIS >/dev/null
+  [[ "${PENDING_ENVS[0]:-}" == 'REDIS_VERSION=7.4-alpine' ]] ||
+    fail "profile setup did not preserve configured value"
 )
 rm -rf "$profile_tmp"
-pass "profile setup replaces managed selections and preserves generated profiles"
+pass "profile setup replaces/clears managed selections while preserving generated profiles and configured values"
 
 assert_file_contains "$ROOT/lib/compose.sh" 'compose_control_value COMPOSE_PROJECT_NAME LocalDevStack'
 pass "CLI project identity follows the Compose project contract"
