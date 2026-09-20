@@ -356,6 +356,13 @@ assert json.loads(split_json["choices"][0]["message"]["content"]) == {
     "hyperedges": [],
 }
 
+split_graph = module._extract_fastflow_structured_graph(split)
+assert split_graph == {"nodes": [], "edges": [], "hyperedges": []}
+split_replacement = module._replace_response_content(split, split_graph)
+assert split_replacement is not None
+split_replacement_json = json.loads(split_replacement)
+assert split_replacement_json["choices"][0]["finish_reason"] == "length"
+
 string_array_response = json.loads(json.dumps(tool_response))
 string_array_response["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"] = json.dumps({
     "nodes": json.dumps([{"id": "a"}]),
