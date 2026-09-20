@@ -799,22 +799,31 @@ Never automatically mount arbitrary host repositories.
 
 ## 8.9 Graphify
 
-Do not install Graphify into `llm-ollama` or Tools solely for this integration.
+Do not install Graphify into either provider image or Tools solely for this integration.
 
 Supported patterns:
 
 - `lds graphify [path] [extract-options...]` -> host Graphify workflow against the
-  loopback-published provider, using `LDS_AI_MODEL` and `LDS_AI_TIMEOUT` by default;
-- explicit host Graphify may use `https://llm-ollama.localhost/v1` or an overridden
-  `OLLAMA_BASE_URL`;
-- container Graphify on a shared network -> `http://llm-ollama:11434/v1`;
+  common loopback-published `llm` endpoint, using the effective active-provider model
+  and `LDS_AI_TIMEOUT` by default;
+- FastFlow/NPU -> Graphify `openai` backend with `OPENAI_BASE_URL` /
+  `OPENAI_MODEL` / `OPENAI_API_KEY`;
+- Ollama/CPU/NVIDIA/ROCm -> Graphify `ollama` backend with `OLLAMA_BASE_URL` /
+  `OLLAMA_MODEL` / `OLLAMA_API_KEY`;
+- explicit external provider URLs remain caller-controlled through the matching
+  backend-specific environment variables;
 - Tools `aiops graphify --file <output>` -> analyze an explicitly supplied Graphify output file.
 
-The `lds graphify` workflow runs `extract --backend ollama --no-cluster` followed by
-`cluster-only <same-path> --backend ollama` so the requested two-phase flow clusters
-once rather than re-clustering immediately after the extraction command's default
-clustering pass. Graphify remains a host/external consumer and is not installed into
-`llm-ollama` or Tools.
+FastFlow defaults to `--token-budget 4000 --max-concurrency 1` unless the caller
+supplies explicit values. These defaults keep Qwen3.5 9B semantic extraction below the
+practical local context ceiling that can otherwise produce `Max length reached!`.
+`LDS_GRAPHIFY_TOKEN_BUDGET` and `LDS_GRAPHIFY_MAX_CONCURRENCY` override the
+LocalDevStack defaults.
+
+The `lds graphify` workflow always runs `extract --no-cluster` followed by
+`cluster-only <same-path>` with the same provider-appropriate Graphify backend, so the
+requested two-phase flow clusters once rather than re-clustering immediately after the
+extraction command's default clustering pass. Graphify remains a host/external consumer.
 
 ## 8.10 AI admin panel
 
