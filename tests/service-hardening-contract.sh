@@ -78,4 +78,4 @@ pass "Tools profile visibility follows LocalDevStack profile selection"
 if awk '/^  llm-ollama:/ { in_llm=1; next } in_llm && /^  [a-zA-Z0-9_-]+:/ { in_llm=0 } in_llm { print }' "$companion" | grep -Eq '/var/run/docker.sock|PROJECT_DIR|/app'; then
   fail "llm-ollama must not receive Docker socket or project mounts"
 fi
-pass "companion-owned llm-ollama keeps the AI trust boundary"
+pass "companion-owned mutually exclusive LLM providers keep the AI trust boundary"
