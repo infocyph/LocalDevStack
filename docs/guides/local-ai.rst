@@ -280,6 +280,12 @@ Start the stack with the AI profile, then run::
    lds up -d
    lds graphify
 
+When LocalDevStack owns the provider endpoint, ``lds graphify`` first verifies the
+selected model in the running Ollama provider. A missing model fails before repository
+extraction starts and reports the matching ``lds llm pull <model>`` command. An explicit
+external ``OLLAMA_BASE_URL`` remains caller-controlled and skips this local-provider
+preflight.
+
 Internally the workflow runs extraction with ``--backend ollama --no-cluster`` and,
 only after a successful extraction, runs ``cluster-only`` against the same path. This
 preserves the requested two-phase flow without performing the default extraction
