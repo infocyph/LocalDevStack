@@ -1,3 +1,88 @@
+
+_GRAPH_SCHEMA = {
+    "type": "object",
+    "required": ["nodes", "edges", "hyperedges"],
+    "properties": {
+        "nodes": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["id", "label", "file_type", "source_file"],
+                "properties": {
+                    "id": {"type": "string"},
+                    "label": {"type": "string"},
+                    "file_type": {
+                        "type": "string",
+                        "enum": ["code", "document", "paper", "image", "rationale", "concept"],
+                    },
+                    "source_file": {"type": "string"},
+                    "source_location": {"type": ["string", "null"]},
+                    "source_url": {"type": ["string", "null"]},
+                    "captured_at": {"type": ["string", "null"]},
+                    "author": {"type": ["string", "null"]},
+                    "contributor": {"type": ["string", "null"]},
+                    "rationale": {"type": ["string", "null"]},
+                },
+            },
+        },
+        "edges": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": [
+                    "source", "target", "relation", "confidence",
+                    "confidence_score", "source_file", "weight",
+                ],
+                "properties": {
+                    "source": {"type": "string"},
+                    "target": {"type": "string"},
+                    "relation": {
+                        "type": "string",
+                        "enum": [
+                            "calls", "implements", "references", "cites",
+                            "conceptually_related_to", "shares_data_with",
+                            "semantically_similar_to", "rationale_for",
+                        ],
+                    },
+                    "confidence": {
+                        "type": "string",
+                        "enum": ["EXTRACTED", "INFERRED", "AMBIGUOUS"],
+                    },
+                    "confidence_score": {"type": "number"},
+                    "source_file": {"type": "string"},
+                    "source_location": {"type": ["string", "null"]},
+                    "weight": {"type": "number"},
+                },
+            },
+        },
+        "hyperedges": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": [
+                    "id", "label", "nodes", "relation", "confidence",
+                    "confidence_score", "source_file",
+                ],
+                "properties": {
+                    "id": {"type": "string"},
+                    "label": {"type": "string"},
+                    "nodes": {"type": "array", "items": {"type": "string"}},
+                    "relation": {
+                        "type": "string",
+                        "enum": ["participate_in", "implement", "form"],
+                    },
+                    "confidence": {
+                        "type": "string",
+                        "enum": ["EXTRACTED", "INFERRED"],
+                    },
+                    "confidence_score": {"type": "number"},
+                    "source_file": {"type": "string"},
+                },
+            },
+        },
+    },
+}
+
 #!/usr/bin/env python3
 """Local Graphify diagnostic reverse proxy.
 
@@ -127,91 +212,31 @@ _GRAPH_TOOL = {
     "function": {
         "name": "submit_graph",
         "description": "Submit the extracted Graphify knowledge-graph fragment. Call exactly once.",
-        "parameters": {
-            "type": "object",
-            "required": ["nodes", "edges", "hyperedges"],
-            "properties": {
-                "nodes": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "required": ["id", "label", "file_type", "source_file"],
-                        "properties": {
-                            "id": {"type": "string"},
-                            "label": {"type": "string"},
-                            "file_type": {
-                                "type": "string",
-                                "enum": ["code", "document", "paper", "image", "rationale", "concept"],
-                            },
-                            "source_file": {"type": "string"},
-                            "source_location": {"type": ["string", "null"]},
-                            "source_url": {"type": ["string", "null"]},
-                            "captured_at": {"type": ["string", "null"]},
-                            "author": {"type": ["string", "null"]},
-                            "contributor": {"type": ["string", "null"]},
-                            "rationale": {"type": ["string", "null"]},
-                        },
-                    },
-                },
-                "edges": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "required": [
-                            "source", "target", "relation", "confidence",
-                            "confidence_score", "source_file", "weight",
-                        ],
-                        "properties": {
-                            "source": {"type": "string"},
-                            "target": {"type": "string"},
-                            "relation": {
-                                "type": "string",
-                                "enum": [
-                                    "calls", "implements", "references", "cites",
-                                    "conceptually_related_to", "shares_data_with",
-                                    "semantically_similar_to", "rationale_for",
-                                ],
-                            },
-                            "confidence": {
-                                "type": "string",
-                                "enum": ["EXTRACTED", "INFERRED", "AMBIGUOUS"],
-                            },
-                            "confidence_score": {"type": "number"},
-                            "source_file": {"type": "string"},
-                            "source_location": {"type": ["string", "null"]},
-                            "weight": {"type": "number"},
-                        },
-                    },
-                },
-                "hyperedges": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "required": [
-                            "id", "label", "nodes", "relation", "confidence",
-                            "confidence_score", "source_file",
-                        ],
-                        "properties": {
-                            "id": {"type": "string"},
-                            "label": {"type": "string"},
-                            "nodes": {"type": "array", "items": {"type": "string"}},
-                            "relation": {
-                                "type": "string",
-                                "enum": ["participate_in", "implement", "form"],
-                            },
-                            "confidence": {
-                                "type": "string",
-                                "enum": ["EXTRACTED", "INFERRED"],
-                            },
-                            "confidence_score": {"type": "number"},
-                            "source_file": {"type": "string"},
-                        },
-                    },
-                },
-            },
-        },
+        "parameters": _GRAPH_SCHEMA,
     },
 }
+
+
+def _build_ollama_schema_request(body: bytes) -> bytes | None:
+    try:
+        request = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(request, dict):
+        return None
+
+    request = dict(request)
+    request["stream"] = False
+    request["temperature"] = 0
+    request["response_format"] = {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "graphify_fragment",
+            "strict": True,
+            "schema": _GRAPH_SCHEMA,
+        },
+    }
+    return json.dumps(request, ensure_ascii=False).encode("utf-8")
 
 
 def _build_tool_recovery_request(body: bytes) -> bytes | None:
@@ -428,14 +453,23 @@ class DiagnosticHandler(BaseHTTPRequestHandler):
         metadata = _request_metadata(body) if is_chat else {}
         extraction_request = bool(metadata.get("_extraction_request"))
         fastflow_request = metadata.get("think", "<omitted>") != "<omitted>"
+        ollama_request = (
+            not fastflow_request
+            and metadata.get("reasoning_effort", "<omitted>") != "<omitted>"
+        )
 
         upstream_body = body
-        structured_primary = False
+        structured_primary = ""
         if extraction_request and fastflow_request:
             candidate = _build_tool_recovery_request(body)
             if candidate is not None:
                 upstream_body = candidate
-                structured_primary = True
+                structured_primary = "fastflow-tool"
+        elif extraction_request and ollama_request:
+            candidate = _build_ollama_schema_request(body)
+            if candidate is not None:
+                upstream_body = candidate
+                structured_primary = "ollama-schema"
 
         upstream_url = self.upstream.rstrip("/") + self.path
         request = urllib.request.Request(
@@ -468,7 +502,7 @@ class DiagnosticHandler(BaseHTTPRequestHandler):
             ).encode("utf-8")
 
         if is_chat and extraction_request:
-            if structured_primary and 200 <= status < 300:
+            if structured_primary == "fastflow-tool" and 200 <= status < 300:
                 graph = _extract_graph_tool_result(response_body)
                 if graph is not None:
                     replacement = _replace_response_content(response_body, graph)
@@ -486,6 +520,18 @@ class DiagnosticHandler(BaseHTTPRequestHandler):
                         response_body = self._fallback_freeform(body)
                 else:
                     response_body = self._fallback_freeform(body)
+            elif structured_primary == "ollama-schema" and 200 <= status < 300:
+                _meta, content = _response_metadata(response_body)
+                suspect, _reason = classify_graph_content(content)
+                if suspect:
+                    response_body = self._fallback_freeform(body)
+                else:
+                    print(
+                        "[lds graphify diagnostic] structured Ollama graph via response_format schema: "
+                        f"model={metadata.get('model')}; reasoning_effort={metadata.get('reasoning_effort')}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
             else:
                 response_body = self._inspect_and_recover_chat_response(body, response_body, status)
 
