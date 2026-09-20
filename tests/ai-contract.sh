@@ -51,7 +51,8 @@ if find "$ROOT/docker/compose" -maxdepth 1 -type f -name 'ai-*.yaml' -print -qui
   fail "AI-specific Compose overlays must be generated ephemerally"
 fi
 
-assert_file_contains "$ROOT/docker/compose/companion.yaml" 'image: infocyph/llm-ollama:${LDS_LLM_ARCH}'
+assert_file_contains "$ROOT/docker/compose/companion.yaml" 'image: infocyph/llm-ollama:latest'
+assert_file_contains "$ROOT/lib/compose.sh" 'image: infocyph/llm-ollama:amd-latest'
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'image: infocyph/llm-fastflow:latest'
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'profiles: ["${LDS_AI_OLLAMA_PROFILE:-ai}"]'
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'profiles: ["${LDS_AI_FASTFLOW_PROFILE:-__lds-ai-disabled-fastflow}"]'
@@ -60,6 +61,8 @@ assert_file_contains "$ROOT/docker/compose/companion.yaml" 'lds_llm:/root/.ollam
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'lds_llm_fastflow:/models'
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'LLM_OLLAMA_MODEL=${LDS_AI_MODEL:-qwen3:14b}'
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'LLM_FASTFLOW_MODEL=${LDS_AI_MODEL:-qwen3.5:9b}'
+assert_file_contains "$ROOT/docker/compose/companion.yaml" 'LLM_THINK=${LDS_AI_THINK:-}'
+assert_file_contains "$ROOT/docker/compose/companion.yaml" 'LDS_AI_THINK=${LDS_AI_THINK:-}'
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'FLM_SERVE_PORT=11434'
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'LDS_AI_PROVIDER=${LDS_AI_PROVIDER:-llm}'
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'LDS_AI_URL=${LDS_AI_URL:-http://llm:11434}'
@@ -78,6 +81,11 @@ assert_file_contains "$ROOT/lib/compose.sh" "'      - /dev/kfd:/dev/kfd'"
 assert_file_contains "$ROOT/lib/compose.sh" "'      - /dev/dri:/dev/dri'"
 pass "Compose wrapper selects exactly one provider and augments only Ollama GPU modes"
 
+if grep -R -nF 'LDS_LLM_ARCH' "$ROOT/lib" "$ROOT/docker/compose" "$ROOT/docker/catalog"; then
+  fail "obsolete LDS_LLM_ARCH must not remain in active LocalDevStack code or catalog"
+fi
+pass "LLM image tags are direct and LDS_LLM_ARCH is removed"
+
 assert_file_contains "$ROOT/lib/ai.sh" 'http://llm.localhost:11434/v1'
 assert_file_contains "$ROOT/lib/ai.sh" '/v1/models'
 assert_file_contains "$ROOT/lib/ai.sh" 'index($model) != null'
@@ -89,6 +97,11 @@ assert_file_contains "$ROOT/lib/ai.sh" 'fastflow) printf '\''%s'\'' openai'
 assert_file_contains "$ROOT/lib/ai.sh" 'ollama) printf '\''%s'\'' ollama'
 assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_TOKEN_BUDGET:-4000'
 assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_MAX_CONCURRENCY:-1'
+assert_file_contains "$ROOT/lib/ai.sh" 'lds-fastflow'
+assert_file_contains "$ROOT/lib/ai.sh" 'lds-ollama'
+assert_file_contains "$ROOT/lib/ai.sh" 'extra_body: {think: false}'
+assert_file_contains "$ROOT/lib/ai.sh" 'reasoning_effort: "none"'
+assert_file_contains "$ROOT/lib/ai.sh" 'llm think <auto|on|off>'
 pass "LLM CLI and Graphify resolve through provider-aware common endpoint"
 
 (
@@ -125,6 +138,26 @@ pass "Graphify validates either provider model through /v1/models"
   fi
 )
 pass "Graphify backend selection follows active LLM provider"
+
+(
+  set -euo pipefail
+  # shellcheck source=lib/ai.sh
+  source "$ROOT/lib/ai.sh"
+
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' EXIT
+
+  [[ "$(_graphify_write_local_provider "$tmp" fastflow http://llm.localhost:11434/v1 qwen3.5:9b 4000)" == lds-fastflow ]] ||
+    fail "FastFlow local Graphify provider name drifted"
+  jq -e '."lds-fastflow".extra_body.think == false' "$tmp/.graphify/providers.json" >/dev/null ||
+    fail "FastFlow local Graphify provider must disable thinking"
+
+  [[ "$(_graphify_write_local_provider "$tmp" ollama http://llm.localhost:11434/v1 qwen3:14b 4000)" == lds-ollama ]] ||
+    fail "Ollama local Graphify provider name drifted"
+  jq -e '."lds-ollama".reasoning_effort == "none" and ."lds-ollama".extra_body.options.num_ctx >= 8192' "$tmp/.graphify/providers.json" >/dev/null ||
+    fail "Ollama local Graphify provider must disable thinking and retain context headroom"
+)
+pass "Graphify local providers enforce structured no-thinking contracts"
 
 
 (
