@@ -61,7 +61,7 @@ grep -Fq 'base=http://custom-ollama.test:11434/v1 key=local model=test-model tim
 grep -Fq 'base=http://custom-ollama.test:11434/v1 key=local model=test-model timeout=42 args=cluster-only . --backend ollama' "$graphify_log" ||
   fail "Graphify cluster wrapper contract failed"
 rm -f "$graphify_log"
-assert_file_contains "$ROOT/lib/ai.sh" "http://llm-ollama.localhost:11434/v1"
+assert_file_contains "$ROOT/lib/ai.sh" "http://llm.localhost:11434/v1"
 pass "Graphify host workflow wrapper"
 
 assert_file_contains "$ROOT/lds" 'exec "$DIR/bin/tool-runner" "$cmd" "$@"'
