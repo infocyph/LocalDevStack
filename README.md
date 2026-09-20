@@ -166,8 +166,9 @@ Examples:
 - PostgreSQL: `postgres:alpine`
 - Tools / Runner / Nginx / Apache: published `:latest`
 - MySQL / MariaDB / MongoDB / Redis: their supported moving defaults
-- local AI: `infocyph/llm-ollama:latest`
-- AMD local AI: `infocyph/llm-ollama:amd-latest`
+- XDNA2 NPU local AI: `infocyph/llm-fastflow:latest`
+- CPU/NVIDIA local AI: `infocyph/llm-ollama:latest`
+- AMD ROCm local AI: `infocyph/llm-ollama:amd-latest`
 
 Elastic does not provide a usable moving `latest` alias for this stack, so Elasticsearch, Kibana, and Filebeat share `ELASTICSEARCH_VERSION` and default to the current stable `9.5.4`; overriding that one value advances or pins all three together.
 
