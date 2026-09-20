@@ -59,12 +59,12 @@ for image in "$tools_image" "$runner_image"; do
 done
 pass "Tools and Runner publish healthchecks"
 
-grep -Fq 'image: infocyph/llm-ollama:${LDS_LLM_ARCH}' "$ROOT/docker/compose/companion.yaml" ||
-  fail "Ollama service must use the latest/amd-latest selector"
+grep -Fq 'image: infocyph/llm-ollama:latest' "$ROOT/docker/compose/companion.yaml" ||
+  fail "Ollama base service must use latest directly"
+grep -Fq 'image: infocyph/llm-ollama:amd-latest' "$ROOT/lib/compose.sh" ||
+  fail "AMD runtime override must select amd-latest directly"
 grep -Fq 'image: infocyph/llm-fastflow:latest' "$ROOT/docker/compose/companion.yaml" ||
   fail "FastFlow service must use its published latest image"
-grep -Fq "amd) printf '%s' amd-latest" "$ROOT/lib/platform.sh" ||
-  fail "AMD runtime must map to Ollama amd-latest"
 grep -Fq "npu) printf '%s' fastflow" "$ROOT/lib/platform.sh" ||
   fail "NPU runtime must map to FastFlow"
 pass "LLM image selection follows mutually exclusive provider contracts"
