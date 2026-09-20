@@ -103,6 +103,7 @@ assert_file_contains "$ROOT/lib/ai.sh" 'extra_body: {think: false}'
 assert_file_contains "$ROOT/lib/ai.sh" 'reasoning_effort: "none"'
 assert_file_contains "$ROOT/lib/ai.sh" 'graphify-diagnostic-proxy.py'
 assert_file_contains "$ROOT/lib/ai.sh" 'http://127.0.0.1:${proxy_port}/v1'
+assert_file_contains "$ROOT/lib/ai.sh" '--provider "$provider"'
 assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_DIAGNOSTICS:-1'
 assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_THINK:-off'
 assert_file_contains "$ROOT/lib/ai.sh" 'lds-graphify-diagnostics.jsonl'
@@ -212,6 +213,13 @@ suspect, reason = module.classify_graph_content(
 )
 assert suspect and reason == "malformed graph JSON"
 
+assert module.parse_graph_content('{"nodes":[],"edges":[],"hyperedges":[]}') == {
+    "nodes": [],
+    "edges": [],
+    "hyperedges": [],
+}
+assert module.parse_graph_content('{"nodes":["bad"],"edges":[],"hyperedges":[]}') is None
+
 body = json.dumps({
     "model": "qwen3.5:9b",
     "messages": [
@@ -233,6 +241,30 @@ assert recovery_json["tools"][0]["function"]["name"] == "submit_graph"
 assert recovery_json["tool_choice"] == "auto"
 assert recovery_json["think"] is False
 assert "STRUCTURED RECOVERY" in recovery_json["messages"][0]["content"]
+
+assert recovery_json["tools"][0]["function"]["parameters"] == module._GRAPH_SCHEMA
+assert "rationale_for" not in module._GRAPH_SCHEMA["properties"]["edges"]["items"]["properties"]["relation"]["enum"]
+
+ollama_body = json.dumps({
+    "model": "qwen3:14b",
+    "messages": [
+        {"role": "system", "content": "You are a graphify semantic extraction agent."},
+        {"role": "user", "content": "private corpus content"}
+    ],
+    "reasoning_effort": "none",
+    "stream": False,
+    "temperature": 0,
+    "options": {"num_ctx": 8192},
+}).encode()
+ollama_request = module._build_ollama_schema_request(ollama_body)
+assert ollama_request is not None
+ollama_json = json.loads(ollama_request)
+assert ollama_json["reasoning_effort"] == "none"
+assert ollama_json["options"]["num_ctx"] == 8192
+assert ollama_json["temperature"] == 0
+assert ollama_json["response_format"]["type"] == "json_schema"
+assert ollama_json["response_format"]["json_schema"]["strict"] is True
+assert ollama_json["response_format"]["json_schema"]["schema"] == module._GRAPH_SCHEMA
 
 tool_response = {
     "id": "chatcmpl-test",
@@ -283,6 +315,18 @@ string_array_response["choices"][0]["message"]["tool_calls"][0]["function"]["arg
 })
 assert module._extract_graph_tool_result(json.dumps(string_array_response).encode()) == {
     "nodes": [{"id": "a"}],
+    "edges": [],
+    "hyperedges": [],
+}
+
+empty_tool_response = json.loads(json.dumps(tool_response))
+empty_tool_response["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"] = json.dumps({
+    "nodes": [],
+    "edges": [],
+    "hyperedges": [],
+})
+assert module._extract_graph_tool_result(json.dumps(empty_tool_response).encode()) == {
+    "nodes": [],
     "edges": [],
     "hyperedges": [],
 }
