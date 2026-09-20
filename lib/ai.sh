@@ -266,7 +266,7 @@ cmd_graphify() {
 
   # Local models are more reliable with conservative semantic chunking and
   # serialized requests. Callers can still override both limits explicitly.
-  if ((local_provider)); then
+  if [[ "$provider" == fastflow ]] || ((local_provider)); then
     if ((has_token_budget == 0)); then
       token_budget_value="${LDS_GRAPHIFY_TOKEN_BUDGET:-4000}"
       [[ "$token_budget_value" =~ ^[0-9]+$ ]] && ((token_budget_value >= 1)) ||
@@ -284,10 +284,11 @@ cmd_graphify() {
   ((local_provider == 0)) || _graphify_local_model_preflight "$model"
 
   graphify_bin="$(bin_path graphify)"
-  target_abs="$(_realpath "$target")"
+  target_abs="$target"
   provider_dir=""
 
   if ((local_provider)); then
+    target_abs="$(_realpath "$target")"
     provider_dir="$(mktemp -d)" || die "Unable to create temporary Graphify provider directory"
     backend="$(_graphify_write_local_provider "$provider_dir" "$provider" "$base_url" "$model" "$token_budget_value")" || {
       rm -rf "$provider_dir"
