@@ -162,9 +162,10 @@ lds_tools_cmd() {
       return 127
     fi
 
-    local -a flags=()
-    [[ -t 0 ]] && flags+=(-i)
-    [[ -t 1 ]] && flags+=(-t)
+    # Keep stdin attached even for pipes/here-strings. Only allocate a TTY when
+    # both sides are interactive; proxied jq/rg/etc. must behave like host tools.
+    local -a flags=(-i)
+    [[ -t 0 && -t 1 ]] && flags+=(-t)
     "$(bin_path docker)" exec "${flags[@]}" "$ctr" "$cmd" "$@"
     return $?
   fi
@@ -597,6 +598,13 @@ cmd_bundle() {
   tmp="$(mktemp -d "${TMPDIR:-/tmp}/lds_bundle.XXXXXX")"
   local base="lds_bundle_${project}_${ts}"
   [[ -n "$out" ]] || out="$PWD/${base}.zip"
+
+  # The archive is created from inside the temporary staging directory. Resolve
+  # explicit relative destinations before changing directory so the final ZIP
+  # survives staging cleanup.
+  if [[ "$out" != /* ]]; then
+    out="$PWD/${out#./}"
+  fi
 
   {
     echo "project=$project"
