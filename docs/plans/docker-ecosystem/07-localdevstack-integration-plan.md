@@ -1945,17 +1945,12 @@ LDS_LLM_ARCH=latest
 
 Other runtime defaults follow the same rule. PostgreSQL uses `postgres:alpine`; MySQL, MariaDB, MongoDB, Redis Stack/Redis Insight, CloudBeaver, Mongo Express and Mailpit use their normal moving latest tags because the selected image family does not provide a suitable moving Alpine alias for this stack.
 
-## Elastic exception
+## Elastic moving-tag policy
 
-Elasticsearch and Kibana explicitly do not support a `latest` tag, and the Elastic Filebeat registry publishes versioned releases rather than a supported moving `latest` contract.
-
-Keep Elasticsearch, Kibana and Filebeat on one aligned current-stable version. At implementation time this is:
-
-```text
-9.5.3
-```
-
-When this Elastic exception is advanced, update all three together and update the LocalDevStack catalog/contract tests in the same change.
+Elasticsearch, Kibana and Filebeat use the same `ELASTICSEARCH_VERSION` selector and
+default to `latest`. This follows the product-wide moving-tag policy instead of pinning
+LocalDevStack to an older tested release. The three services must continue to use the
+same selector so a user override advances or pins them together.
 
 ## Override precedence
 
@@ -2069,7 +2064,7 @@ All planned LocalDevStack integration batches are implemented on branch `plan/do
 - PostgreSQL defaults to `postgres:alpine`.
 - Tools, Runner, Nginx and Apache consume their published `:latest` aliases.
 - One LLM service uses `infocyph/llm-ollama:${LDS_LLM_ARCH}`; CPU/NVIDIA map to `latest`, AMD/ROCm maps to `amd-latest`.
-- Elasticsearch, Kibana and Filebeat remain version-aligned on the tested stable version because their required image contract does not provide a suitable moving `latest` alias.
+- Elasticsearch, Kibana and Filebeat share the `ELASTICSEARCH_VERSION` selector and default to the moving `latest` tag.
 - PHP/Node runtime selection remains user-driven and version-specific.
 - Existing named volumes and container names remain intentionally stable for this release.
 
