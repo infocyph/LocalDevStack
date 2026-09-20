@@ -1,9 +1,35 @@
 # shellcheck shell=bash
 
-# Detect the preferred local-AI runtime from host GPU capability.
-# NVIDIA is preferred on hybrid hosts because the standard image supports
-# CPU/NVIDIA, while the AMD image is specifically the ROCm variant.
+# Detect a FastFlow-supported AMD XDNA2 NPU.
+# FastFlowLM currently identifies XDNA2 as AMD PCI vendor/device 1022:17f0.
+# The paths are injectable so the contract can be exercised without NPU hardware.
+fastflow_npu_supported() {
+  local accel="${LDS_AI_ACCEL_DEVICE:-/dev/accel/accel0}"
+  local sysfs="${LDS_AI_ACCEL_SYSFS:-/sys/class/accel/accel0/device}"
+  local vendor="" device="" driver=""
+
+  [[ -e "$accel" ]] || return 1
+  [[ -r "$sysfs/vendor" && -r "$sysfs/device" ]] || return 1
+
+  vendor="$(tr '[:upper:]' '[:lower:]' <"$sysfs/vendor" | tr -d '[:space:]')"
+  device="$(tr '[:upper:]' '[:lower:]' <"$sysfs/device" | tr -d '[:space:]')"
+  if [[ -L "$sysfs/driver" ]]; then
+    driver="$(basename "$(readlink -f "$sysfs/driver" 2>/dev/null || true)")"
+  fi
+
+  [[ "$vendor" == "0x1022" && "$device" == "0x17f0" ]] || return 1
+  [[ -z "$driver" || "$driver" == "amdxdna" ]] || return 1
+}
+
+# Detect the preferred local-AI runtime from host accelerator capability.
+# A supported XDNA2 NPU wins because FastFlowLM can use it directly. NVIDIA is
+# next, then ROCm-capable AMD GPU, with CPU as the portable fallback.
 detect_ai_runtime() {
+  if fastflow_npu_supported; then
+    printf '%s' npu
+    return 0
+  fi
+
   if has_cmd nvidia-smi && nvidia-smi -L >/dev/null 2>&1; then
     printf '%s' nvidia
     return 0
@@ -21,6 +47,48 @@ detect_ai_runtime() {
   fi
 
   printf '%s' cpu
+}
+
+ai_provider_for_runtime() {
+  case "${1,,}" in
+  npu) printf '%s' fastflow ;;
+  "" | cpu | nvidia | amd) printf '%s' ollama ;;
+  *) return 1 ;;
+  esac
+}
+
+ai_service_for_runtime() {
+  case "$(ai_provider_for_runtime "${1:-}")" in
+  fastflow) printf '%s' llm-fastflow ;;
+  ollama) printf '%s' llm-ollama ;;
+  *) return 1 ;;
+  esac
+}
+
+ai_model_default_for_runtime() {
+  case "${1,,}" in
+  npu) printf '%s' 'qwen3.5:9b' ;;
+  "" | cpu | nvidia | amd) printf '%s' 'qwen3:14b' ;;
+  *) return 1 ;;
+  esac
+}
+
+effective_ai_runtime() {
+  local runtime
+  runtime="$(compose_control_value LDS_AI_RUNTIME "")"
+  [[ -n "$runtime" ]] || runtime="$(detect_ai_runtime)"
+  printf '%s' "${runtime,,}"
+}
+
+effective_ai_model() {
+  local runtime="${1:-}" configured
+  [[ -n "$runtime" ]] || runtime="$(effective_ai_runtime)"
+  configured="$(compose_control_value LDS_AI_MODEL "")"
+  if [[ -n "$configured" ]]; then
+    printf '%s' "$configured"
+  else
+    ai_model_default_for_runtime "$runtime"
+  fi
 }
 
 host_cpu_is_amd() {
@@ -48,7 +116,7 @@ ai_igpu_default_for_runtime() {
 llm_arch_for_runtime() {
   case "${1,,}" in
   amd) printf '%s' amd-latest ;;
-  "" | cpu | nvidia) printf '%s' latest ;;
+  "" | cpu | nvidia | npu) printf '%s' latest ;;
   *) return 1 ;;
   esac
 }
