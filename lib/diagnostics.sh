@@ -426,11 +426,18 @@ cmd_images() {
   printf '%-16s %s\n' "Runner" "infocyph/runner:latest"
   printf '%-16s %s\n' "Nginx" "infocyph/nginx:latest"
   printf '%-16s %s\n' "Apache" "infocyph/apache:latest"
-  local ai_runtime llm_arch
+  local ai_runtime ai_provider llm_arch llm_image
   ai_runtime="$(compose_control_value LDS_AI_RUNTIME "")"
   [[ -n "$ai_runtime" ]] || ai_runtime="$(detect_ai_runtime)"
-  llm_arch="$(llm_arch_for_runtime "$ai_runtime")"
-  printf '%-16s %s\n' "LLM" "infocyph/llm-ollama:$llm_arch"
+  ai_provider="$(ai_provider_for_runtime "$ai_runtime")"
+  if [[ "$ai_provider" == "fastflow" ]]; then
+    llm_image="infocyph/llm-fastflow:latest"
+  else
+    llm_arch="$(llm_arch_for_runtime "$ai_runtime")"
+    llm_image="infocyph/llm-ollama:$llm_arch"
+  fi
+  printf '%-16s %s\n' "LLM" "$llm_image"
+  printf '%-16s %s\n' "LLM provider" "$ai_provider"
   printf '%-16s %s\n' "LLM runtime" "$ai_runtime"
   printf '%-16s postgres:%s\n' "PostgreSQL" "$(compose_control_value POSTGRES_VERSION alpine)"
   printf '%-16s mysql:%s\n' "MySQL" "$(compose_control_value MYSQL_VERSION latest)"
@@ -518,12 +525,14 @@ cmd_doctor() {
   )
 
   if profile_enabled ai; then
-    local llm
-    llm="$(docker_compose ps -q llm-ollama 2>/dev/null | sed -n '1p' || true)"
+    local llm llm_service llm_provider
+    llm_service="$(ai_service_for_runtime "$(effective_ai_runtime)")"
+    llm_provider="$(ai_provider_for_runtime "$(effective_ai_runtime)")"
+    llm="$(docker_compose ps -q "$llm_service" 2>/dev/null | sed -n '1p' || true)"
     if [[ -n "$llm" ]] && docker inspect -f '{{.State.Running}}' "$llm" 2>/dev/null | grep -qx true; then
-      _doctor_ok "AI provider container is running."
+      _doctor_ok "AI provider is running: $llm_provider ($llm_service)."
     else
-      _doctor_warn "AI profile is selected but llm-ollama is not running."
+      _doctor_warn "AI profile is selected but $llm_provider provider service '$llm_service' is not running."
       warnings=$((warnings + 1))
     fi
   fi
