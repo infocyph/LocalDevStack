@@ -56,7 +56,7 @@ while IFS='|' read -r key profile display service_key version_env defaults promp
     [[ "$defaults" != *"LDS_AI_RUNTIME="* ]] || fail "AI profile wizard must not prompt for runtime"
     ;;
   ELASTICSEARCH)
-    [[ "$defaults" == *"ELASTICSEARCH_VERSION=9.5.3"* ]] || fail "Elastic stable default drift"
+    [[ "$defaults" == *"ELASTICSEARCH_VERSION=latest"* ]] || fail "Elastic latest default drift"
     ;;
   esac
 done <"$catalog"
