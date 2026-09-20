@@ -316,10 +316,13 @@ LocalDevStack deliberately performs exactly one provider-native structured reque
 per Graphify extraction attempt. It does not add its own structured retry or
 free-form fallback chain. If the provider times out or returns an unusable structured
 response, the proxy returns a bounded ``finish_reason=length`` signal so Graphify
-can split the offending chunk through its existing adaptive-retry logic. For local
-providers the OpenAI SDK retry layer also defaults to zero
-(``LDS_GRAPHIFY_SDK_RETRIES=0``) to avoid hidden retry amplification; an explicit
-``GRAPHIFY_MAX_RETRIES`` still wins.
+can split the offending chunk through its existing adaptive-retry logic.
+
+For local providers, hidden retry amplification is bounded at both outer layers:
+the OpenAI SDK retry count defaults to zero (``LDS_GRAPHIFY_SDK_RETRIES=0``) and
+Graphify's adaptive retry depth defaults to one
+(``LDS_GRAPHIFY_MAX_RETRY_DEPTH=1``). Explicit
+``GRAPHIFY_MAX_RETRIES`` / ``GRAPHIFY_MAX_RETRY_DEPTH`` values still win.
 
 Detailed suspect-response logging is optional and does not control the compatibility
 proxy. Enable it with:
