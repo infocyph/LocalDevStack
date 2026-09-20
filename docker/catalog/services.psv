@@ -2,7 +2,7 @@
 POSTGRESQL|postgresql|PostgreSQL|postgres|POSTGRES_VERSION|POSTGRES_VERSION=alpine;POSTGRES_USER=postgres;POSTGRES_PASSWORD=postgres;POSTGRES_DATABASE=postgres|Version;User;Password;Database|cloudbeaver|PostgresStore|https://db.localhost|database|1|0|
 MYSQL|mysql|MySQL|mysql|MYSQL_VERSION|MYSQL_VERSION=latest;MYSQL_ROOT_PASSWORD=12345;MYSQL_USER=infocyph;MYSQL_PASSWORD=12345;MYSQL_DATABASE=localdb|Version;Root password;User;Password;Database|cloudbeaver|MySQLStore|https://db.localhost|database|1|0|
 MARIADB|mariadb|MariaDB|mariadb|MARIADB_VERSION|MARIADB_VERSION=latest;MARIADB_ROOT_PASSWORD=12345;MARIADB_USER=infocyph;MARIADB_PASSWORD=12345;MARIADB_DATABASE=localdb|Version;Root password;User;Password;Database|cloudbeaver|MariaDBStore|https://db.localhost|database|1|0|
-ELASTICSEARCH|elasticsearch|Elasticsearch|elasticsearch|ELASTICSEARCH_VERSION|ELASTICSEARCH_VERSION=latest|Version|kibana|ElasticSearchStore|https://kibana.localhost|search|1|0|
+ELASTICSEARCH|elasticsearch|Elasticsearch|elasticsearch|ELASTICSEARCH_VERSION|ELASTICSEARCH_VERSION=9.5.4|Version|kibana|ElasticSearchStore|https://kibana.localhost|search|1|0|
 MONGODB|mongodb|MongoDB|mongodb|MONGODB_VERSION|MONGODB_VERSION=latest;MONGODB_ROOT_USERNAME=root;MONGODB_ROOT_PASSWORD=12345|Version;Root username;Root password|mongo-express|MongoDBStore|https://me.localhost|database|1|0|
 REDIS|redis|Redis|redis|REDIS_VERSION|REDIS_VERSION=latest|Version|redis-insight|RedisStore|https://ri.localhost|cache|1|0|
 AI|ai|Local AI|llm-ollama|LDS_LLM_ARCH|LDS_AI_MODEL=qwen3:14b|Preferred model||LLMModels|https://llm-ollama.localhost|ai|1|0|cpu,nvidia,amd
