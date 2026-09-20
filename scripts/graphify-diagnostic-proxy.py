@@ -121,6 +121,162 @@ def classify_graph_content(content: str | None) -> tuple[bool, str]:
     return True, "response is not parseable as a graph JSON object"
 
 
+
+_GRAPH_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "submit_graph",
+        "description": "Submit the extracted Graphify knowledge-graph fragment. Call exactly once.",
+        "parameters": {
+            "type": "object",
+            "required": ["nodes", "edges", "hyperedges"],
+            "properties": {
+                "nodes": {"type": "array", "items": {"type": "object"}},
+                "edges": {"type": "array", "items": {"type": "object"}},
+                "hyperedges": {"type": "array", "items": {"type": "object"}},
+            },
+        },
+    },
+}
+
+
+def _build_tool_recovery_request(body: bytes) -> bytes | None:
+    try:
+        request = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(request, dict):
+        return None
+
+    messages = request.get("messages")
+    if not isinstance(messages, list):
+        return None
+
+    request = dict(request)
+    request["tools"] = [_GRAPH_TOOL]
+    # FastFlow v1.0.6 treats unsupported tool_choice modes as auto, so the
+    # explicit instruction is the enforcement mechanism for Qwen3.5.
+    request["tool_choice"] = "auto"
+    request["stream"] = False
+
+    amended = []
+    recovery_suffix = (
+        "\n\nSTRUCTURED RECOVERY: Do not emit the graph as assistant text. "
+        "Call the submit_graph tool exactly once. Put the complete extraction "
+        "fragment into its nodes, edges, and hyperedges arguments. Do not add "
+        "new facts; follow the original Graphify schema and source_file rules."
+    )
+    injected = False
+    for message in messages:
+        if not isinstance(message, dict):
+            amended.append(message)
+            continue
+        copied = dict(message)
+        if (
+            not injected
+            and copied.get("role") == "system"
+            and isinstance(copied.get("content"), str)
+            and "graphify semantic extraction agent" in copied["content"]
+        ):
+            copied["content"] += recovery_suffix
+            injected = True
+        amended.append(copied)
+    if not injected:
+        amended.insert(0, {"role": "system", "content": recovery_suffix.strip()})
+    request["messages"] = amended
+    return json.dumps(request, ensure_ascii=False).encode("utf-8")
+
+
+def _coerce_graph_array(value: Any) -> list[dict[str, Any]] | None:
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(value, list):
+        return None
+    if any(not isinstance(entry, dict) for entry in value):
+        return None
+    return value
+
+
+def _extract_graph_tool_result(body: bytes) -> dict[str, Any] | None:
+    try:
+        response = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(response, dict):
+        return None
+
+    choices = response.get("choices")
+    if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+        return None
+    message = choices[0].get("message")
+    if not isinstance(message, dict):
+        return None
+    tool_calls = message.get("tool_calls")
+    if not isinstance(tool_calls, list):
+        return None
+
+    for call in tool_calls:
+        if not isinstance(call, dict):
+            continue
+        function = call.get("function")
+        if not isinstance(function, dict) or function.get("name") != "submit_graph":
+            continue
+        arguments = function.get("arguments")
+        if isinstance(arguments, str):
+            try:
+                arguments = json.loads(arguments)
+            except json.JSONDecodeError:
+                continue
+        if not isinstance(arguments, dict):
+            continue
+
+        graph: dict[str, Any] = {}
+        for key in _GRAPH_KEYS:
+            value = _coerce_graph_array(arguments.get(key))
+            if value is None:
+                break
+            graph[key] = value
+        else:
+            if any(graph[key] for key in _GRAPH_KEYS):
+                return graph
+    return None
+
+
+def _replace_response_content(body: bytes, graph: dict[str, Any]) -> bytes | None:
+    try:
+        response = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(response, dict):
+        return None
+    choices = response.get("choices")
+    if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+        return None
+
+    response = dict(response)
+    choices = [dict(choice) if isinstance(choice, dict) else choice for choice in choices]
+    first = choices[0]
+    message = first.get("message")
+    if not isinstance(message, dict):
+        message = {}
+    else:
+        message = dict(message)
+    message["role"] = "assistant"
+    message["content"] = json.dumps(graph, ensure_ascii=False, separators=(",", ":"))
+    message.pop("tool_calls", None)
+    message.pop("reasoning_content", None)
+    message.pop("reasoning", None)
+    message.pop("thinking", None)
+    first["message"] = message
+    first["finish_reason"] = "stop"
+    choices[0] = first
+    response["choices"] = choices
+    return json.dumps(response, ensure_ascii=False).encode("utf-8")
+
+
 def _request_metadata(body: bytes) -> dict[str, Any]:
     try:
         request = json.loads(body.decode("utf-8"))
@@ -225,7 +381,7 @@ class DiagnosticHandler(BaseHTTPRequestHandler):
             ).encode("utf-8")
 
         if self.command == "POST" and self.path.rstrip("/").endswith("/v1/chat/completions"):
-            self._inspect_chat_response(body, response_body, status)
+            response_body = self._inspect_and_recover_chat_response(body, response_body, status)
 
         self.send_response(status)
         for name, value in response_headers.items():
@@ -236,16 +392,62 @@ class DiagnosticHandler(BaseHTTPRequestHandler):
         if self.command != "HEAD":
             self.wfile.write(response_body)
 
-    def _inspect_chat_response(self, request_body: bytes, response_body: bytes, status: int) -> None:
+    def _post_upstream(self, body: bytes) -> bytes | None:
+        request = urllib.request.Request(
+            self.upstream.rstrip("/") + "/v1/chat/completions",
+            data=body,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": self.headers.get("Authorization", "Bearer local"),
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=1900) as response:
+                if response.status < 200 or response.status >= 300:
+                    return None
+                return response.read()
+        except Exception:
+            return None
+
+    def _inspect_and_recover_chat_response(
+        self, request_body: bytes, response_body: bytes, status: int
+    ) -> bytes:
         req = _request_metadata(request_body)
         resp, content = _response_metadata(response_body)
-        if status < 200 or status >= 300 or not req.pop("_extraction_request", False):
-            return
+        extraction_request = req.pop("_extraction_request", False)
+        if status < 200 or status >= 300 or not extraction_request:
+            return response_body
 
         suspect, reason = classify_graph_content(content)
         if not suspect:
-            return
+            return response_body
 
+        original_reason = reason
+        recovery = _build_tool_recovery_request(request_body)
+        recovered_graph = None
+        recovered_response = None
+        if recovery is not None and req.get("think", "<omitted>") != "<omitted>":
+            recovered_response = self._post_upstream(recovery)
+            if recovered_response is not None:
+                recovered_graph = _extract_graph_tool_result(recovered_response)
+
+        if recovered_graph is not None and recovered_response is not None:
+            replacement = _replace_response_content(recovered_response, recovered_graph)
+            if replacement is not None:
+                recovered_meta, _ = _response_metadata(replacement)
+                print(
+                    "[lds graphify diagnostic] recovered malformed FastFlow graph via submit_graph tool: "
+                    f"model={req.get('model')}; think={req.get('think')}; "
+                    f"nodes={len(recovered_graph['nodes'])}; edges={len(recovered_graph['edges'])}; "
+                    f"hyperedges={len(recovered_graph['hyperedges'])}; "
+                    f"completion_tokens={recovered_meta.get('completion_tokens')}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                return replacement
+
+        reason = original_reason
         record = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "status": status,
@@ -280,6 +482,14 @@ class DiagnosticHandler(BaseHTTPRequestHandler):
             file=sys.stderr,
             flush=True,
         )
+        if recovery is not None:
+            print(
+                "[lds graphify diagnostic] structured submit_graph recovery did not yield a usable graph; "
+                "returning the original response so Graphify can apply its normal retry policy",
+                file=sys.stderr,
+                flush=True,
+            )
+        return response_body
 
     do_GET = _forward
     do_HEAD = _forward
