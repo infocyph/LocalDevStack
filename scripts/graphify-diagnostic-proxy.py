@@ -154,6 +154,29 @@ def _json_candidates(content: str):
         start = content.find("{", start + 1)
 
 
+def parse_graph_content(content: str | None) -> dict[str, list[dict[str, Any]]] | None:
+    """Return a structurally valid graph fragment, including an all-empty fragment."""
+    if content is None or not content.strip():
+        return None
+    for candidate in _json_candidates(content):
+        try:
+            parsed = json.loads(candidate)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if not isinstance(parsed, dict):
+            continue
+
+        graph: dict[str, list[dict[str, Any]]] = {}
+        for key in _GRAPH_KEYS:
+            value = parsed.get(key)
+            if not isinstance(value, list) or any(not isinstance(entry, dict) for entry in value):
+                break
+            graph[key] = value
+        else:
+            return graph
+    return None
+
+
 def classify_graph_content(content: str | None) -> tuple[bool, str]:
     """Return (suspect, reason), mirroring Graphify's hollow decision closely."""
     if content is None or not content.strip():
@@ -338,8 +361,7 @@ def _extract_graph_tool_result(body: bytes) -> dict[str, Any] | None:
                 break
             graph[key] = value
         else:
-            if any(graph[key] for key in _GRAPH_KEYS):
-                return graph
+            return graph
     return None
 
 
@@ -432,6 +454,7 @@ def _response_metadata(body: bytes) -> tuple[dict[str, Any], str | None]:
 class DiagnosticHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     upstream: str = ""
+    provider: str = ""
     log_file: Path
     preview_chars: int = 4096
 
@@ -451,20 +474,15 @@ class DiagnosticHandler(BaseHTTPRequestHandler):
         is_chat = self.command == "POST" and self.path.rstrip("/").endswith("/v1/chat/completions")
         metadata = _request_metadata(body) if is_chat else {}
         extraction_request = bool(metadata.get("_extraction_request"))
-        fastflow_request = metadata.get("think", "<omitted>") != "<omitted>"
-        ollama_request = (
-            not fastflow_request
-            and metadata.get("reasoning_effort", "<omitted>") != "<omitted>"
-        )
 
         upstream_body = body
         structured_primary = ""
-        if extraction_request and fastflow_request:
+        if extraction_request and self.provider == "fastflow":
             candidate = _build_tool_recovery_request(body)
             if candidate is not None:
                 upstream_body = candidate
                 structured_primary = "fastflow-tool"
-        elif extraction_request and ollama_request:
+        elif extraction_request and self.provider == "ollama":
             candidate = _build_ollama_schema_request(body)
             if candidate is not None:
                 upstream_body = candidate
@@ -521,13 +539,15 @@ class DiagnosticHandler(BaseHTTPRequestHandler):
                     response_body = self._fallback_freeform(body)
             elif structured_primary == "ollama-schema" and 200 <= status < 300:
                 _meta, content = _response_metadata(response_body)
-                suspect, _reason = classify_graph_content(content)
-                if suspect:
+                graph = parse_graph_content(content)
+                if graph is None:
                     response_body = self._fallback_freeform(body)
                 else:
                     print(
                         "[lds graphify diagnostic] structured Ollama graph via response_format schema: "
-                        f"model={metadata.get('model')}; reasoning_effort={metadata.get('reasoning_effort')}",
+                        f"model={metadata.get('model')}; reasoning_effort={metadata.get('reasoning_effort')}; "
+                        f"nodes={len(graph['nodes'])}; edges={len(graph['edges'])}; "
+                        f"hyperedges={len(graph['hyperedges'])}",
                         file=sys.stderr,
                         flush=True,
                     )
@@ -662,12 +682,14 @@ class DiagnosticHandler(BaseHTTPRequestHandler):
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--upstream", required=True)
+    parser.add_argument("--provider", required=True, choices=("fastflow", "ollama"))
     parser.add_argument("--ready-file", required=True)
     parser.add_argument("--log-file", required=True)
     parser.add_argument("--preview-chars", type=int, default=4096)
     args = parser.parse_args()
 
     DiagnosticHandler.upstream = args.upstream
+    DiagnosticHandler.provider = args.provider
     DiagnosticHandler.log_file = Path(args.log_file)
     DiagnosticHandler.preview_chars = max(256, args.preview_chars)
 
