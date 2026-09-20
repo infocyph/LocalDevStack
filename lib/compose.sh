@@ -42,7 +42,7 @@ docker_compose() {
   local -a env_files=(--env-file "$ENV_RELEASE")
   [[ -r "$ENV_DOCKER" ]] && env_files+=(--env-file "$ENV_DOCKER")
 
-  local ai_runtime ai_provider ai_model llm_arch ollama_profile fastflow_profile runtime_override=""
+  local ai_runtime ai_provider ai_model ollama_profile fastflow_profile runtime_override=""
   local -a runtime_f=()
 
   ai_runtime="$(compose_control_value LDS_AI_RUNTIME "")"
@@ -57,9 +57,6 @@ docker_compose() {
     die "Cannot resolve AI provider for runtime: $ai_runtime"
   ai_model="$(effective_ai_model "$ai_runtime")" ||
     die "Cannot resolve AI model for runtime: $ai_runtime"
-  llm_arch="$(llm_arch_for_runtime "$ai_runtime")" ||
-    die "Cannot resolve LLM image tag for runtime: $ai_runtime"
-
   if [[ "$ai_provider" == "fastflow" ]]; then
     ollama_profile=__lds-ai-disabled-ollama
     fastflow_profile=ai
@@ -82,7 +79,7 @@ docker_compose() {
         printf '%s\n' '    gpus: all'
         ;;
       amd)
-        printf '%s\n' '    devices:' '      - /dev/kfd:/dev/kfd' '      - /dev/dri:/dev/dri'
+        printf '%s\n' '    image: infocyph/llm-ollama:amd-latest' '    devices:' '      - /dev/kfd:/dev/kfd' '      - /dev/dri:/dev/dri'
         ;;
       esac
     } >"$runtime_override"
@@ -103,7 +100,6 @@ docker_compose() {
 
   local rc=0
   HOST_OS="$host_os" \
-    LDS_LLM_ARCH="$llm_arch" \
     LDS_AI_PROVIDER=llm \
     LDS_AI_URL=http://llm:11434 \
     LDS_AI_MODEL="$ai_model" \
