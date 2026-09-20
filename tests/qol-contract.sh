@@ -43,7 +43,7 @@ assert_contains "$images" "infocyph/runner:latest"
 assert_contains "$images" "infocyph/nginx:latest"
 assert_contains "$images" "infocyph/apache:latest"
 assert_contains "$images" "postgres:alpine"
-assert_contains "$images" "elasticsearch:9.5.4"
+assert_contains "$images" "docker.elastic.co/elasticsearch/elasticsearch:9.5.4"
 assert_contains "$images" "localdevstack-php:<selected-version> (Alpine)"
 pass "images is offline-safe and reports fixed plus configurable image selections"
 
