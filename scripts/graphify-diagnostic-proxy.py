@@ -20,6 +20,8 @@ from pathlib import Path
 from typing import Any
 
 _GRAPH_KEYS = ("nodes", "edges", "hyperedges")
+_STRUCTURED_MAX_TOKENS = 4096
+
 _GRAPH_SCHEMA = {
     "type": "object",
     "required": ["nodes", "edges", "hyperedges"],
@@ -250,6 +252,8 @@ def _build_ollama_schema_request(body: bytes) -> bytes | None:
     request = dict(request)
     request["stream"] = False
     request["temperature"] = 0
+    request.pop("max_tokens", None)
+    request["max_completion_tokens"] = _bounded_completion_cap(request)
     request["response_format"] = {
         "type": "json_schema",
         "json_schema": {
@@ -261,7 +265,16 @@ def _build_ollama_schema_request(body: bytes) -> bytes | None:
     return json.dumps(request, ensure_ascii=False).encode("utf-8")
 
 
-def _build_tool_recovery_request(body: bytes) -> bytes | None:
+def _bounded_completion_cap(request: dict[str, Any]) -> int:
+    raw = request.get("max_completion_tokens", request.get("max_tokens", _STRUCTURED_MAX_TOKENS))
+    try:
+        cap = int(raw)
+    except (TypeError, ValueError):
+        cap = _STRUCTURED_MAX_TOKENS
+    return max(1, min(cap, _STRUCTURED_MAX_TOKENS))
+
+
+def _build_tool_recovery_request(body: bytes, *, retry: bool = False) -> bytes | None:
     try:
         request = json.loads(body.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError):
@@ -275,18 +288,27 @@ def _build_tool_recovery_request(body: bytes) -> bytes | None:
 
     request = dict(request)
     request["tools"] = [_GRAPH_TOOL]
-    # FastFlow v1.0.6 treats unsupported tool_choice modes as auto, so the
-    # explicit instruction is the enforcement mechanism for Qwen3.5.
+    # FastFlow currently supports tool_choice=auto|none only. The explicit
+    # system instruction is therefore what makes submit_graph mandatory.
     request["tool_choice"] = "auto"
     request["stream"] = False
+    request["temperature"] = 0
+    request.pop("max_tokens", None)
+    request["max_completion_tokens"] = _bounded_completion_cap(request)
 
     amended = []
     recovery_suffix = (
-        "\n\nSTRUCTURED RECOVERY: Do not emit the graph as assistant text. "
+        "\n\nSTRUCTURED OUTPUT: Do not emit the graph as ordinary assistant text. "
         "Call the submit_graph tool exactly once. Put the complete extraction "
         "fragment into its nodes, edges, and hyperedges arguments. Do not add "
         "new facts; follow the original Graphify schema and source_file rules."
     )
+    if retry:
+        recovery_suffix += (
+            " A previous structured attempt did not produce a usable submit_graph call. "
+            "This retry MUST call submit_graph exactly once; do not answer with prose or raw JSON."
+        )
+
     injected = False
     for message in messages:
         if not isinstance(message, dict):
@@ -363,6 +385,14 @@ def _extract_graph_tool_result(body: bytes) -> dict[str, Any] | None:
         else:
             return graph
     return None
+
+
+def _extract_fastflow_structured_graph(body: bytes) -> dict[str, Any] | None:
+    graph = _extract_graph_tool_result(body)
+    if graph is not None:
+        return graph
+    _meta, content = _response_metadata(body)
+    return parse_graph_content(content)
 
 
 def _replace_response_content(body: bytes, graph: dict[str, Any]) -> bytes | None:
@@ -456,6 +486,8 @@ class DiagnosticHandler(BaseHTTPRequestHandler):
     upstream: str = ""
     provider: str = ""
     diagnostics: bool = False
+    upstream_timeout: int = 1800
+    structured_timeout: int = 300
     log_file: Path
     preview_chars: int = 4096
 
@@ -502,7 +534,8 @@ class DiagnosticHandler(BaseHTTPRequestHandler):
         response_body = b'{"error":{"message":"LocalDevStack Graphify diagnostic proxy upstream failure"}}'
 
         try:
-            with urllib.request.urlopen(request, timeout=1900) as upstream_response:
+            request_timeout = self.structured_timeout if structured_primary else self.upstream_timeout
+            with urllib.request.urlopen(request, timeout=request_timeout) as upstream_response:
                 status = upstream_response.status
                 response_body = upstream_response.read()
                 content_type = upstream_response.headers.get("Content-Type")
@@ -521,9 +554,29 @@ class DiagnosticHandler(BaseHTTPRequestHandler):
 
         if is_chat and extraction_request:
             if structured_primary == "fastflow-tool" and 200 <= status < 300:
-                graph = _extract_graph_tool_result(response_body)
+                graph = _extract_fastflow_structured_graph(response_body)
+                structured_response = response_body
+
+                if graph is None:
+                    retry_body = _build_tool_recovery_request(body, retry=True)
+                    retry_response = (
+                        self._post_upstream(retry_body, timeout=self.structured_timeout)
+                        if retry_body is not None
+                        else None
+                    )
+                    if retry_response is not None:
+                        retry_graph = _extract_fastflow_structured_graph(retry_response)
+                        if retry_graph is not None:
+                            graph = retry_graph
+                            structured_response = retry_response
+                            print(
+                                "[lds graphify] FastFlow structured extraction recovered on bounded retry",
+                                file=sys.stderr,
+                                flush=True,
+                            )
+
                 if graph is not None:
-                    replacement = _replace_response_content(response_body, graph)
+                    replacement = _replace_response_content(structured_response, graph)
                     if replacement is not None:
                         response_body = replacement
                         if self.diagnostics:
@@ -567,18 +620,33 @@ class DiagnosticHandler(BaseHTTPRequestHandler):
             self.wfile.write(response_body)
 
     def _fallback_freeform(self, original_body: bytes) -> bytes:
-        fallback = self._post_upstream(original_body)
+        try:
+            fallback_request = json.loads(original_body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            fallback_request = None
+        if isinstance(fallback_request, dict):
+            fallback_request = dict(fallback_request)
+            fallback_request.pop("max_tokens", None)
+            fallback_request["max_completion_tokens"] = _bounded_completion_cap(fallback_request)
+            fallback_request["temperature"] = 0
+            fallback_body = json.dumps(fallback_request, ensure_ascii=False).encode("utf-8")
+        else:
+            fallback_body = original_body
+
+        fallback = self._post_upstream(fallback_body, timeout=self.structured_timeout)
         if fallback is None:
             return b'{"error":{"message":"Structured Graphify extraction failed and free-form fallback was unavailable"}}'
         print(
             "[lds graphify] structured extraction did not yield a usable graph; "
-            "falling back to the original free-form Graphify request",
+            "falling back once to the bounded free-form Graphify request",
             file=sys.stderr,
             flush=True,
         )
-        return self._inspect_and_recover_chat_response(original_body, fallback, 200)
+        return self._inspect_and_recover_chat_response(
+            original_body, fallback, 200, allow_structured_recovery=False
+        )
 
-    def _post_upstream(self, body: bytes) -> bytes | None:
+    def _post_upstream(self, body: bytes, *, timeout: int | None = None) -> bytes | None:
         request = urllib.request.Request(
             self.upstream.rstrip("/") + "/v1/chat/completions",
             data=body,
@@ -589,7 +657,7 @@ class DiagnosticHandler(BaseHTTPRequestHandler):
             method="POST",
         )
         try:
-            with urllib.request.urlopen(request, timeout=1900) as response:
+            with urllib.request.urlopen(request, timeout=timeout or self.upstream_timeout) as response:
                 if response.status < 200 or response.status >= 300:
                     return None
                 return response.read()
@@ -597,7 +665,12 @@ class DiagnosticHandler(BaseHTTPRequestHandler):
             return None
 
     def _inspect_and_recover_chat_response(
-        self, request_body: bytes, response_body: bytes, status: int
+        self,
+        request_body: bytes,
+        response_body: bytes,
+        status: int,
+        *,
+        allow_structured_recovery: bool = True,
     ) -> bytes:
         req = _request_metadata(request_body)
         resp, content = _response_metadata(response_body)
@@ -613,10 +686,14 @@ class DiagnosticHandler(BaseHTTPRequestHandler):
         recovery = _build_tool_recovery_request(request_body)
         recovered_graph = None
         recovered_response = None
-        if recovery is not None and req.get("think", "<omitted>") != "<omitted>":
-            recovered_response = self._post_upstream(recovery)
+        if (
+            allow_structured_recovery
+            and recovery is not None
+            and req.get("think", "<omitted>") != "<omitted>"
+        ):
+            recovered_response = self._post_upstream(recovery, timeout=self.structured_timeout)
             if recovered_response is not None:
-                recovered_graph = _extract_graph_tool_result(recovered_response)
+                recovered_graph = _extract_fastflow_structured_graph(recovered_response)
 
         if recovered_graph is not None and recovered_response is not None:
             replacement = _replace_response_content(recovered_response, recovered_graph)
@@ -676,7 +753,7 @@ class DiagnosticHandler(BaseHTTPRequestHandler):
                 file=sys.stderr,
                 flush=True,
             )
-        if recovery is not None:
+        if allow_structured_recovery and recovery is not None:
             print(
                 "[lds graphify diagnostic] structured submit_graph recovery did not yield a usable graph; "
                 "returning the original response so Graphify can apply its normal retry policy",
@@ -695,6 +772,8 @@ def main() -> int:
     parser.add_argument("--upstream", required=True)
     parser.add_argument("--provider", required=True, choices=("fastflow", "ollama"))
     parser.add_argument("--diagnostics", choices=("on", "off"), default="off")
+    parser.add_argument("--timeout", type=int, default=1800)
+    parser.add_argument("--structured-timeout", type=int, default=300)
     parser.add_argument("--ready-file", required=True)
     parser.add_argument("--log-file", required=True)
     parser.add_argument("--preview-chars", type=int, default=4096)
@@ -703,6 +782,8 @@ def main() -> int:
     DiagnosticHandler.upstream = args.upstream
     DiagnosticHandler.provider = args.provider
     DiagnosticHandler.diagnostics = args.diagnostics == "on"
+    DiagnosticHandler.upstream_timeout = max(1, args.timeout)
+    DiagnosticHandler.structured_timeout = max(1, args.structured_timeout)
     DiagnosticHandler.log_file = Path(args.log_file)
     DiagnosticHandler.preview_chars = max(256, args.preview_chars)
 
