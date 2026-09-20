@@ -166,8 +166,9 @@ Examples:
 
 - PostgreSQL defaults to ``postgres:alpine``.
 - Tools, Runner, Nginx, and Apache use their published ``:latest`` aliases.
-- Standard local AI uses ``infocyph/llm-ollama:latest``.
-- AMD local AI uses ``infocyph/llm-ollama:amd-latest``.
+- XDNA2 NPU local AI uses ``infocyph/llm-fastflow:latest``.
+- CPU/NVIDIA local AI uses ``infocyph/llm-ollama:latest``.
+- AMD ROCm local AI uses ``infocyph/llm-ollama:amd-latest``.
 - Elasticsearch, Kibana, and Filebeat share ``ELASTICSEARCH_VERSION`` and default to the current stable ``9.5.4`` because this Elastic image set does not expose a usable moving ``latest`` alias.
 
 Run::
@@ -210,37 +211,53 @@ builds. Other arbitrary refs are rejected.
 AI Settings
 -----------
 
-Important AI settings include::
+Important LocalDevStack AI settings include::
 
    LDS_AI_ENABLED=auto
-   LDS_AI_PROVIDER=ollama
-   LDS_AI_URL=http://llm-ollama:11434
-   LDS_AI_MODEL=qwen3:14b
-   LDS_AI_RUNTIME=<optional explicit cpu|nvidia|amd>
+   LDS_AI_PROVIDER=llm
+   LDS_AI_URL=http://llm:11434
+   LDS_AI_MODEL=
+   LDS_AI_RUNTIME=<optional explicit cpu|nvidia|amd|npu>
    LDS_AI_IGPU_ENABLE=<auto-derived 0|1>
 
-When ``LDS_AI_RUNTIME`` is not explicitly set, LocalDevStack detects the preferred
-runtime for the Compose invocation. NVIDIA is selected only when ``nvidia-smi`` is
-usable; AMD is selected only when the ROCm Linux device nodes ``/dev/kfd`` and
-``/dev/dri`` are present; otherwise CPU is selected.
+``LDS_AI_PROVIDER`` and ``LDS_AI_URL`` describe the common consumer contract. They do
+not identify which backend implementation is active.
 
-``LDS_LLM_ARCH`` is derived from that runtime (``latest`` for CPU/NVIDIA,
-``amd-latest`` for AMD). It is not a separate user-facing image version selector.
-Using ``lds llm runtime ...`` persists the explicit runtime choice, matching derived
-tag and the automatic ``LDS_AI_IGPU_ENABLE`` value. On an AMD CPU with the AMD runtime,
-the automatic value is ``1`` and is forwarded as ``OLLAMA_IGPU_ENABLE=1``; otherwise
-it is ``0``.
+When ``LDS_AI_RUNTIME`` is not explicitly set, LocalDevStack detects the preferred
+runtime in this order: supported XDNA2 NPU, NVIDIA, AMD ROCm, CPU.
+
+Provider mapping is::
+
+   npu     -> FastFlow / infocyph/llm-fastflow:latest / qwen3.5:9b
+   nvidia  -> Ollama   / infocyph/llm-ollama:latest / qwen3:14b
+   amd     -> Ollama   / infocyph/llm-ollama:amd-latest / qwen3:14b
+   cpu     -> Ollama   / infocyph/llm-ollama:latest / qwen3:14b
+
+Only one provider service is enabled. The selected service owns the ``llm`` Docker alias
+on port ``11434``.
 
 Use::
 
-   lds llm runtime <cpu|nvidia|amd>
+   lds llm runtime auto
+   lds llm runtime npu
+   lds llm runtime nvidia
+   lds llm runtime amd
+   lds llm runtime cpu
 
-to override the detected runtime behavior.
+to control the runtime explicitly. ``auto`` clears the explicit override.
 
-The selected ``LDS_AI_MODEL`` is also forwarded to the provider as
-``LLM_OLLAMA_MODEL``, so Tools and ``lds llm`` share the same default model.
+``LDS_LLM_ARCH`` remains a derived Ollama compatibility tag (``latest`` or
+``amd-latest``); it is not the FastFlow selector and should not be managed as a generic
+LLM version field.
 
-Provider-side options accepted in ``docker/.env`` include::
+New setup leaves ``LDS_AI_MODEL`` blank so the active provider default applies. An
+explicit model override is forwarded to both Tools and the active provider. Keep it blank
+when switching providers automatically unless the same model exists in both runtimes.
+
+On an AMD CPU with the AMD runtime, the automatic ``LDS_AI_IGPU_ENABLE`` value is ``1``
+and is forwarded as ``OLLAMA_IGPU_ENABLE=1``; otherwise the derived value is ``0``.
+
+Ollama-side options include::
 
    LLM_OLLAMA_SYSTEM=
    LLM_OLLAMA_INPUT_WARN_BYTES=1048576
@@ -256,7 +273,18 @@ Provider-side options accepted in ``docker/.env`` include::
    OLLAMA_KEEP_ALIVE=5m
    OLLAMA_NO_CLOUD=1
 
-Tools consumer settings remain separate::
+FastFlow-side input options include::
+
+   LLM_FASTFLOW_INPUT_WARN_BYTES=1048576
+   LLM_FASTFLOW_INPUT_MAX_BYTES=0
+   LLM_FASTFLOW_ATTACHMENT_MAX_BYTES=16777216
+   LLM_FASTFLOW_ATTACHMENTS_MAX_BYTES=33554432
+   LLM_FASTFLOW_ATTACHMENT_MAX_COUNT=16
+   LLM_FASTFLOW_PDF_MAX_PAGES=24
+   LLM_FASTFLOW_PDF_DPI=120
+   LLM_FASTFLOW_ALLOW_LARGE_INPUT=0
+
+Tools consumer controls remain separate::
 
    LDS_AI_CONNECT_TIMEOUT=2
    LDS_AI_PREFLIGHT_TIMEOUT=5
@@ -266,14 +294,11 @@ Tools consumer settings remain separate::
    LDS_AI_MAX_REQUEST_BYTES=1048576
    LDS_AI_MAX_RESPONSE_BYTES=2097152
 
-Only generation/analysis receives the long 1800-second default. Connect and preflight
-checks stay fast. The same generation timeout is passed to Nginx as
-``LLM_PROXY_TIMEOUT_SECONDS`` for the dedicated LLM proxy path.
+The same generation timeout is passed to Nginx as ``LLM_PROXY_TIMEOUT_SECONDS``.
 
-The LLM service itself is tracked only in ``docker/compose/companion.yaml``. There are
-no tracked AI runtime-variant YAML files; ``lds`` creates temporary fragments under
-``docker/.runtime/`` only for NVIDIA or AMD/ROCm augmentation.
-
+Both provider definitions live in ``docker/compose/companion.yaml``. No tracked AI
+runtime-variant YAML files exist; ``lds`` creates temporary fragments under
+``docker/.runtime/`` only for NVIDIA/ROCm augmentation.
 Compose Extras
 --------------
 
