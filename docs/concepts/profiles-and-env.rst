@@ -168,7 +168,7 @@ Examples:
 - Tools, Runner, Nginx, and Apache use their published ``:latest`` aliases.
 - Standard local AI uses ``infocyph/llm-ollama:latest``.
 - AMD local AI uses ``infocyph/llm-ollama:amd-latest``.
-- Elasticsearch, Kibana, and Filebeat share ``ELASTICSEARCH_VERSION`` and default to ``latest``.
+- Elasticsearch, Kibana, and Filebeat share ``ELASTICSEARCH_VERSION`` and default to the current stable ``9.5.4`` because this Elastic image set does not expose a usable moving ``latest`` alias.
 
 Run::
 
