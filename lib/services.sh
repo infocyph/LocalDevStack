@@ -50,6 +50,16 @@ resolve_service() {
     return 0
   }
 
+  # "llm" is the stable operational alias for whichever mutually-exclusive
+  # provider is active for the effective runtime.
+  if [[ "${raw,,}" == "llm" ]]; then
+    norm="$(ai_service_for_runtime "$(effective_ai_runtime)")" ||
+      die "Unable to resolve the active LLM provider service"
+    compose_service_exists "$norm" || die "Active LLM provider service is unavailable: $norm"
+    printf '%s' "$norm"
+    return 0
+  fi
+
   norm="$(normalize_service "$raw")"
   compose_service_exists "$norm" && {
     printf '%s' "$norm"
