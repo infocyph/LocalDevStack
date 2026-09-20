@@ -97,3 +97,10 @@ update_env() {
   fi
 }
 
+
+remove_env() {
+  local file="$1" var="$2"
+  [[ -f "$file" ]] || return 0
+  var="$(printf '%s' "$var" | sed 's/[]\/$*.^|[]/\\&/g')"
+  sed -Ei "/^[# ]*$var=/d" "$file"
+}
