@@ -206,10 +206,18 @@ setup_service() {
   queue_profile "$profile"
 
   if [[ "$service" == "AI" ]]; then
-    local detected_runtime detected_arch
+    local detected_runtime detected_arch detected_provider detected_model detected_image
     detected_runtime="$(compose_control_value LDS_AI_RUNTIME "$(detect_ai_runtime)")"
-    detected_arch="$(llm_arch_for_runtime "$detected_runtime")"
-    printf "%bDetected local-AI runtime:%b %s (%s)\n" "$CYAN" "$NC" "$detected_runtime" "infocyph/llm-ollama:$detected_arch"
+    detected_provider="$(ai_provider_for_runtime "$detected_runtime")"
+    detected_model="$(effective_ai_model "$detected_runtime")"
+    if [[ "$detected_provider" == "fastflow" ]]; then
+      detected_image="infocyph/llm-fastflow:latest"
+    else
+      detected_arch="$(llm_arch_for_runtime "$detected_runtime")"
+      detected_image="infocyph/llm-ollama:$detected_arch"
+    fi
+    printf "%bDetected local-AI runtime:%b %s (%s, %s, model %s)\n" \
+      "$CYAN" "$NC" "$detected_runtime" "$detected_provider" "$detected_image" "$detected_model"
   fi
 
   local defaults="${PROFILE_ENV[$profile]:-}"
@@ -250,9 +258,10 @@ setup_service() {
     LDS_AI_RUNTIME)
       val="${val,,}"
       case "$val" in
-      cpu | nvidia | amd) ;;
-      *) die "AI runtime must be cpu, nvidia, or amd" ;;
+      "" | auto | cpu | nvidia | amd | npu) ;;
+      *) die "AI runtime must be auto, cpu, nvidia, amd, or npu" ;;
       esac
+      [[ "$val" == "auto" ]] && val=""
       ;;
     esac
 
