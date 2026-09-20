@@ -293,8 +293,10 @@ Structured extraction is provider-specific:
 
 * FastFlow / Qwen3.5 uses native tool calling with a single ``submit_graph``
   function whose arguments follow Graphify's node/edge/hyperedge schema. The proxy
-  converts valid tool arguments back into the normal assistant JSON content that
-  Graphify already understands. FastFlow currently ignores OpenAI
+  requests FastFlow in streaming mode and stops reading as soon as FastFlow emits
+  the completed ``tool_calls`` delta, then converts that call into the normal
+  non-stream assistant JSON content Graphify expects. This avoids waiting for model
+  EOS on FastFlow's non-stream path. FastFlow currently ignores OpenAI
   ``response_format`` on its chat-completions path, so tool calling is the
   supported structured channel.
 * Ollama uses its OpenAI-compatible ``response_format.type=json_schema`` path with
@@ -309,8 +311,9 @@ general output allowance. LocalDevStack caps a structured extraction at 2048 out
 tokens and defaults each structured request to a 120-second timeout
 (``LDS_GRAPHIFY_STRUCTURED_TIMEOUT``). This is important for FastFlow because its
 Qwen3.5 non-stream tool parser recognizes ``<tool_call>`` only after generation
-finishes; without a smaller bound, a malformed/non-terminating tool response can run
-toward Graphify's 16384-token completion cap for many minutes.
+finishes. The LDS FastFlow adapter therefore consumes the streaming parser instead;
+the 2048-token/120-second bounds remain the safety ceiling if no complete tool call
+arrives.
 
 LocalDevStack deliberately performs exactly one provider-native structured request
 per Graphify extraction attempt. It does not add its own structured retry or
