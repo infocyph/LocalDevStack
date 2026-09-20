@@ -325,17 +325,62 @@ def _build_tool_recovery_request(body: bytes) -> bytes | None:
     return json.dumps(request, ensure_ascii=False).encode("utf-8")
 
 
-def _coerce_graph_array(value: Any) -> list[dict[str, Any]] | None:
-    if isinstance(value, str):
+def _decode_jsonish(value: Any) -> Any:
+    """Decode nested JSON strings produced by OpenAI-compatible tool adapters."""
+    current = value
+    for _ in range(3):
+        if not isinstance(current, str):
+            break
+        stripped = current.strip()
+        if not stripped:
+            break
         try:
-            value = json.loads(value)
+            current = json.loads(stripped)
         except json.JSONDecodeError:
-            return None
+            break
+    return current
+
+
+def _coerce_graph_array(value: Any) -> list[dict[str, Any]] | None:
+    value = _decode_jsonish(value)
     if not isinstance(value, list):
         return None
     if any(not isinstance(entry, dict) for entry in value):
         return None
     return value
+
+
+def _coerce_graph_object(value: Any) -> dict[str, Any] | None:
+    value = _decode_jsonish(value)
+    if not isinstance(value, dict):
+        return None
+
+    # Some OpenAI-compatible servers wrap the function payload one level deeper.
+    for wrapper in ("arguments", "graph", "payload", "data"):
+        if wrapper in value and not all(key in value for key in _GRAPH_KEYS):
+            nested = _decode_jsonish(value.get(wrapper))
+            if isinstance(nested, dict):
+                value = nested
+                break
+
+    graph: dict[str, Any] = {}
+    for key in _GRAPH_KEYS:
+        array = _coerce_graph_array(value.get(key))
+        if array is None:
+            return None
+        graph[key] = array
+    return graph
+
+
+def _tool_call_candidates(message: dict[str, Any]) -> list[dict[str, Any]]:
+    calls = message.get("tool_calls")
+    if isinstance(calls, list):
+        return [call for call in calls if isinstance(call, dict)]
+
+    single = message.get("tool_call")
+    if isinstance(single, dict):
+        return [single]
+    return []
 
 
 def _extract_graph_tool_result(body: bytes) -> dict[str, Any] | None:
@@ -352,33 +397,26 @@ def _extract_graph_tool_result(body: bytes) -> dict[str, Any] | None:
     message = choices[0].get("message")
     if not isinstance(message, dict):
         return None
-    tool_calls = message.get("tool_calls")
-    if not isinstance(tool_calls, list):
-        return None
 
-    for call in tool_calls:
-        if not isinstance(call, dict):
-            continue
+    for call in _tool_call_candidates(message):
         function = call.get("function")
-        if not isinstance(function, dict) or function.get("name") != "submit_graph":
-            continue
-        arguments = function.get("arguments")
-        if isinstance(arguments, str):
-            try:
-                arguments = json.loads(arguments)
-            except json.JSONDecodeError:
-                continue
-        if not isinstance(arguments, dict):
+        if isinstance(function, dict):
+            name = str(function.get("name", "")).strip()
+            arguments = function.get("arguments")
+        else:
+            # Tolerate flatter adapters that place name/arguments on the call.
+            name = str(call.get("name", "")).strip()
+            arguments = call.get("arguments")
+
+        graph = _coerce_graph_object(arguments)
+        if graph is None:
             continue
 
-        graph: dict[str, Any] = {}
-        for key in _GRAPH_KEYS:
-            value = _coerce_graph_array(arguments.get(key))
-            if value is None:
-                break
-            graph[key] = value
-        else:
+        # submit_graph is the only tool we provide. Accept a structurally valid
+        # graph even if FastFlow/Qwen adds harmless whitespace/name drift.
+        if not name or name == "submit_graph" or len(_tool_call_candidates(message)) == 1:
             return graph
+
     return None
 
 
@@ -483,6 +521,39 @@ def _request_metadata(body: bytes) -> dict[str, Any]:
         "max_completion_tokens": request.get("max_completion_tokens", request.get("max_tokens")),
         "stream": request.get("stream"),
     }
+
+
+def _tool_call_summary(body: bytes) -> str:
+    try:
+        response = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return "unparseable-response"
+    if not isinstance(response, dict):
+        return "non-object-response"
+
+    choices = response.get("choices")
+    if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+        return "no-choice"
+    message = choices[0].get("message")
+    if not isinstance(message, dict):
+        return "no-message"
+
+    summaries = []
+    for call in _tool_call_candidates(message):
+        function = call.get("function")
+        if isinstance(function, dict):
+            name = str(function.get("name", "")).strip() or "<empty>"
+            args = _decode_jsonish(function.get("arguments"))
+        else:
+            name = str(call.get("name", "")).strip() or "<empty>"
+            args = _decode_jsonish(call.get("arguments"))
+
+        if isinstance(args, dict):
+            summaries.append(f"{name}:keys={sorted(args.keys())}")
+        else:
+            summaries.append(f"{name}:args_type={type(args).__name__}")
+
+    return "; ".join(summaries) if summaries else "no-tool-calls"
 
 
 def _response_metadata(body: bytes) -> tuple[dict[str, Any], str | None]:
@@ -658,9 +729,11 @@ class DiagnosticHandler(BaseHTTPRequestHandler):
         if not suspect:
             reason = "structured response did not contain a usable provider-native graph"
 
+        tool_summary = _tool_call_summary(response_body)
         print(
             "[lds graphify] provider returned a suspect extraction response: "
-            f"reason={reason}; model={req.get('model')}; finish_reason={resp.get('finish_reason')}",
+            f"reason={reason}; model={req.get('model')}; finish_reason={resp.get('finish_reason')}; "
+            f"tool_calls={tool_summary}",
             file=sys.stderr,
             flush=True,
         )
