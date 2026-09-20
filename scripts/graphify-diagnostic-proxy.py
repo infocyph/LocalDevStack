@@ -455,6 +455,7 @@ class DiagnosticHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     upstream: str = ""
     provider: str = ""
+    diagnostics: bool = False
     log_file: Path
     preview_chars: int = 4096
 
@@ -525,14 +526,15 @@ class DiagnosticHandler(BaseHTTPRequestHandler):
                     replacement = _replace_response_content(response_body, graph)
                     if replacement is not None:
                         response_body = replacement
-                        print(
-                            "[lds graphify diagnostic] structured FastFlow graph via submit_graph tool: "
-                            f"model={metadata.get('model')}; think={metadata.get('think')}; "
-                            f"nodes={len(graph['nodes'])}; edges={len(graph['edges'])}; "
-                            f"hyperedges={len(graph['hyperedges'])}",
-                            file=sys.stderr,
-                            flush=True,
-                        )
+                        if self.diagnostics:
+                            print(
+                                "[lds graphify diagnostic] structured FastFlow graph via submit_graph tool: "
+                                f"model={metadata.get('model')}; think={metadata.get('think')}; "
+                                f"nodes={len(graph['nodes'])}; edges={len(graph['edges'])}; "
+                                f"hyperedges={len(graph['hyperedges'])}",
+                                file=sys.stderr,
+                                flush=True,
+                            )
                     else:
                         response_body = self._fallback_freeform(body)
                 else:
@@ -543,14 +545,15 @@ class DiagnosticHandler(BaseHTTPRequestHandler):
                 if graph is None:
                     response_body = self._fallback_freeform(body)
                 else:
-                    print(
-                        "[lds graphify diagnostic] structured Ollama graph via response_format schema: "
-                        f"model={metadata.get('model')}; reasoning_effort={metadata.get('reasoning_effort')}; "
-                        f"nodes={len(graph['nodes'])}; edges={len(graph['edges'])}; "
-                        f"hyperedges={len(graph['hyperedges'])}",
-                        file=sys.stderr,
-                        flush=True,
-                    )
+                    if self.diagnostics:
+                        print(
+                            "[lds graphify diagnostic] structured Ollama graph via response_format schema: "
+                            f"model={metadata.get('model')}; reasoning_effort={metadata.get('reasoning_effort')}; "
+                            f"nodes={len(graph['nodes'])}; edges={len(graph['edges'])}; "
+                            f"hyperedges={len(graph['hyperedges'])}",
+                            file=sys.stderr,
+                            flush=True,
+                        )
             else:
                 response_body = self._inspect_and_recover_chat_response(body, response_body, status)
 
@@ -568,7 +571,7 @@ class DiagnosticHandler(BaseHTTPRequestHandler):
         if fallback is None:
             return b'{"error":{"message":"Structured Graphify extraction failed and free-form fallback was unavailable"}}'
         print(
-            "[lds graphify diagnostic] submit_graph primary extraction did not yield a usable graph; "
+            "[lds graphify] structured extraction did not yield a usable graph; "
             "falling back to the original free-form Graphify request",
             file=sys.stderr,
             flush=True,
@@ -631,40 +634,48 @@ class DiagnosticHandler(BaseHTTPRequestHandler):
                 return replacement
 
         reason = original_reason
-        record = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "status": status,
-            "reason": reason,
-            **req,
-            **resp,
-            "assistant_content": content,
-        }
-        self.log_file.parent.mkdir(parents=True, exist_ok=True)
-        with self.log_file.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+        print(
+            "[lds graphify] provider returned a suspect extraction response: "
+            f"reason={reason}; model={req.get('model')}; finish_reason={resp.get('finish_reason')}",
+            file=sys.stderr,
+            flush=True,
+        )
 
-        preview = (content or "")[: self.preview_chars]
-        print(
-            "[lds graphify diagnostic] suspect LLM response: "
-            f"reason={reason}; model={req.get('model')}; "
-            f"think={req.get('think')}; reasoning_effort={req.get('reasoning_effort')}; "
-            f"finish_reason={resp.get('finish_reason')}; "
-            f"prompt_tokens={resp.get('prompt_tokens')}; "
-            f"completion_tokens={resp.get('completion_tokens')}",
-            file=sys.stderr,
-            flush=True,
-        )
-        print(
-            f"[lds graphify diagnostic] assistant content preview ({len(preview)}/{len(content or '')} chars): "
-            f"{preview!r}",
-            file=sys.stderr,
-            flush=True,
-        )
-        print(
-            f"[lds graphify diagnostic] full suspect response logged to {self.log_file}",
-            file=sys.stderr,
-            flush=True,
-        )
+        if self.diagnostics:
+            record = {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "status": status,
+                "reason": reason,
+                **req,
+                **resp,
+                "assistant_content": content,
+            }
+            self.log_file.parent.mkdir(parents=True, exist_ok=True)
+            with self.log_file.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+            preview = (content or "")[: self.preview_chars]
+            print(
+                "[lds graphify diagnostic] suspect LLM response: "
+                f"reason={reason}; model={req.get('model')}; "
+                f"think={req.get('think')}; reasoning_effort={req.get('reasoning_effort')}; "
+                f"finish_reason={resp.get('finish_reason')}; "
+                f"prompt_tokens={resp.get('prompt_tokens')}; "
+                f"completion_tokens={resp.get('completion_tokens')}",
+                file=sys.stderr,
+                flush=True,
+            )
+            print(
+                f"[lds graphify diagnostic] assistant content preview ({len(preview)}/{len(content or '')} chars): "
+                f"{preview!r}",
+                file=sys.stderr,
+                flush=True,
+            )
+            print(
+                f"[lds graphify diagnostic] full suspect response logged to {self.log_file}",
+                file=sys.stderr,
+                flush=True,
+            )
         if recovery is not None:
             print(
                 "[lds graphify diagnostic] structured submit_graph recovery did not yield a usable graph; "
@@ -683,6 +694,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--upstream", required=True)
     parser.add_argument("--provider", required=True, choices=("fastflow", "ollama"))
+    parser.add_argument("--diagnostics", choices=("on", "off"), default="off")
     parser.add_argument("--ready-file", required=True)
     parser.add_argument("--log-file", required=True)
     parser.add_argument("--preview-chars", type=int, default=4096)
@@ -690,6 +702,7 @@ def main() -> int:
 
     DiagnosticHandler.upstream = args.upstream
     DiagnosticHandler.provider = args.provider
+    DiagnosticHandler.diagnostics = args.diagnostics == "on"
     DiagnosticHandler.log_file = Path(args.log_file)
     DiagnosticHandler.preview_chars = max(256, args.preview_chars)
 
