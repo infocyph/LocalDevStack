@@ -420,7 +420,7 @@ cmd_config() {
 
 cmd_images() {
   local elastic
-  elastic="$(compose_control_value ELASTICSEARCH_VERSION latest)"
+  elastic="$(compose_control_value ELASTICSEARCH_VERSION 9.5.4)"
 
   printf '%-16s %s\n' "Tools" "infocyph/tools:latest"
   printf '%-16s %s\n' "Runner" "infocyph/runner:latest"
