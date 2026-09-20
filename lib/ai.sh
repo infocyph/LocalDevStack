@@ -29,14 +29,35 @@ cmd_ai() {
   esac
 }
 
-_graphify_local_base_url() {
-  local provider_ctr nginx_ctr
+_active_llm_runtime() {
+  effective_ai_runtime
+}
 
-  provider_ctr="$(docker_compose ps -q llm-ollama 2>/dev/null | sed -n '1p' || true)"
+_active_llm_service() {
+  ai_service_for_runtime "$(_active_llm_runtime)"
+}
+
+_active_llm_provider() {
+  ai_provider_for_runtime "$(_active_llm_runtime)"
+}
+
+_active_llm_cli() {
+  case "$(_active_llm_provider)" in
+  fastflow) printf '%s' llm-fastflow ;;
+  ollama) printf '%s' llm-ollama ;;
+  *) return 1 ;;
+  esac
+}
+
+_graphify_local_base_url() {
+  local service provider_ctr nginx_ctr
+  service="$(_active_llm_service)"
+
+  provider_ctr="$(docker_compose ps -q "$service" 2>/dev/null | sed -n '1p' || true)"
   [[ -n "$provider_ctr" ]] ||
-    die "llm-ollama is not running. Enable the ai profile and start the stack first."
+    die "$service is not running. Enable the ai profile and start the stack first."
   docker inspect -f '{{.State.Running}}' "$provider_ctr" 2>/dev/null | grep -qx true ||
-    die "llm-ollama container exists but is not running."
+    die "$service container exists but is not running."
 
   nginx_ctr="$(docker_compose ps -q nginx 2>/dev/null | sed -n '1p' || true)"
   [[ -n "$nginx_ctr" ]] ||
@@ -44,16 +65,19 @@ _graphify_local_base_url() {
   docker inspect -f '{{.State.Running}}' "$nginx_ctr" 2>/dev/null | grep -qx true ||
     die "nginx container exists but is not running."
 
-  printf '%s' 'http://llm-ollama.localhost:11434/v1'
+  printf '%s' 'http://llm.localhost:11434/v1'
 }
 
 _graphify_local_model_preflight() {
-  local model="${1:-}"
+  local model="${1:-}" response
   [[ -n "$model" ]] || return 1
+  need_bin curl "install curl to validate the selected LocalDevStack model"
 
-  if ! docker_compose exec -T llm-ollama /bin/ollama show "$model" >/dev/null 2>&1; then
-    die "Ollama model '$model' is not available in LocalDevStack. Run: lds llm pull $model"
-  fi
+  response="$(curl --connect-timeout 3 --max-time 10 -fsS     'http://llm.localhost:11434/v1/models' 2>/dev/null)" ||
+    die "The selected LocalDevStack LLM endpoint is unavailable. Start the ai profile first."
+
+  printf '%s' "$response" | grep -Fq ""$model"" ||
+    die "Model '$model' is not available from the active LocalDevStack provider. Run: lds llm pull $model"
 }
 
 cmd_graphify() {
@@ -71,7 +95,7 @@ cmd_graphify() {
     local_provider=1
   fi
   timeout="${GRAPHIFY_API_TIMEOUT:-$(compose_control_value LDS_AI_TIMEOUT 1800)}"
-  model="${OLLAMA_MODEL:-$(compose_control_value LDS_AI_MODEL qwen3:14b)}"
+  model="${OLLAMA_MODEL:-$(effective_ai_model "$(_active_llm_runtime)")}"
   api_key="${OLLAMA_API_KEY:-local}"
 
   # Keep explicit model/timeout overrides consistent across extraction and clustering.
@@ -121,15 +145,25 @@ cmd_graphify() {
 }
 
 _llm_exec() {
-  local ctr
-  ctr="$(docker_compose ps -q llm-ollama 2>/dev/null | sed -n '1p' || true)"
-  [[ -n "$ctr" ]] || die "llm-ollama is not running. Enable the ai profile and start the stack first."
+  local service cli ctr
+  service="$(_active_llm_service)"
+  cli="$(_active_llm_cli)"
+
+  ctr="$(docker_compose ps -q "$service" 2>/dev/null | sed -n '1p' || true)"
+  [[ -n "$ctr" ]] || die "$service is not running. Enable the ai profile and start the stack first."
   docker inspect -f '{{.State.Running}}' "$ctr" 2>/dev/null | grep -qx true ||
-    die "llm-ollama container exists but is not running."
+    die "$service container exists but is not running."
 
   local -a exec_args=(exec)
   [[ -t 0 && -t 1 ]] || exec_args+=(-T)
-  docker_compose "${exec_args[@]}" llm-ollama llm-ollama "$@"
+  docker_compose "${exec_args[@]}" "$service" "$cli" "$@"
+}
+
+_llm_require_provider() {
+  local expected="$1" command="$2" active
+  active="$(_active_llm_provider)"
+  [[ "$active" == "$expected" ]] ||
+    die "llm $command is available only with the $expected provider; active provider is $active."
 }
 
 cmd_llm() {
@@ -140,31 +174,71 @@ cmd_llm() {
   runtime)
     local mode="${1:-}"
     if [[ -z "$mode" ]]; then
-      printf '%s\n' "$(compose_control_value LDS_AI_RUNTIME "$(detect_ai_runtime)")"
+      printf '%s\n' "$(_active_llm_runtime)"
       return 0
     fi
+
     case "${mode,,}" in
-    cpu | nvidia | amd)
-      local normalized arch igpu_enable
+    auto)
+      update_env "$ENV_DOCKER" LDS_AI_RUNTIME ""
+      update_env "$ENV_DOCKER" LDS_LLM_ARCH ""
+      update_env "$ENV_DOCKER" LDS_AI_IGPU_ENABLE ""
+      local detected
+      detected="$(detect_ai_runtime)"
+      ok "LLM runtime set to auto; detected $detected ($(ai_provider_for_runtime "$detected")). Recreate the AI service to apply it."
+      ;;
+    cpu | nvidia | amd | npu)
+      local normalized arch igpu_enable provider image
       normalized="${mode,,}"
       arch="$(llm_arch_for_runtime "$normalized")"
       igpu_enable="$(ai_igpu_default_for_runtime "$normalized")"
+      provider="$(ai_provider_for_runtime "$normalized")"
+
+      if [[ "$normalized" == "npu" ]] && ! fastflow_npu_supported; then
+        warn "No FastFlow-supported XDNA2 NPU is currently detected; the explicit npu runtime will still be persisted."
+      fi
+
       update_env "$ENV_DOCKER" LDS_AI_RUNTIME "$normalized"
       update_env "$ENV_DOCKER" LDS_LLM_ARCH "$arch"
       update_env "$ENV_DOCKER" LDS_AI_IGPU_ENABLE "$igpu_enable"
-      ok "LLM runtime set to $normalized (infocyph/llm-ollama:$arch, iGPU=$igpu_enable). Recreate llm-ollama to apply the change."
+
+      if [[ "$provider" == "fastflow" ]]; then
+        image="infocyph/llm-fastflow:latest"
+      else
+        image="infocyph/llm-ollama:$arch"
+      fi
+      ok "LLM runtime set to $normalized ($provider, $image). Recreate the AI service to apply the change."
       ;;
-    *) die "llm runtime <cpu|nvidia|amd>" ;;
+    *) die "llm runtime <auto|cpu|nvidia|amd|npu>" ;;
     esac
     ;;
-  models | ps | show | pull | rm | unload | run | ask | chat | prompt | code | review | json | ai-commit | ollama | api | version)
+
+  models | list | pull | rm | remove | run | ask | chat | prompt | code | review | json | ai-commit | api | version)
     _llm_exec "${sub,,}" "$@"
     ;;
-  help | -h | --help)
-    printf '%s\n' "llm <models|ps|show|pull|rm|unload|run|ask|chat|prompt|code|review|json|ai-commit|ollama|api|version>"
-    printf '%s\n' "llm runtime <cpu|nvidia|amd>"
+
+  ps | show | unload | ollama)
+    _llm_require_provider ollama "${sub,,}"
+    _llm_exec "${sub,,}" "$@"
     ;;
-  *) die "llm <models|ps|show|pull|rm|unload|run|ask|chat|prompt|code|review|json|ai-commit|ollama|api|version|runtime>" ;;
+
+  validate | check | flm)
+    _llm_require_provider fastflow "${sub,,}"
+    _llm_exec "${sub,,}" "$@"
+    ;;
+
+  provider)
+    printf '%s\n' "$(_active_llm_provider)"
+    ;;
+
+  help | -h | --help)
+    printf '%s\n' "llm <models|pull|rm|run|ask|chat|prompt|code|review|json|ai-commit|api|version>"
+    printf '%s\n' "llm provider"
+    printf '%s\n' "llm runtime <auto|cpu|nvidia|amd|npu>"
+    printf '%s\n' "Ollama-only: llm <ps|show|unload|ollama>"
+    printf '%s\n' "FastFlow-only: llm <validate|check|flm>"
+    ;;
+
+  *) die "llm <models|pull|rm|run|ask|chat|prompt|code|review|json|ai-commit|api|version|provider|runtime>" ;;
   esac
 }
-
