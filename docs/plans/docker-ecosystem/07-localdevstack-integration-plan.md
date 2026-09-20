@@ -1895,10 +1895,10 @@ This LocalDevStack phase is complete when all of the following are true:
 9. Mailpit remains persistent and TLS-capable.
 10. Runner cron/Supervisor/logrotate workflows still work.
 11. AI can be omitted completely with no degradation to the default product.
-12. When AI is enabled, `llm-ollama` persists models and is reachable internally at `http://llm-ollama:11434`.
-13. `https://llm-ollama.localhost` works through Nginx streaming proxy behavior.
-14. Tools `askai`, `aiops` and AI-enabled `gitx` use the separate LLM provider.
-15. No LocalDevStack component embeds a second Ollama runtime.
+12. When AI is enabled, exactly one provider is active: FastFlow for supported XDNA2 NPU, otherwise Ollama.
+13. The active provider persists its own model store and owns the common `llm:11434` identity; `https://llm.localhost` and loopback-only `http://127.0.0.1:11434` work through Nginx.
+14. Tools `askai` / `aiops`, Graphify, and the provider CLIs use the common OpenAI-compatible LLM route; provider-specific native routes remain diagnostic/low-level only.
+15. No LocalDevStack component embeds a second model runtime or starts both `llm-fastflow` and `llm-ollama` for one stack.
 16. No AI component auto-executes model-generated commands.
 17. Existing user volumes and env overrides survive upgrade.
 18. Docker socket exposure is documented and limited to components that actually require it.
@@ -2021,13 +2021,14 @@ All planned LocalDevStack integration batches are implemented on branch `plan/do
 
 4. **Batch 4 — optional AI integration**
    - optional `ai` profile;
-   - persistent `LLMModels`;
-   - CPU/NVIDIA/AMD modes;
-   - `https://llm-ollama.localhost`;
-   - Nginx-owned loopback-only native Ollama port;
-   - Tools consumer wiring;
+   - mutually-exclusive FastFlow/Ollama provider services behind common `llm:11434`;
+   - persistent `LLMModels` and `LLMFastFlowModels`;
+   - XDNA2 NPU / NVIDIA / AMD ROCm / CPU runtime modes with automatic detection;
+   - `https://llm.localhost` plus provider-specific diagnostic routes;
+   - Nginx-owned loopback-only common native API port;
+   - provider-neutral Tools consumer wiring;
    - `lds ai` / `lds llm` separation;
-   - fake-provider integration test.
+   - common OpenAI-compatible fake-provider integration test.
 
 5. **Batch 5 — profiles/catalog/runtime defaults**
    - canonical host service catalog;
@@ -2072,7 +2073,7 @@ All planned LocalDevStack integration batches are implemented on branch `plan/do
 - Prefer a moving Alpine variant when an image family provides a suitable one; otherwise use its normal moving latest alias.
 - PostgreSQL defaults to `postgres:alpine`.
 - Tools, Runner, Nginx and Apache consume their published `:latest` aliases.
-- One LLM service uses `infocyph/llm-ollama:${LDS_LLM_ARCH}`; CPU/NVIDIA map to `latest`, AMD/ROCm maps to `amd-latest`.
+- Exactly one LLM provider is active: XDNA2 NPU uses `infocyph/llm-fastflow:latest`; CPU/NVIDIA use `infocyph/llm-ollama:latest`; AMD/ROCm uses `infocyph/llm-ollama:amd-latest`.
 - Elasticsearch, Kibana and Filebeat share the `ELASTICSEARCH_VERSION` selector and currently default to stable `9.5.4`, because the required Elastic image set has no usable moving `latest` alias.
 - PHP/Node runtime selection remains user-driven and version-specific.
 - Existing named volumes and container names remain intentionally stable for this release.
@@ -2084,7 +2085,6 @@ These remain future work rather than release blockers:
 - multi-instance container/volume namespacing;
 - automatic dependency-update PRs;
 - Docker socket proxy if it can reduce privilege without breaking supported workflows;
-- automatic GPU detection;
 - Graphify installation/management;
 - additional browser AI UI;
 - automatic model downloads beyond the provider defaults.
@@ -2098,11 +2098,12 @@ Audit window: approximately **2026-09-16 13:53 Asia/Dhaka through 2026-09-18**.
 
 Compared LocalDevStack against the current related releases/main contracts:
 
-- Tools **0.23.2**
+- Tools **0.25**
 - Runner **0.5**
-- Nginx **0.4.1**
+- Nginx **0.6**
 - Apache **0.4.2**
-- LLM-Ollama **current stable**
+- LLM-FastFlow **0.01.2**
+- LLM-Ollama **0.05**
 - Toolset **2.0**
 - Scriptomatic current `main`
 
@@ -2114,13 +2115,13 @@ No legacy LocalDevStack command/service/storage feature was removed:
 
 - all **60** old public/support `lds` functions still exist after modularization;
 - all **9** old `bin/*` wrappers remain;
-- all **16** old Compose services remain;
-- all **19** old named volumes remain.
+- all **16** old Compose services remain; the current graph has **18** services after adding the two mutually-exclusive LLM provider definitions;
+- all **19** old named volumes remain; the current graph has **22** named volumes after adding the two provider stores and Tools durable state.
 
 New runtime additions are additive:
 
-- `llm-ollama`;
-- `LLMModels`;
+- `llm-ollama` and `llm-fastflow` provider definitions (mutually exclusive at runtime);
+- `LLMModels` and `LLMFastFlowModels`;
 - `ToolsState`;
 - AI/QoL/diagnostic commands.
 
@@ -2184,18 +2185,20 @@ profile bridge would regress Admin Panel-created Apache hosts.
 
 This is a non-blocking follow-up, not a release defect.
 
-## LLM-Ollama capability boundaries
+## LLM provider capability boundaries
 
-The current published LLM-Ollama image contract is **linux/amd64 only**. LocalDevStack
-remains usable on arm64 with the `ai` profile disabled.
+The published FastFlow and Ollama provider contracts used by this integration are
+**linux/amd64** AI runtimes. LocalDevStack remains usable with the `ai` profile disabled
+on unsupported platforms.
 
-LocalDevStack intentionally does not mount a repository/workspace into `llm-ollama` by
-default. Direct model/API/chat/stdin workflows are supported. Repository-aware analysis
-is supported through the Tools consumer layer (`lds ai review`, `repo-review`).
+LocalDevStack intentionally does not mount a repository/workspace into either provider
+by default. Direct model/API/chat/stdin workflows are supported through the active
+provider, while repository-aware analysis remains available through the Tools consumer
+layer (`lds ai review`, `repo-review`) and explicit provider workspace features when a
+user intentionally enables them.
 
-The upstream optional workspace override is not automatically enabled because doing so
-would weaken the no-repository-ingestion default and still requires explicit Git
-safe-directory/identity decisions for writable repository operations.
+Exactly one provider runs for a stack. FastFlow owns supported XDNA2 NPU execution;
+Ollama owns NVIDIA, AMD ROCm and CPU execution.
 
 ## Lower-layer compatibility notes
 
@@ -2213,16 +2216,20 @@ safe-directory/identity decisions for writable repository operations.
 
 ## Readiness conclusion
 
-After the corrections above, there is no identified legacy feature loss or current
-cross-image release blocker. The remaining items are explicit optional/future capability
-work rather than regressions.
+After the corrections above and the final 2026-09-20 provider integration, there is no
+identified legacy feature loss or current cross-image release blocker. Tools 0.25,
+Nginx 0.6, FastFlow 0.01.2 and Ollama 0.05 are validated by the current compatibility
+gate. The remaining items are explicit optional/future capability work rather than
+regressions.
 
 
 ---
 
-# Final implementation simplification — single LLM service and fixed infrastructure images
+# Historical interim simplification — fixed infrastructure images
 
-This section supersedes earlier planning text in this file wherever it conflicts with the final implementation.
+This section records the pre-FastFlow simplification that established fixed infrastructure
+images and ephemeral GPU augmentation. Its Ollama-only provider statements are superseded
+by the **Final AI provider architecture override — 2026-09-20** below.
 
 ## Fixed infrastructure images
 
@@ -2237,70 +2244,27 @@ infocyph/apache:latest
 
 Do not add `LDS_TOOLS_IMAGE`, `LDS_RUNNER_IMAGE`, `LDS_NGINX_IMAGE`, or `LDS_APACHE_IMAGE` indirection. `docker/release.env` is reserved for release/build defaults that genuinely vary, currently including `SCRIPTOMATIC_REF`.
 
-## Single LLM service
+## Provider-service evolution
 
-The only tracked LLM service definition lives in:
+The earlier implementation temporarily tracked only `llm-ollama` in
+`docker/compose/companion.yaml`, with CPU/NVIDIA mapped to `latest` and AMD/ROCm to
+`amd-latest`. That intermediate state established the generated NVIDIA/ROCm hardware
+augmentation and Nginx-owned loopback publication.
 
-```text
-docker/compose/companion.yaml
-```
-
-with:
-
-```yaml
-llm-ollama:
-  container_name: LLM_OLLAMA
-  image: infocyph/llm-ollama:${LDS_LLM_ARCH}
-  profiles: [ai]
-  environment:
-    LLM_OLLAMA_MODEL: ${LDS_AI_MODEL:-qwen3:14b}
-    OLLAMA_IGPU_ENABLE: ${LDS_AI_IGPU_ENABLE:-0}
-    # provider input/PDF/Ollama tuning values are forwarded from docker/.env
-```
-
-There are no tracked `ai.yaml`, `ai-nvidia.yaml`, `ai-amd.yaml`, or
-`ai-host-port.yaml` files. Do not reintroduce them.
-
-Runtime/tag mapping is:
+The final implementation now tracks both provider definitions in the same companion file
+and enables exactly one through generated profile selection:
 
 ```text
-cpu     -> LDS_LLM_ARCH=latest
-nvidia  -> LDS_LLM_ARCH=latest
-amd     -> LDS_LLM_ARCH=amd-latest
+npu     -> llm-fastflow / infocyph/llm-fastflow:latest
+nvidia  -> llm-ollama  / infocyph/llm-ollama:latest
+amd     -> llm-ollama  / infocyph/llm-ollama:amd-latest
+cpu     -> llm-ollama  / infocyph/llm-ollama:latest
 ```
 
-Initial runtime detection is conservative:
-
-- usable `nvidia-smi` / `nvidia-smi.exe` -> `nvidia`;
-- both `/dev/kfd` and `/dev/dri` present -> `amd`;
-- otherwise -> `cpu`.
-
-An AMD CPU alone does not select the ROCm image. When the effective runtime is `amd`
-and the host CPU vendor is AMD, persist `LDS_AI_IGPU_ENABLE=1` and forward it to the
-provider as `OLLAMA_IGPU_ENABLE=1`; otherwise the derived default is `0`. This avoids
-Ollama's integrated-GPU filter silently dropping Ryzen integrated Radeon devices that are
-otherwise available through the ROCm device nodes.
-
-Explicit `LDS_AI_RUNTIME` / `lds llm runtime ...` selection remains authoritative.
-`LDS_LLM_ARCH` and the automatic `LDS_AI_IGPU_ENABLE` value are derived from that
-effective runtime/host combination and must not become independent image-version
-selectors. A deliberately persisted iGPU override remains user-controlled until the
-runtime selector is invoked again.
-
-## Ephemeral hardware Compose augmentation
-
-Hardware settings are generated by `lds` only for the current Compose invocation:
-
-- NVIDIA -> `gpus: all`;
-- AMD -> `/dev/kfd` and `/dev/dri`.
-
-The generated fragment is temporary, is not part of `configuration/compose/`, and is
-removed after the Compose command completes. Native Ollama host access is not part of
-this fragment; Nginx owns the fixed loopback-only `127.0.0.1:11434` publication.
-
-This keeps the repository at one LLM service definition while still avoiding invalid
-GPU/device declarations on unsupported hosts.
-
+NVIDIA/ROCm hardware augmentation remains ephemeral; FastFlow's XDNA2
+`/dev/accel/accel0` + memlock contract is part of its tracked service definition.
+Nginx continues to own loopback-only `127.0.0.1:11434`, now proxying the common
+`llm:11434` alias.
 
 ---
 
