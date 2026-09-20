@@ -188,6 +188,7 @@ pass "Graphify local providers enforce structured no-thinking contracts"
 python3 -m py_compile "$ROOT/scripts/graphify-diagnostic-proxy.py"
 python3 - "$ROOT/scripts/graphify-diagnostic-proxy.py" <<'PY'
 import importlib.util
+import io
 import json
 import sys
 
@@ -257,6 +258,7 @@ assert recovery is not None
 recovery_json = json.loads(recovery)
 assert recovery_json["tools"][0]["function"]["name"] == "submit_graph"
 assert recovery_json["tool_choice"] == "auto"
+assert recovery_json["stream"] is True
 assert recovery_json["think"] is False
 assert "STRUCTURED OUTPUT" in recovery_json["messages"][0]["content"]
 assert recovery_json["temperature"] == 0
@@ -321,6 +323,47 @@ assert graph == {
 }
 
 assert module._extract_fastflow_structured_graph(json.dumps(tool_response).encode()) == graph
+
+sse_tool_event = {
+    "id": "chatcmpl-stream-test",
+    "object": "chat.completion.chunk",
+    "model": "qwen3.5:9b",
+    "choices": [{
+        "index": 0,
+        "delta": {
+            "tool_calls": [{
+                "index": 0,
+                "id": "call_stream",
+                "type": "function",
+                "function": {
+                    "name": "submit_graph",
+                    "arguments": json.dumps(graph),
+                },
+            }],
+        },
+        "finish_reason": None,
+    }],
+}
+sse_tail = {
+    "id": "chatcmpl-stream-test",
+    "object": "chat.completion.chunk",
+    "model": "qwen3.5:9b",
+    "choices": [{
+        "index": 0,
+        "delta": {"content": None},
+        "finish_reason": "tool_calls",
+    }],
+    "usage": {"prompt_tokens": 100, "completion_tokens": 30, "total_tokens": 130},
+}
+stream_bytes = (
+    "data: " + json.dumps(sse_tool_event) + "\n\n"
+    + "data: " + json.dumps(sse_tail) + "\n\n"
+    + "data: [DONE]\n\n"
+).encode()
+collapsed = module._fastflow_stream_completion(io.BytesIO(stream_bytes), "qwen3.5:9b")
+collapsed_json = json.loads(collapsed)
+assert collapsed_json["choices"][0]["finish_reason"] == "tool_calls"
+assert module._extract_fastflow_structured_graph(collapsed) == graph
 
 content_only_response = {
     "choices": [{
