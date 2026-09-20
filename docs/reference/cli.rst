@@ -266,6 +266,13 @@ The common Docker/API identity is ``llm:11434`` and the user-facing route is
 ``https://llm.localhost``. Nginx publishes the common native API loopback-only at
 ``http://127.0.0.1:11434``.
 
+Generic service operations also accept ``llm`` and resolve it to the active provider::
+
+   lds logs llm
+   lds restart llm
+   lds exec llm ...
+   lds rebuild llm
+
 Provider defaults are ``qwen3.5:9b`` for FastFlow/NPU and ``qwen3:14b`` for Ollama.
 Leaving ``LDS_AI_MODEL`` blank allows the runtime-specific default to apply.
 Rebuild
