@@ -1945,12 +1945,21 @@ LDS_LLM_ARCH=latest
 
 Other runtime defaults follow the same rule. PostgreSQL uses `postgres:alpine`; MySQL, MariaDB, MongoDB, Redis Stack/Redis Insight, CloudBeaver, Mongo Express and Mailpit use their normal moving latest tags because the selected image family does not provide a suitable moving Alpine alias for this stack.
 
-## Elastic moving-tag policy
+## Elastic current-release exception
 
-Elasticsearch, Kibana and Filebeat use the same `ELASTICSEARCH_VERSION` selector and
-default to `latest`. This follows the product-wide moving-tag policy instead of pinning
-LocalDevStack to an older tested release. The three services must continue to use the
-same selector so a user override advances or pins them together.
+The Elastic image set used by LocalDevStack does not expose a usable moving `latest`
+alias. Elasticsearch, Kibana and Filebeat therefore share one
+`ELASTICSEARCH_VERSION` selector and default to the newest stable release verified by
+the compatibility gate.
+
+Current default:
+
+```text
+9.5.4
+```
+
+Advance this single selector when Elastic publishes a newer stable release; all three
+services and their contract tests must move together.
 
 ## Override precedence
 
@@ -2064,7 +2073,7 @@ All planned LocalDevStack integration batches are implemented on branch `plan/do
 - PostgreSQL defaults to `postgres:alpine`.
 - Tools, Runner, Nginx and Apache consume their published `:latest` aliases.
 - One LLM service uses `infocyph/llm-ollama:${LDS_LLM_ARCH}`; CPU/NVIDIA map to `latest`, AMD/ROCm maps to `amd-latest`.
-- Elasticsearch, Kibana and Filebeat share the `ELASTICSEARCH_VERSION` selector and default to the moving `latest` tag.
+- Elasticsearch, Kibana and Filebeat share the `ELASTICSEARCH_VERSION` selector and currently default to stable `9.5.4`, because the required Elastic image set has no usable moving `latest` alias.
 - PHP/Node runtime selection remains user-driven and version-specific.
 - Existing named volumes and container names remain intentionally stable for this release.
 
