@@ -29,6 +29,29 @@ for image in "${images[@]}"; do
 done
 pass "published infrastructure compatibility images exist"
 
+moving_images=(
+  "postgres:alpine"
+  "mysql:latest"
+  "mariadb:latest"
+  "mongo:latest"
+  "redis/redis-stack-server:latest"
+  "redis/redisinsight:latest"
+  "dbeaver/cloudbeaver:latest"
+  "mongo-express:latest"
+  "axllent/mailpit:latest"
+  "elasticsearch:latest"
+  "kibana:latest"
+  "docker.elastic.co/beats/filebeat:latest"
+  "infocyph/llm-ollama:latest"
+  "infocyph/llm-ollama:amd-latest"
+)
+
+for image in "${moving_images[@]}"; do
+  printf 'Checking moving image alias %s\n' "$image"
+  docker manifest inspect "$image" >/dev/null
+done
+pass "all configured moving image aliases resolve"
+
 for image in "$tools_image" "$runner_image"; do
   health="$(docker image inspect "$image" --format '{{json .Config.Healthcheck}}')"
   [[ -n "$health" && "$health" != "null" ]] || fail "$image must publish a healthcheck"
