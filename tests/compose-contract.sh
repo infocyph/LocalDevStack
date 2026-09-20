@@ -108,9 +108,9 @@ elastic_json="$("${compose[@]}" --profile elasticsearch --profile filebeat confi
 python3 -c '
 import json,sys
 d=json.load(sys.stdin)
-assert d["services"]["elasticsearch"]["image"] == "elasticsearch:latest"
-assert d["services"]["kibana"]["image"] == "kibana:latest"
-assert d["services"]["filebeat"]["image"] == "docker.elastic.co/beats/filebeat:latest"
+assert d["services"]["elasticsearch"]["image"] == "elasticsearch:9.5.4"
+assert d["services"]["kibana"]["image"] == "kibana:9.5.4"
+assert d["services"]["filebeat"]["image"] == "docker.elastic.co/beats/filebeat:9.5.4"
 ' <<<"$elastic_json"
 pass "Elastic stack uses aligned current-stable tags because latest is unsupported"
 
