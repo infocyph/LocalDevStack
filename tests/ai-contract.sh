@@ -106,3 +106,35 @@ pass "LLM CLI and Graphify resolve through active provider/common endpoint"
   fi
 )
 pass "Graphify validates either provider model through /v1/models"
+
+
+(
+  set -euo pipefail
+  # shellcheck source=lib/services.sh
+  source "$ROOT/lib/services.sh"
+
+  normalize_service() { printf '%s' "${1,,}"; }
+  docker() { return 1; }
+
+  __test_runtime=npu
+  effective_ai_runtime() { printf '%s' "$__test_runtime"; }
+  ai_service_for_runtime() {
+    case "${1,,}" in
+      npu) printf '%s' llm-fastflow ;;
+      *) printf '%s' llm-ollama ;;
+    esac
+  }
+  compose_service_exists() {
+    case "$1" in
+      llm-fastflow|llm-ollama) return 0 ;;
+      *) return 1 ;;
+    esac
+  }
+
+  [[ "$(resolve_service llm)" == "llm-fastflow" ]] ||
+    fail "common llm alias did not resolve FastFlow for NPU runtime"
+  __test_runtime=cpu
+  [[ "$(resolve_service llm)" == "llm-ollama" ]] ||
+    fail "common llm alias did not resolve Ollama for CPU runtime"
+)
+pass "generic service commands resolve llm to the active provider"
