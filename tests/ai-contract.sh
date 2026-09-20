@@ -106,7 +106,9 @@ assert_file_contains "$ROOT/lib/ai.sh" 'http://127.0.0.1:${proxy_port}/v1'
 assert_file_contains "$ROOT/lib/ai.sh" '--provider "$provider"'
 assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_DIAGNOSTICS:-0'
 assert_file_contains "$ROOT/lib/ai.sh" '--diagnostics "$diagnostic_mode"'
-assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_STRUCTURED_TIMEOUT:-300'
+assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_STRUCTURED_TIMEOUT:-120'
+assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_SDK_RETRIES:-0'
+assert_file_contains "$ROOT/lib/ai.sh" 'export GRAPHIFY_MAX_RETRIES="$graphify_sdk_retries"'
 assert_file_contains "$ROOT/lib/ai.sh" 'existing graph detected; using Graphify incremental update (changed files only)'
 assert_file_contains "$ROOT/lib/ai.sh" 'existing graph detected; --force requested, performing a full rebuild'
 assert_file_contains "$ROOT/lib/ai.sh" 'no existing graph detected; performing initial full build'
@@ -256,7 +258,7 @@ assert recovery_json["tool_choice"] == "auto"
 assert recovery_json["think"] is False
 assert "STRUCTURED OUTPUT" in recovery_json["messages"][0]["content"]
 assert recovery_json["temperature"] == 0
-assert recovery_json["max_completion_tokens"] == 4096
+assert recovery_json["max_completion_tokens"] == 2048
 
 assert recovery_json["tools"][0]["function"]["parameters"] == module._GRAPH_SCHEMA
 assert "rationale_for" not in module._GRAPH_SCHEMA["properties"]["edges"]["items"]["properties"]["relation"]["enum"]
@@ -278,7 +280,7 @@ ollama_json = json.loads(ollama_request)
 assert ollama_json["reasoning_effort"] == "none"
 assert ollama_json["options"]["num_ctx"] == 8192
 assert ollama_json["temperature"] == 0
-assert ollama_json["max_completion_tokens"] == 4096
+assert ollama_json["max_completion_tokens"] == 2048
 assert ollama_json["response_format"]["type"] == "json_schema"
 assert ollama_json["response_format"]["json_schema"]["strict"] is True
 assert ollama_json["response_format"]["json_schema"]["schema"] == module._GRAPH_SCHEMA
@@ -333,11 +335,6 @@ assert module._extract_fastflow_structured_graph(
     json.dumps(content_only_response).encode()
 ) == graph
 
-retry = module._build_tool_recovery_request(body, retry=True)
-assert retry is not None
-retry_json = json.loads(retry)
-assert "previous structured attempt" in retry_json["messages"][0]["content"]
-assert retry_json["max_completion_tokens"] == 4096
 replacement = module._replace_response_content(json.dumps(tool_response).encode(), graph)
 assert replacement is not None
 replacement_json = json.loads(replacement)
@@ -346,6 +343,16 @@ assert json.loads(message["content"]) == graph
 assert "tool_calls" not in message
 assert "reasoning_content" not in message
 assert replacement_json["choices"][0]["finish_reason"] == "stop"
+
+split = module._graphify_split_response(json.dumps(tool_response).encode(), "qwen3.5:9b")
+split_json = json.loads(split)
+assert split_json["model"] == "qwen3.5:9b"
+assert split_json["choices"][0]["finish_reason"] == "length"
+assert json.loads(split_json["choices"][0]["message"]["content"]) == {
+    "nodes": [],
+    "edges": [],
+    "hyperedges": [],
+}
 
 string_array_response = json.loads(json.dumps(tool_response))
 string_array_response["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"] = json.dumps({
