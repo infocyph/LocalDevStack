@@ -57,11 +57,12 @@ services:
   llm-ollama:
     container_name: LLM_OLLAMA
     hostname: llm-ollama
-    image: infocyph/llm-ollama:${LDS_LLM_ARCH}
+    image: infocyph/llm-ollama:latest
     restart: unless-stopped
     profiles: ["${LDS_AI_OLLAMA_PROFILE:-ai}"]
     environment:
       - LLM_OLLAMA_MODEL=${LDS_AI_MODEL:-qwen3:14b}
+      - LLM_THINK=${LDS_AI_THINK:-}
       - LLM_OLLAMA_SYSTEM=${LLM_OLLAMA_SYSTEM:-}
       - LLM_OLLAMA_INPUT_WARN_BYTES=${LLM_OLLAMA_INPUT_WARN_BYTES:-1048576}
       - LLM_OLLAMA_INPUT_MAX_BYTES=${LLM_OLLAMA_INPUT_MAX_BYTES:-0}
@@ -92,6 +93,7 @@ services:
     profiles: ["${LDS_AI_FASTFLOW_PROFILE:-__lds-ai-disabled-fastflow}"]
     environment:
       - LLM_FASTFLOW_MODEL=${LDS_AI_MODEL:-qwen3.5:9b}
+      - LLM_THINK=${LDS_AI_THINK:-}
       - FLM_MODEL_PATH=/models
       - FLM_SERVE_PORT=11434
       - FLM_HOST=0.0.0.0
