@@ -118,6 +118,15 @@ pass "CLI project identity follows the Compose project contract"
   [[ "$(llm_arch_for_runtime cpu)" == "latest" ]] || fail "CPU LLM tag drift"
   [[ "$(llm_arch_for_runtime nvidia)" == "latest" ]] || fail "NVIDIA LLM tag drift"
   [[ "$(llm_arch_for_runtime amd)" == "amd-latest" ]] || fail "AMD LLM tag drift"
+  [[ "$(llm_arch_for_runtime npu)" == "latest" ]] || fail "NPU compatibility tag drift"
+  [[ "$(ai_provider_for_runtime cpu)" == "ollama" ]] || fail "CPU provider drift"
+  [[ "$(ai_provider_for_runtime nvidia)" == "ollama" ]] || fail "NVIDIA provider drift"
+  [[ "$(ai_provider_for_runtime amd)" == "ollama" ]] || fail "AMD provider drift"
+  [[ "$(ai_provider_for_runtime npu)" == "fastflow" ]] || fail "NPU provider drift"
+  [[ "$(ai_service_for_runtime npu)" == "llm-fastflow" ]] || fail "NPU service drift"
+  [[ "$(ai_service_for_runtime cpu)" == "llm-ollama" ]] || fail "Ollama service drift"
+  [[ "$(ai_model_default_for_runtime npu)" == "qwen3.5:9b" ]] || fail "FastFlow model default drift"
+  [[ "$(ai_model_default_for_runtime cpu)" == "qwen3:14b" ]] || fail "Ollama model default drift"
   host_cpu_is_amd() { return 0; }
   [[ "$(ai_igpu_default_for_runtime amd)" == "1" ]] || fail "AMD CPU + AMD runtime must enable iGPU"
   [[ "$(ai_igpu_default_for_runtime cpu)" == "0" ]] || fail "CPU runtime must not enable iGPU"
@@ -125,7 +134,7 @@ pass "CLI project identity follows the Compose project contract"
   host_cpu_is_amd() { return 1; }
   [[ "$(ai_igpu_default_for_runtime amd)" == "0" ]] || fail "non-AMD CPU must not auto-enable iGPU"
 )
-pass "LLM runtime maps image tags and AMD CPU iGPU defaults deterministically"
+pass "LLM runtime maps mutually exclusive providers, models, tags and AMD iGPU defaults deterministically"
 
 ai_env_tmp="$(mktemp -d)"
 (
