@@ -206,32 +206,32 @@ Host Graphify Workflow
    lds graphify ./your-project
    lds graphify ./your-project --mode deep --token-budget 4000 --max-concurrency 1
 
-This command runs the host ``graphify`` CLI against LocalDevStack's Ollama provider.
+This command runs the host ``graphify`` CLI against the common LocalDevStack LLM route.
 It performs ``extract --backend ollama --no-cluster`` followed by
-``cluster-only <same-path> --backend ollama``, so clustering happens once.
+``cluster-only <same-path> --backend ollama`` so clustering happens once. Graphify's
+backend is currently named ``ollama`` even though LocalDevStack presents a provider-neutral
+OpenAI-compatible ``/v1`` endpoint.
 
 By default it derives:
 
-- ``OLLAMA_BASE_URL=http://llm-ollama.localhost:11434/v1``, routed through Nginx;
-- ``OLLAMA_MODEL`` from ``LDS_AI_MODEL``;
+- ``OLLAMA_BASE_URL=http://llm.localhost:11434/v1`` through Nginx;
+- ``OLLAMA_MODEL`` from the effective provider model;
 - ``GRAPHIFY_API_TIMEOUT`` from ``LDS_AI_TIMEOUT``.
 
-The stack and AI profile must be running; there is no separate host-port setup step.
-
-An explicitly supplied ``OLLAMA_BASE_URL`` overrides the default
-``http://llm-ollama.localhost:11434/v1`` endpoint.
+Before extraction, LocalDevStack checks ``/v1/models`` and fails immediately when the
+selected model is unavailable. An explicitly supplied ``OLLAMA_BASE_URL`` bypasses that
+local-provider preflight.
 
 LLM Provider
 ------------
 
 ::
 
+   lds llm provider
+   lds llm runtime
    lds llm models
-   lds llm ps
-   lds llm show ...
    lds llm pull ...
    lds llm rm ...
-   lds llm unload ...
    lds llm run ...
    lds llm ask ...
    lds llm chat ...
@@ -240,32 +240,34 @@ LLM Provider
    lds llm review ...
    lds llm json ...
    lds llm ai-commit ...
-   lds llm ollama ...
    lds llm api ...
    lds llm version
    lds llm help
 
-These commands execute the bundled provider CLI through LocalDevStack's Compose wrapper.
-Do not replace them with bare ``docker compose exec llm-ollama ...`` from the repository
-root; LocalDevStack has no root ``compose.yml``.
+These commands execute the active provider CLI through LocalDevStack's Compose wrapper.
+Exactly one provider is active: FastFlow for XDNA2 NPU, otherwise Ollama.
 
-``LDS_AI_MODEL`` is forwarded to the provider as ``LLM_OLLAMA_MODEL``, so
-``lds ai`` and ``lds llm`` share the configured default model. Provider input,
-attachment, PDF and Ollama runtime knobs are documented in :doc:`../guides/local-ai`.
+Provider-specific low-level commands are guarded:
+
+.. code-block:: text
+
+   Ollama-only:   ps, show, unload, ollama
+   FastFlow-only: validate, check, flm
 
 Runtime selection::
 
-   lds llm runtime
-   lds llm runtime <cpu|nvidia|amd>
+   lds llm runtime auto
+   lds llm runtime npu
+   lds llm runtime nvidia
+   lds llm runtime amd
+   lds llm runtime cpu
 
-The runtime command keeps the derived image tag in sync and also refreshes
-``LDS_AI_IGPU_ENABLE``. AMD runtime on an AMD CPU uses ``1`` so Ollama admits the
-integrated Radeon GPU; the other derived cases use ``0``.
+The common Docker/API identity is ``llm:11434`` and the user-facing route is
+``https://llm.localhost``. Nginx publishes the common native API loopback-only at
+``http://127.0.0.1:11434``.
 
-Native Ollama access is always routed through Nginx at
-``http://llm-ollama.localhost:11434``; the provider container itself is not
-published directly.
-
+Provider defaults are ``qwen3.5:9b`` for FastFlow/NPU and ``qwen3:14b`` for Ollama.
+Leaving ``LDS_AI_MODEL`` blank allows the runtime-specific default to apply.
 Rebuild
 -------
 
