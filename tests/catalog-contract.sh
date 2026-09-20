@@ -49,11 +49,11 @@ while IFS='|' read -r key profile display service_key version_env defaults promp
     ;;
   AI)
     [[ "$profile" == "ai" ]] || fail "AI profile must be ai"
-    [[ "$service_key" == "llm-ollama" ]] || fail "AI service key must be llm-ollama"
-    [[ "$runtime_modes" == "cpu,nvidia,amd" ]] || fail "AI runtime metadata drift"
-    [[ "$defaults" == *"LDS_AI_MODEL=qwen3:14b"* ]] || fail "AI model default drift"
-    [[ "$version_env" == "LDS_LLM_ARCH" ]] || fail "AI image selector must be LDS_LLM_ARCH"
-    [[ "$defaults" != *"LDS_AI_RUNTIME="* ]] || fail "AI profile wizard must not prompt for runtime"
+    [[ "$service_key" == "llm" ]] || fail "AI service identity must be provider-neutral llm"
+    [[ "$runtime_modes" == "cpu,nvidia,amd,npu" ]] || fail "AI runtime metadata drift"
+    [[ "$defaults" == "LDS_AI_MODEL=" ]] || fail "AI setup must leave provider model default automatic"
+    [[ "$version_env" == "LDS_AI_RUNTIME" ]] || fail "AI selector metadata must be LDS_AI_RUNTIME"
+    [[ "$url" == "https://llm.localhost" ]] || fail "AI convenience URL must use common llm identity"
     ;;
   ELASTICSEARCH)
     [[ "$defaults" == *"ELASTICSEARCH_VERSION=9.5.4"* ]] || fail "Elastic current default drift"
