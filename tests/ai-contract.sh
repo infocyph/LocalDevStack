@@ -196,6 +196,11 @@ assert not suspect
 suspect, reason = module.classify_graph_content("I found nothing useful in these documents.")
 assert suspect and "not parseable" in reason
 
+suspect, reason = module.classify_graph_content(
+    '{"nodes":[{"id":"a","source_file:".github/x.md"}],"edges":[]}'
+)
+assert suspect and reason == "malformed graph JSON"
+
 body = json.dumps({
     "model": "qwen3.5:9b",
     "messages": [
