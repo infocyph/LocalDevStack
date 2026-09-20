@@ -367,7 +367,9 @@ cmd_open() {
   redis | redisinsight | redis-insight | rds) url="https://ri.localhost" ;;
   mongo | me | mongoexpress | mongo-express) url="https://me.localhost" ;;
   kibana | kbn) url="https://kibana.localhost" ;;
-  ai | llm | llm-ollama | ollama) url="https://llm-ollama.localhost" ;;
+  ai | llm) url="https://llm.localhost" ;;
+  llm-ollama | ollama) url="https://llm-ollama.localhost" ;;
+  llm-fastflow | fastflow) url="https://llm-fastflow.localhost" ;;
   *)
     url="https://${target}"
     ;;
