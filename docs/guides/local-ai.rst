@@ -278,9 +278,11 @@ Troubleshooting
    lds llm runtime
    lds llm provider
    lds doctor
-   lds logs llm-fastflow
-   lds logs llm-ollama
+   lds logs llm
    curl -fsS http://127.0.0.1:11434/v1/models | jq
+
+Use ``lds logs llm-fastflow`` or ``lds logs llm-ollama`` only when you explicitly
+want the provider-specific service identity.
 
 If FastFlow was expected but not selected, verify ``/dev/accel/accel0`` and the host
 ``amdxdna`` driver before forcing ``lds llm runtime npu``.
