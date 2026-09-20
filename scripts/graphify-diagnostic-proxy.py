@@ -62,7 +62,7 @@ _GRAPH_SCHEMA = {
                         "enum": [
                             "calls", "implements", "references", "cites",
                             "conceptually_related_to", "shares_data_with",
-                            "semantically_similar_to", "rationale_for",
+                            "semantically_similar_to",
                         ],
                     },
                     "confidence": {
