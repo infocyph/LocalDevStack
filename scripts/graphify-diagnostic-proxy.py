@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import socket
 import sys
 import urllib.error
 import urllib.request
@@ -20,7 +21,7 @@ from pathlib import Path
 from typing import Any
 
 _GRAPH_KEYS = ("nodes", "edges", "hyperedges")
-_STRUCTURED_MAX_TOKENS = 4096
+_STRUCTURED_MAX_TOKENS = 2048
 
 _GRAPH_SCHEMA = {
     "type": "object",
@@ -274,7 +275,7 @@ def _bounded_completion_cap(request: dict[str, Any]) -> int:
     return max(1, min(cap, _STRUCTURED_MAX_TOKENS))
 
 
-def _build_tool_recovery_request(body: bytes, *, retry: bool = False) -> bytes | None:
+def _build_tool_recovery_request(body: bytes) -> bytes | None:
     try:
         request = json.loads(body.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError):
@@ -303,12 +304,6 @@ def _build_tool_recovery_request(body: bytes, *, retry: bool = False) -> bytes |
         "fragment into its nodes, edges, and hyperedges arguments. Do not add "
         "new facts; follow the original Graphify schema and source_file rules."
     )
-    if retry:
-        recovery_suffix += (
-            " A previous structured attempt did not produce a usable submit_graph call. "
-            "This retry MUST call submit_graph exactly once; do not answer with prose or raw JSON."
-        )
-
     injected = False
     for message in messages:
         if not isinstance(message, dict):
@@ -393,6 +388,40 @@ def _extract_fastflow_structured_graph(body: bytes) -> dict[str, Any] | None:
         return graph
     _meta, content = _response_metadata(body)
     return parse_graph_content(content)
+
+
+def _graphify_split_response(body: bytes, model: str | None) -> bytes:
+    """Return a standard completion that makes Graphify bisect the current chunk."""
+    try:
+        response = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        response = {}
+    if not isinstance(response, dict):
+        response = {}
+
+    out = dict(response)
+    out.setdefault("id", "chatcmpl-lds-graphify-retry")
+    out.setdefault("object", "chat.completion")
+    if model:
+        out["model"] = model
+    out["choices"] = [{
+        "index": 0,
+        "finish_reason": "length",
+        "message": {
+            "role": "assistant",
+            "content": '{"nodes":[],"edges":[],"hyperedges":[]}',
+        },
+    }]
+    return json.dumps(out, ensure_ascii=False).encode("utf-8")
+
+
+def _is_timeout_error(exc: BaseException) -> bool:
+    if isinstance(exc, (TimeoutError, socket.timeout)):
+        return True
+    reason = getattr(exc, "reason", None)
+    if isinstance(reason, (TimeoutError, socket.timeout)):
+        return True
+    return "timed out" in str(exc).lower() or "timeout" in str(exc).lower()
 
 
 def _replace_response_content(body: bytes, graph: dict[str, Any]) -> bytes | None:
@@ -487,7 +516,7 @@ class DiagnosticHandler(BaseHTTPRequestHandler):
     provider: str = ""
     diagnostics: bool = False
     upstream_timeout: int = 1800
-    structured_timeout: int = 300
+    structured_timeout: int = 120
     log_file: Path
     preview_chars: int = 4096
 
@@ -548,35 +577,26 @@ class DiagnosticHandler(BaseHTTPRequestHandler):
             if content_type:
                 response_headers["Content-Type"] = content_type
         except Exception as exc:
-            response_body = json.dumps(
-                {"error": {"message": f"Graphify diagnostic proxy upstream error: {exc}"}}
-            ).encode("utf-8")
+            if structured_primary and _is_timeout_error(exc):
+                status = 200
+                response_body = _graphify_split_response(b"", metadata.get("model"))
+                print(
+                    "[lds graphify] structured provider request timed out after "
+                    f"{self.structured_timeout}s; asking Graphify to split the chunk",
+                    file=sys.stderr,
+                    flush=True,
+                )
+            else:
+                status = 502
+                response_body = json.dumps(
+                    {"error": {"message": f"LocalDevStack Graphify proxy upstream error: {exc}"}}
+                ).encode("utf-8")
 
-        if is_chat and extraction_request:
-            if structured_primary == "fastflow-tool" and 200 <= status < 300:
+        if is_chat and extraction_request and 200 <= status < 300:
+            if structured_primary == "fastflow-tool":
                 graph = _extract_fastflow_structured_graph(response_body)
-                structured_response = response_body
-
-                if graph is None:
-                    retry_body = _build_tool_recovery_request(body, retry=True)
-                    retry_response = (
-                        self._post_upstream(retry_body, timeout=self.structured_timeout)
-                        if retry_body is not None
-                        else None
-                    )
-                    if retry_response is not None:
-                        retry_graph = _extract_fastflow_structured_graph(retry_response)
-                        if retry_graph is not None:
-                            graph = retry_graph
-                            structured_response = retry_response
-                            print(
-                                "[lds graphify] FastFlow structured extraction recovered on bounded retry",
-                                file=sys.stderr,
-                                flush=True,
-                            )
-
                 if graph is not None:
-                    replacement = _replace_response_content(structured_response, graph)
+                    replacement = _replace_response_content(response_body, graph)
                     if replacement is not None:
                         response_body = replacement
                         if self.diagnostics:
@@ -588,27 +608,36 @@ class DiagnosticHandler(BaseHTTPRequestHandler):
                                 file=sys.stderr,
                                 flush=True,
                             )
-                    else:
-                        response_body = self._fallback_freeform(body)
                 else:
-                    response_body = self._fallback_freeform(body)
-            elif structured_primary == "ollama-schema" and 200 <= status < 300:
+                    self._diagnose_suspect_response(body, response_body, status)
+                    response_body = _graphify_split_response(response_body, metadata.get("model"))
+                    print(
+                        "[lds graphify] FastFlow structured response unusable; "
+                        "asking Graphify to split the chunk",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+            elif structured_primary == "ollama-schema":
                 _meta, content = _response_metadata(response_body)
                 graph = parse_graph_content(content)
                 if graph is None:
-                    response_body = self._fallback_freeform(body)
-                else:
-                    if self.diagnostics:
-                        print(
-                            "[lds graphify diagnostic] structured Ollama graph via response_format schema: "
-                            f"model={metadata.get('model')}; reasoning_effort={metadata.get('reasoning_effort')}; "
-                            f"nodes={len(graph['nodes'])}; edges={len(graph['edges'])}; "
-                            f"hyperedges={len(graph['hyperedges'])}",
-                            file=sys.stderr,
-                            flush=True,
-                        )
-            else:
-                response_body = self._inspect_and_recover_chat_response(body, response_body, status)
+                    self._diagnose_suspect_response(body, response_body, status)
+                    response_body = _graphify_split_response(response_body, metadata.get("model"))
+                    print(
+                        "[lds graphify] Ollama structured response unusable; "
+                        "asking Graphify to split the chunk",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                elif self.diagnostics:
+                    print(
+                        "[lds graphify diagnostic] structured Ollama graph via response_format schema: "
+                        f"model={metadata.get('model')}; reasoning_effort={metadata.get('reasoning_effort')}; "
+                        f"nodes={len(graph['nodes'])}; edges={len(graph['edges'])}; "
+                        f"hyperedges={len(graph['hyperedges'])}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
 
         self.send_response(status)
         for name, value in response_headers.items():
@@ -619,98 +648,16 @@ class DiagnosticHandler(BaseHTTPRequestHandler):
         if self.command != "HEAD":
             self.wfile.write(response_body)
 
-    def _fallback_freeform(self, original_body: bytes) -> bytes:
-        try:
-            fallback_request = json.loads(original_body.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            fallback_request = None
-        if isinstance(fallback_request, dict):
-            fallback_request = dict(fallback_request)
-            fallback_request.pop("max_tokens", None)
-            fallback_request["max_completion_tokens"] = _bounded_completion_cap(fallback_request)
-            fallback_request["temperature"] = 0
-            fallback_body = json.dumps(fallback_request, ensure_ascii=False).encode("utf-8")
-        else:
-            fallback_body = original_body
-
-        fallback = self._post_upstream(fallback_body, timeout=self.structured_timeout)
-        if fallback is None:
-            return b'{"error":{"message":"Structured Graphify extraction failed and free-form fallback was unavailable"}}'
-        print(
-            "[lds graphify] structured extraction did not yield a usable graph; "
-            "falling back once to the bounded free-form Graphify request",
-            file=sys.stderr,
-            flush=True,
-        )
-        return self._inspect_and_recover_chat_response(
-            original_body, fallback, 200, allow_structured_recovery=False
-        )
-
-    def _post_upstream(self, body: bytes, *, timeout: int | None = None) -> bytes | None:
-        request = urllib.request.Request(
-            self.upstream.rstrip("/") + "/v1/chat/completions",
-            data=body,
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": self.headers.get("Authorization", "Bearer local"),
-            },
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=timeout or self.upstream_timeout) as response:
-                if response.status < 200 or response.status >= 300:
-                    return None
-                return response.read()
-        except Exception:
-            return None
-
-    def _inspect_and_recover_chat_response(
-        self,
-        request_body: bytes,
-        response_body: bytes,
-        status: int,
-        *,
-        allow_structured_recovery: bool = True,
-    ) -> bytes:
+    def _diagnose_suspect_response(
+        self, request_body: bytes, response_body: bytes, status: int
+    ) -> None:
         req = _request_metadata(request_body)
+        req.pop("_extraction_request", None)
         resp, content = _response_metadata(response_body)
-        extraction_request = req.pop("_extraction_request", False)
-        if status < 200 or status >= 300 or not extraction_request:
-            return response_body
-
         suspect, reason = classify_graph_content(content)
         if not suspect:
-            return response_body
+            reason = "structured response did not contain a usable provider-native graph"
 
-        original_reason = reason
-        recovery = _build_tool_recovery_request(request_body)
-        recovered_graph = None
-        recovered_response = None
-        if (
-            allow_structured_recovery
-            and recovery is not None
-            and req.get("think", "<omitted>") != "<omitted>"
-        ):
-            recovered_response = self._post_upstream(recovery, timeout=self.structured_timeout)
-            if recovered_response is not None:
-                recovered_graph = _extract_fastflow_structured_graph(recovered_response)
-
-        if recovered_graph is not None and recovered_response is not None:
-            replacement = _replace_response_content(recovered_response, recovered_graph)
-            if replacement is not None:
-                recovered_meta, _ = _response_metadata(replacement)
-                print(
-                    "[lds graphify diagnostic] recovered malformed FastFlow graph via submit_graph tool: "
-                    f"model={req.get('model')}; think={req.get('think')}; "
-                    f"nodes={len(recovered_graph['nodes'])}; edges={len(recovered_graph['edges'])}; "
-                    f"hyperedges={len(recovered_graph['hyperedges'])}; "
-                    f"completion_tokens={recovered_meta.get('completion_tokens')}",
-                    file=sys.stderr,
-                    flush=True,
-                )
-                return replacement
-
-        reason = original_reason
         print(
             "[lds graphify] provider returned a suspect extraction response: "
             f"reason={reason}; model={req.get('model')}; finish_reason={resp.get('finish_reason')}",
@@ -718,49 +665,43 @@ class DiagnosticHandler(BaseHTTPRequestHandler):
             flush=True,
         )
 
-        if self.diagnostics:
-            record = {
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "status": status,
-                "reason": reason,
-                **req,
-                **resp,
-                "assistant_content": content,
-            }
-            self.log_file.parent.mkdir(parents=True, exist_ok=True)
-            with self.log_file.open("a", encoding="utf-8") as handle:
-                handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+        if not self.diagnostics:
+            return
 
-            preview = (content or "")[: self.preview_chars]
-            print(
-                "[lds graphify diagnostic] suspect LLM response: "
-                f"reason={reason}; model={req.get('model')}; "
-                f"think={req.get('think')}; reasoning_effort={req.get('reasoning_effort')}; "
-                f"finish_reason={resp.get('finish_reason')}; "
-                f"prompt_tokens={resp.get('prompt_tokens')}; "
-                f"completion_tokens={resp.get('completion_tokens')}",
-                file=sys.stderr,
-                flush=True,
-            )
-            print(
-                f"[lds graphify diagnostic] assistant content preview ({len(preview)}/{len(content or '')} chars): "
-                f"{preview!r}",
-                file=sys.stderr,
-                flush=True,
-            )
-            print(
-                f"[lds graphify diagnostic] full suspect response logged to {self.log_file}",
-                file=sys.stderr,
-                flush=True,
-            )
-        if allow_structured_recovery and recovery is not None:
-            print(
-                "[lds graphify diagnostic] structured submit_graph recovery did not yield a usable graph; "
-                "returning the original response so Graphify can apply its normal retry policy",
-                file=sys.stderr,
-                flush=True,
-            )
-        return response_body
+        record = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "status": status,
+            "reason": reason,
+            **req,
+            **resp,
+            "assistant_content": content,
+        }
+        self.log_file.parent.mkdir(parents=True, exist_ok=True)
+        with self.log_file.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+        preview = (content or "")[: self.preview_chars]
+        print(
+            "[lds graphify diagnostic] suspect LLM response: "
+            f"reason={reason}; model={req.get('model')}; "
+            f"think={req.get('think')}; reasoning_effort={req.get('reasoning_effort')}; "
+            f"finish_reason={resp.get('finish_reason')}; "
+            f"prompt_tokens={resp.get('prompt_tokens')}; "
+            f"completion_tokens={resp.get('completion_tokens')}",
+            file=sys.stderr,
+            flush=True,
+        )
+        print(
+            f"[lds graphify diagnostic] assistant content preview ({len(preview)}/{len(content or '')} chars): "
+            f"{preview!r}",
+            file=sys.stderr,
+            flush=True,
+        )
+        print(
+            f"[lds graphify diagnostic] full suspect response logged to {self.log_file}",
+            file=sys.stderr,
+            flush=True,
+        )
 
     do_GET = _forward
     do_HEAD = _forward
@@ -773,7 +714,7 @@ def main() -> int:
     parser.add_argument("--provider", required=True, choices=("fastflow", "ollama"))
     parser.add_argument("--diagnostics", choices=("on", "off"), default="off")
     parser.add_argument("--timeout", type=int, default=1800)
-    parser.add_argument("--structured-timeout", type=int, default=300)
+    parser.add_argument("--structured-timeout", type=int, default=120)
     parser.add_argument("--ready-file", required=True)
     parser.add_argument("--log-file", required=True)
     parser.add_argument("--preview-chars", type=int, default=4096)
