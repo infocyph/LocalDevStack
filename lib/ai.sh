@@ -99,25 +99,58 @@ _graphify_local_backend_for_provider() {
 }
 
 _graphify_write_local_provider() {
-  local dir="$1" provider="$2" base_url="$3" model="$4" token_budget="$5"
+  local dir="$1" provider="$2" base_url="$3" model="$4" token_budget="$5" think_mode="${6:-off}"
   local backend num_ctx
   backend="$(_graphify_local_backend_for_provider "$provider")" || return 1
 
   mkdir -p "$dir/.graphify"
   case "$provider" in
   fastflow)
-    jq -n \
-      --arg backend "$backend" \
-      --arg base_url "$base_url" \
-      --arg model "$model" \
-      '{
-        ($backend): {
-          base_url: $base_url,
-          default_model: $model,
-          env_key: "LDS_GRAPHIFY_API_KEY",
-          extra_body: {think: false}
-        }
-      }' >"$dir/.graphify/providers.json"
+    case "$think_mode" in
+    off)
+      jq -n \
+        --arg backend "$backend" \
+        --arg base_url "$base_url" \
+        --arg model "$model" \
+        '{
+          ($backend): {
+            base_url: $base_url,
+            default_model: $model,
+            env_key: "LDS_GRAPHIFY_API_KEY",
+            extra_body: {think: false}
+          }
+        }' >"$dir/.graphify/providers.json"
+      ;;
+    on)
+      jq -n \
+        --arg backend "$backend" \
+        --arg base_url "$base_url" \
+        --arg model "$model" \
+        '{
+          ($backend): {
+            base_url: $base_url,
+            default_model: $model,
+            env_key: "LDS_GRAPHIFY_API_KEY",
+            reasoning_effort: "high",
+            extra_body: {think: true}
+          }
+        }' >"$dir/.graphify/providers.json"
+      ;;
+    auto)
+      jq -n \
+        --arg backend "$backend" \
+        --arg base_url "$base_url" \
+        --arg model "$model" \
+        '{
+          ($backend): {
+            base_url: $base_url,
+            default_model: $model,
+            env_key: "LDS_GRAPHIFY_API_KEY"
+          }
+        }' >"$dir/.graphify/providers.json"
+      ;;
+    *) return 1 ;;
+    esac
     ;;
   ollama)
     num_ctx=$((token_budget + 8192 + 2400))
@@ -188,7 +221,7 @@ cmd_graphify() {
   [[ -e "$target" ]] || die "Graphify target does not exist: $target"
 
   local runtime provider backend base_url timeout model api_key graphify_bin arg provider_dir target_abs
-  local graphify_python="" diagnostic_root="" diagnostic_log="" diagnostic_preview=""
+  local graphify_python="" diagnostic_root="" diagnostic_log="" diagnostic_preview="" graphify_think="off"
   local local_provider=0
   local next_is_model=0 next_is_timeout=0 next_is_token_budget=0 next_is_max_concurrency=0
   local has_token_budget=0 has_max_concurrency=0
@@ -224,6 +257,13 @@ cmd_graphify() {
   esac
 
   timeout="${GRAPHIFY_API_TIMEOUT:-$(compose_control_value LDS_AI_TIMEOUT 1800)}"
+
+  case "${LDS_GRAPHIFY_THINK:-off}" in
+  off | false | 0) graphify_think=off ;;
+  on | true | 1) graphify_think=on ;;
+  auto | default) graphify_think=auto ;;
+  *) die "LDS_GRAPHIFY_THINK must be off/on/auto" ;;
+  esac
 
   # Keep explicit model/timeout/resource overrides consistent while LocalDevStack
   # retains ownership of backend selection and the two-stage extract/cluster flow.
@@ -383,7 +423,7 @@ cmd_graphify() {
         printf '%s\n' "[lds graphify] suspect-response diagnostics enabled: $diagnostic_log" >&2
       fi
 
-      backend="$(_graphify_write_local_provider "$provider_dir" "$provider" "$local_provider_base_url" "$model" "$token_budget_value")" ||
+      backend="$(_graphify_write_local_provider "$provider_dir" "$provider" "$local_provider_base_url" "$model" "$token_budget_value" "$graphify_think")" ||
         die "Unable to build LocalDevStack Graphify provider configuration"
 
       unset OPENAI_BASE_URL OPENAI_API_KEY OPENAI_MODEL OLLAMA_BASE_URL OLLAMA_API_KEY OLLAMA_MODEL
