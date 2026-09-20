@@ -169,7 +169,7 @@ Examples:
 - local AI: `infocyph/llm-ollama:latest`
 - AMD local AI: `infocyph/llm-ollama:amd-latest`
 
-Elasticsearch, Kibana, and Filebeat share the same `ELASTICSEARCH_VERSION` selector and default to the moving `latest` tag.
+Elastic does not provide a usable moving `latest` alias for this stack, so Elasticsearch, Kibana, and Filebeat share `ELASTICSEARCH_VERSION` and default to the current stable `9.5.4`; overriding that one value advances or pins all three together.
 
 Inspect the effective defaults with `lds images`.
 
