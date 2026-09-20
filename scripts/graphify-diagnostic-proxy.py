@@ -1,4 +1,25 @@
+#!/usr/bin/env python3
+"""Local Graphify diagnostic reverse proxy.
 
+Forwards OpenAI-compatible Graphify traffic to the active LocalDevStack LLM
+without modifying request bodies. Only suspect chat-completion responses are
+reported: empty content, malformed/non-graph JSON, or graph arrays containing
+no usable object entries. Request prompts/source content are never logged.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import sys
+import urllib.error
+import urllib.request
+from datetime import datetime, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from typing import Any
+
+_GRAPH_KEYS = ("nodes", "edges", "hyperedges")
 _GRAPH_SCHEMA = {
     "type": "object",
     "required": ["nodes", "edges", "hyperedges"],
@@ -83,28 +104,6 @@ _GRAPH_SCHEMA = {
     },
 }
 
-#!/usr/bin/env python3
-"""Local Graphify diagnostic reverse proxy.
-
-Forwards OpenAI-compatible Graphify traffic to the active LocalDevStack LLM
-without modifying request bodies. Only suspect chat-completion responses are
-reported: empty content, malformed/non-graph JSON, or graph arrays containing
-no usable object entries. Request prompts/source content are never logged.
-"""
-from __future__ import annotations
-
-import argparse
-import json
-import re
-import sys
-import urllib.error
-import urllib.request
-from datetime import datetime, timezone
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
-from typing import Any
-
-_GRAPH_KEYS = ("nodes", "edges", "hyperedges")
 _FENCE_RE = re.compile(r"~~~[ \t]*([A-Za-z0-9_+-]*)[ \t]*\r?\n(.*?)~~~", re.S)
 
 
