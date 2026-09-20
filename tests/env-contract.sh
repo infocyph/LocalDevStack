@@ -19,7 +19,9 @@ assert_file_contains "$ROOT/lib/hosts.sh" 'var=COMPOSE_PROFILES'
 assert_file_contains "$ROOT/lds" 'compose_control_value()'
 assert_file_contains "$ROOT/lds" 'dotenv_value()'
 assert_file_contains "$ROOT/lib/compose.sh" 'compose_control_value LDS_AI_RUNTIME ""'
-assert_file_contains "$ROOT/lib/compose.sh" 'LDS_LLM_ARCH="$llm_arch"'
+if grep -RqsF 'LDS_LLM_ARCH' "$ROOT/lib" "$ROOT/docker/compose" "$ROOT/docker/catalog"; then
+  fail "obsolete LDS_LLM_ARCH remains in active environment wiring"
+fi
 pass "environment file and precedence wiring"
 
 git -C "$ROOT" check-ignore -q docker/.env || fail "docker/.env must remain ignored user state"
@@ -115,10 +117,6 @@ pass "CLI project identity follows the Compose project contract"
   set -euo pipefail
   has_cmd() { return 1; }
   source "$ROOT/lib/platform.sh"
-  [[ "$(llm_arch_for_runtime cpu)" == "latest" ]] || fail "CPU LLM tag drift"
-  [[ "$(llm_arch_for_runtime nvidia)" == "latest" ]] || fail "NVIDIA LLM tag drift"
-  [[ "$(llm_arch_for_runtime amd)" == "amd-latest" ]] || fail "AMD LLM tag drift"
-  [[ "$(llm_arch_for_runtime npu)" == "latest" ]] || fail "NPU compatibility tag drift"
   [[ "$(ai_provider_for_runtime cpu)" == "ollama" ]] || fail "CPU provider drift"
   [[ "$(ai_provider_for_runtime nvidia)" == "ollama" ]] || fail "NVIDIA provider drift"
   [[ "$(ai_provider_for_runtime amd)" == "ollama" ]] || fail "AMD provider drift"
@@ -134,7 +132,7 @@ pass "CLI project identity follows the Compose project contract"
   host_cpu_is_amd() { return 1; }
   [[ "$(ai_igpu_default_for_runtime amd)" == "0" ]] || fail "non-AMD CPU must not auto-enable iGPU"
 )
-pass "LLM runtime maps mutually exclusive providers, models, tags and AMD iGPU defaults deterministically"
+pass "LLM runtime maps mutually exclusive providers, models and AMD iGPU defaults deterministically"
 
 ai_env_tmp="$(mktemp -d)"
 (
@@ -168,7 +166,6 @@ ai_env_tmp="$(mktemp -d)"
   host_cpu_is_amd() { return 0; }
   add_required_env
   grep -Fxq "LDS_AI_RUNTIME=amd" "$ENV_DOCKER" || fail "detected AI runtime was not persisted"
-  grep -Fxq "LDS_LLM_ARCH=amd-latest" "$ENV_DOCKER" || fail "detected AMD tag was not persisted"
   grep -Fxq "LDS_AI_IGPU_ENABLE=1" "$ENV_DOCKER" || fail "AMD CPU iGPU preference was not persisted"
 
   update_env "$ENV_DOCKER" LDS_AI_RUNTIME nvidia
@@ -176,7 +173,6 @@ ai_env_tmp="$(mktemp -d)"
   detect_ai_runtime() { printf "%s" amd; }
   add_required_env
   grep -Fxq "LDS_AI_RUNTIME=nvidia" "$ENV_DOCKER" || fail "explicit runtime must win over detection"
-  grep -Fxq "LDS_LLM_ARCH=latest" "$ENV_DOCKER" || fail "NVIDIA runtime must use standard latest tag"
   grep -Fxq "LDS_AI_IGPU_ENABLE=0" "$ENV_DOCKER" || fail "explicit iGPU preference must be preserved"
 )
 rm -rf "$ai_env_tmp"
