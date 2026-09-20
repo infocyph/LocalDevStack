@@ -161,12 +161,16 @@ def _response_metadata(body: bytes) -> tuple[dict[str, Any], str | None]:
     message = choice.get("message") if isinstance(choice.get("message"), dict) else {}
     usage = response.get("usage") if isinstance(response.get("usage"), dict) else {}
 
+    content = message.get("content") if isinstance(message, dict) else None
+    if not isinstance(content, str):
+        content = None
+
     return {
         "finish_reason": choice.get("finish_reason"),
         "prompt_tokens": usage.get("prompt_tokens"),
         "completion_tokens": usage.get("completion_tokens"),
         "total_tokens": usage.get("total_tokens"),
-    }, message.get("content") if isinstance(message, dict) else None
+    }, content
 
 
 class DiagnosticHandler(BaseHTTPRequestHandler):
