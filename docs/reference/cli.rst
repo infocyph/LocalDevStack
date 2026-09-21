@@ -1,0 +1,383 @@
+CLI Reference
+=============
+
+``lds`` is the canonical LocalDevStack host CLI. ``lds.bat`` bridges Windows/Git Bash
+invocation into the same command surface.
+
+Global Options
+--------------
+
+``-v`` / ``--verbose``
+   Enable verbose command/error output.
+
+``-q`` / ``--quiet``
+   Suppress non-error LocalDevStack output where supported.
+
+``--reload-extras``
+   Force a rescan of ``configuration/compose/*.yaml`` / ``*.yml`` before the command.
+
+``-h`` / ``--help``
+   Show help.
+
+The machine-copyable Markdown command summary is::
+
+   lds help --markdown
+
+Stack
+-----
+
+::
+
+   lds stack up
+   lds stack start
+   lds stack down [--volumes --yes]
+   lds stack restart [service...]
+   lds stack status [status-args...]
+   lds stack ps
+   lds stack logs [service] [--follow] [--since <duration>] [--grep <pattern>]
+   lds stack exec <service> [command...]
+   lds stack events [since]
+   lds stack clean --yes [--volumes] [--global]
+   lds stack diff [--config] [--json]
+   lds stack config <show|services|profiles|env-used|validate>
+   lds stack http reload
+
+Common top-level aliases are::
+
+   lds up
+   lds start
+   lds down
+   lds stop
+   lds restart
+   lds reboot
+   lds status
+   lds ps
+   lds logs
+   lds exec
+   lds events
+   lds clean
+   lds config
+
+Domains
+-------
+
+::
+
+   lds domain add
+   lds domain rm [args...]
+   lds domain ls
+
+Legacy aliases::
+
+   lds host add
+   lds host rm
+   lds host list
+
+Setup
+-----
+
+::
+
+   lds setup init
+   lds setup permissions
+   lds setup domain
+   lds setup profile
+   lds setup profiles
+
+Profiles
+--------
+
+::
+
+   lds profiles list
+   lds profiles add <profile...>
+   lds profiles remove <profile...>
+
+Configuration
+-------------
+
+::
+
+   lds config show [--json] [--raw]
+   lds config services
+   lds config profiles
+   lds config env-used
+   lds config validate
+   lds images
+   lds urls
+
+``config show`` is redacted by default.
+
+Certificates
+------------
+
+Tools certificate operations::
+
+   lds cert status [domain|all]
+   lds cert regen [domain|all] [--yes]
+   lds cert diagnose <domain>
+
+Host trust-store operations::
+
+   lds certificate install
+   lds certificate uninstall [--all]
+
+Diagnostics
+-----------
+
+::
+
+   lds doctor
+   lds diag dns <domain>
+   lds diag net
+   lds diag tcp <host> <port>
+   lds diag http <url> [curl-args...]
+   lds diag tls <domain>
+   lds sniff <url> [curl-args...]
+
+``sniff`` is the HTTP diagnostic shortcut.
+
+Support
+-------
+
+::
+
+   lds support open <admin|mail|db|redis|mongo|kibana|ai|domain>
+   lds support trace <domain>
+   lds support bundle [--redact|--full] [output.zip]
+   lds support notify <watch|test> ...
+   lds support ui
+
+Shortcuts::
+
+   lds open ...
+   lds bundle ...
+   lds notify ...
+   lds ui
+
+Tools Control Plane
+-------------------
+
+::
+
+   lds tools sh
+   lds tools exec "<command>"
+   lds tools file <path>
+
+Open a generic container shell or run a command::
+
+   lds cli <container>
+   lds cli <container> <command...>
+
+Resolve a domain/container to its application shell::
+
+   lds core [domain|container]
+
+Secrets
+-------
+
+::
+
+   lds secrets <senv-args...>
+
+This delegates to Tools ``senv``.
+
+AI Consumer
+-----------
+
+::
+
+   lds ai status
+   lds ai ask ...
+   lds ai explain ...
+   lds ai troubleshoot ...
+   lds ai review ...
+   lds ai repo-review ...
+   lds ai graphify ...
+
+``status`` maps to the Tools provider-status flow.
+
+Host Graphify Workflow
+----------------------
+
+::
+
+   lds graphify
+   lds graphify ./your-project
+   lds graphify ./your-project --mode deep --token-budget 4000 --max-concurrency 1
+
+This command runs the host ``graphify`` CLI against the common LocalDevStack LLM route.
+It performs ``extract --backend ollama --no-cluster`` followed by
+``cluster-only <same-path> --backend ollama`` so clustering happens once. Graphify's
+backend is currently named ``ollama`` even though LocalDevStack presents a provider-neutral
+OpenAI-compatible ``/v1`` endpoint.
+
+By default it derives:
+
+- ``OLLAMA_BASE_URL=http://llm.localhost:11434/v1`` through Nginx;
+- ``OLLAMA_MODEL`` from the effective provider model;
+- ``GRAPHIFY_API_TIMEOUT`` from ``LDS_AI_TIMEOUT``.
+
+Before extraction, LocalDevStack checks ``/v1/models`` and fails immediately when the
+selected model is unavailable. An explicitly supplied ``OLLAMA_BASE_URL`` bypasses that
+local-provider preflight.
+
+LLM Provider
+------------
+
+::
+
+   lds llm provider
+   lds llm runtime
+   lds llm models
+   lds llm pull ...
+   lds llm rm ...
+   lds llm run ...
+   lds llm ask ...
+   lds llm chat ...
+   lds llm prompt ...
+   lds llm code ...
+   lds llm review ...
+   lds llm json ...
+   lds llm ai-commit ...
+   lds llm api ...
+   lds llm version
+   lds llm help
+
+These commands execute the active provider CLI through LocalDevStack's Compose wrapper.
+Exactly one provider is active: FastFlow for XDNA2 NPU, otherwise Ollama.
+
+Provider-specific low-level commands are guarded:
+
+.. code-block:: text
+
+   Ollama-only:   ps, show, unload, ollama
+   FastFlow-only: validate, check, flm
+
+Runtime selection::
+
+   lds llm runtime auto
+   lds llm runtime npu
+   lds llm runtime nvidia
+   lds llm runtime amd
+   lds llm runtime cpu
+
+The common Docker/API identity is ``llm:11434`` and the user-facing route is
+``https://llm.localhost``. Nginx publishes the common native API loopback-only at
+``http://127.0.0.1:11434``.
+
+Generic service operations also accept ``llm`` and resolve it to the active provider::
+
+   lds logs llm
+   lds restart llm
+   lds exec llm ...
+   lds rebuild llm
+
+Provider defaults are ``qwen3.5:9b`` for FastFlow/NPU and ``qwen3:14b`` for Ollama.
+Leaving ``LDS_AI_MODEL`` blank allows the runtime-specific default to apply.
+Rebuild
+-------
+
+::
+
+   lds rebuild
+   lds rebuild all
+   lds rebuild <service...>
+
+No-argument rebuild uses an interactive selector.
+
+Ad-hoc Dockerfile Runner
+------------------------
+
+::
+
+   lds run
+   lds run shell
+   lds run ps
+   lds run logs
+   lds run stop
+   lds run rm
+   lds run open
+
+Useful flags include::
+
+   --name <name>
+   --tag <tag>
+   --no-build
+   --no-keepalive
+   --sock
+   --host-os <value>
+   --publish <host:container>
+   -p <host:container>
+   --mount <host[:container]>
+   --port <container-port>
+   --path <url-path>
+   --http
+   --https
+
+See :doc:`../guides/ad-hoc-runner`.
+
+Runtime and Client Wrappers
+---------------------------
+
+PHP/Node::
+
+   lds php ...
+   lds composer ...
+   lds node ...
+   lds npm ...
+   lds npx ...
+
+PostgreSQL::
+
+   lds pg ...
+   lds psql ...
+   lds pg_dump ...
+   lds pg_restore ...
+
+MySQL::
+
+   lds my ...
+   lds mysql ...
+   lds mysqldump ...
+
+MariaDB::
+
+   lds maria ...
+   lds mariadb ...
+   lds mariadb-dump ...
+
+Redis::
+
+   lds redis ...
+   lds redis-cli ...
+
+MongoDB::
+
+   lds mongo ...
+   lds mongodb ...
+   lds mongosh ...
+   lds mongoimport ...
+   lds mongoexport ...
+
+Elasticsearch::
+
+   lds es ...
+   lds elastic ...
+   lds elasticsearch ...
+
+Unknown Command Fallback
+------------------------
+
+If a command is not implemented by ``lds`` itself, LocalDevStack delegates it to
+``bin/tool-runner``. This preserves the existing Tools/Toolset command extension surface.
+
+Deprecated
+----------
+
+::
+
+   lds vpn-fix
+
+The command now explains that fixed-subnet manipulation is obsolete because networking
+is dynamically assigned.

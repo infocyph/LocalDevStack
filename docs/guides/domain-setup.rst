@@ -1,68 +1,179 @@
 Domain Setup
 ============
 
-LocalDevStack creates domains and vhosts, when you run ``lds setup domain``.
+LocalDevStack uses Tools for domain/vhost generation while the host ``lds`` CLI owns the
+surrounding profile, Compose, and runtime orchestration.
 
-How ``lds setup domain`` works
-------------------------------
+Create a Domain
+---------------
 
-1. Run the interactive wizard.
-2. Enable the selected profiles.
-3. Bring the stack up and reload HTTP.
+Start the stack first so ``server-tools`` is available::
 
-Wizard flow (what the user answers)
------------------------------------
+   lds up
 
-``lds setup domain`` runs an interactive 8-step flow:
+Then run the interactive wizard::
 
-1. Domain name
-2. App type (PHP or NodeJs)
-3. Runtime version (PHP Major.Minor, or Node major/tags)
-4. Server type (PHP: Nginx or Apache; Node: Nginx forced + optional Node start command)
-5. Protocol (HTTP only / HTTPS only / both + optional redirect)
-6. Document root (relative path mapped under ``/app``)
-7. Client max body size
-8. Mutual TLS toggle (only available when HTTPS is enabled; this requires client side certificate)
+   lds setup domain
 
-What it generates
+or the canonical domain command::
+
+   lds domain add
+
+The wizard delegates to Tools ``mkhost`` and collects the details needed for the chosen
+application type, including:
+
+1. domain name;
+2. PHP, Node, or supported static/backend application type;
+3. runtime version where applicable;
+4. HTTP server path where applicable;
+5. HTTP/HTTPS behavior;
+6. document root;
+7. request/body limits;
+8. optional mutual TLS settings.
+
+After generation, LocalDevStack reads Tools state, adds any required generated
+server/runtime profile, clears temporary mkhost state, and recreates the stack.
+
+Runtime Version Selection
 -------------------------
 
-Vhost configs
-~~~~~~~~~~~~~~~~~~
+Runtime selection remains explicit and version-specific.
 
-Writes generated vhost files:
+For PHP, the selected version produces::
 
-- Nginx vhost:
-  ``configuration/nginx/<domain>.conf``
+   localdevstack-php:<selected-version>
 
-- Apache vhost (only when Apache mode is selected):
-  ``configuration/apache/<domain>.conf``
+For Node, the selected version produces::
 
-TLS handling (HTTPS)
-~~~~~~~~~~~~~~~~~~~~
+   localdevstack-node:<selected-version>
 
-If you select HTTPS in the wizard, after writing the HTTPS config;
-this generates/refreshes certificates for all known hosts.
+Both runtime families use Alpine variants. The version selector is intentionally not
+replaced by the moving infrastructure-image policy.
 
-See: :doc:`tls-and-certificates`
+Generated State
+---------------
 
-Node apps (optional)
-~~~~~~~~~~~~~~~~~~~~
+Active vhosts are Docker-managed state:
 
-If you choose **NodeJs** app type:
+- Nginx vhosts persist in ``NginxHosts``;
+- Apache vhosts persist in ``ApacheHosts``;
+- PHP-FPM pool state persists in ``FPMPools``;
+- PHP-FPM sockets use ``FPMSocks``;
+- generated runtime Compose fragments are written under configuration/compose/.
 
-- It generates a Node compose fragment:
+There is no active host-side ``configuration/nginx`` source of truth.
 
-  ``docker/extras/<token>.yaml``
+List Domains
+------------
 
-The token is derived from the domain (slugified).
-This compose fragment defines a Node service (internal port is always ``3000``) and sets a profile like:
+List persisted Nginx domains::
 
-- ``node_<token>``
+   lds domain ls
 
-Tips
-----
+Domain listing reads the NginxHosts named volume through ``server-tools``.
 
-- Prefer a consistent domain scheme (e.g., ``project.localhost``) so your routing stays predictable.
-- After any vhost/cert changes, ``lds`` will run ``lds http reload`` automatically as part of setup;
-  you can also run it manually when you edit configs yourself.
+Remove a Domain
+---------------
+
+Use::
+
+   lds domain rm
+
+or pass arguments supported by the underlying Tools removal flow::
+
+   lds domain rm <args...>
+
+LocalDevStack delegates removal to Tools ``rmhost``, removes any generated server profile
+reported by that operation, resets temporary removal state, and recreates the stack.
+
+The legacy command group remains available::
+
+   lds host add
+   lds host rm
+   lds host list
+
+but ``domain`` is the canonical interface.
+
+Routing
+-------
+
+LocalDevStack uses Docker DNS/service names instead of fixed bridge addresses. Generated
+HTTP configuration routes to logical runtime service names or PHP-FPM sockets.
+
+Nginx is always the host-facing front door. Apache is always available as an alternate
+backend for domains that choose that mode.
+
+The three logical networks remain ``Frontend``, ``Backend``, and ``DataStore`` while
+Docker chooses their address ranges dynamically.
+
+TLS
+---
+
+When HTTPS is selected, Tools refreshes the shared LocalDevStack certificate set.
+
+The certificate SAN set includes at least::
+
+   localhost
+   *.localhost
+   127.0.0.1
+   ::1
+
+and Tools can include generated domain/service names.
+
+The wildcard covers built-in convenience endpoints such as ``admin.localhost``,
+``webmail.localhost``, and ``llm-ollama.localhost``.
+
+Working in a Domain Container
+-----------------------------
+
+Resolve a domain to its application/runtime container and open a shell::
+
+   lds core project.localhost
+
+When no domain is supplied, ``lds core`` lists known domains and prompts on an
+interactive terminal.
+
+A direct container name can also be supplied to ``lds core``.
+
+For a generic container shell/command flow use::
+
+   lds cli <container>
+   lds cli <container> <command...>
+
+Diagnostics
+-----------
+
+Validate the effective stack::
+
+   lds config validate
+
+Inspect a domain end to end::
+
+   lds support trace project.localhost
+
+The trace checks DNS, TLS, HTTP timing, generated Nginx upstream configuration, and
+recent Nginx logs.
+
+Additional probes include::
+
+   lds diag dns project.localhost
+   lds diag tls project.localhost
+   lds diag http https://project.localhost
+
+Convenience Commands
+--------------------
+
+List active built-in URLs::
+
+   lds urls
+
+Open a known UI/domain::
+
+   lds open admin
+   lds open mail
+   lds open db
+   lds open redis
+   lds open mongo
+   lds open kibana
+   lds open ai
+   lds open project.localhost

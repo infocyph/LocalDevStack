@@ -7,10 +7,7 @@ networks:
       com.docker.compose.project: "LocalDevStack"
       com.docker.compose.network: "frontend"
       com.infocyph.stack: "LocalDevStack"
-    ipam:
-      config:
-        - subnet: 172.28.0.0/24
-          gateway: 172.28.0.1
+      com.infocyph.network-schema: "dynamic-v1"
   backend:
     name: Backend
     driver: bridge
@@ -18,10 +15,7 @@ networks:
       com.docker.compose.project: "LocalDevStack"
       com.docker.compose.network: "backend"
       com.infocyph.stack: "LocalDevStack"
-    ipam:
-      config:
-        - subnet: 172.29.0.0/24
-          gateway: 172.29.0.1
+      com.infocyph.network-schema: "dynamic-v1"
   datastore:
     name: DataStore
     driver: bridge
@@ -29,10 +23,7 @@ networks:
       com.docker.compose.project: "LocalDevStack"
       com.docker.compose.network: "datastore"
       com.infocyph.stack: "LocalDevStack"
-    ipam:
-      config:
-        - subnet: 172.30.0.0/24
-          gateway: 172.30.0.1
+      com.infocyph.network-schema: "dynamic-v1"
 volumes:
   lds_fpm_sock:
     name: FPMSocks
@@ -148,6 +139,24 @@ volumes:
       com.infocyph.lds: "1"
       com.infocyph.stack: "LocalDevStack"
       com.infocyph.purpose: "Filebeat Data"
+  lds_llm:
+    name: LLMModels
+    labels:
+      com.infocyph.lds: "1"
+      com.infocyph.stack: "LocalDevStack"
+      com.infocyph.purpose: "Ollama Model Store"
+  lds_llm_fastflow:
+    name: LLMFastFlowModels
+    labels:
+      com.infocyph.lds: "1"
+      com.infocyph.stack: "LocalDevStack"
+      com.infocyph.purpose: "FastFlow Model Store"
+  lds_tools_state:
+    name: ToolsState
+    labels:
+      com.infocyph.lds: "1"
+      com.infocyph.stack: "LocalDevStack"
+      com.infocyph.purpose: "Tools Durable State"
 include:
   - docker/compose/companion.yaml
   - docker/compose/db.yaml

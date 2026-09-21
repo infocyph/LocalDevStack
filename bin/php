@@ -130,11 +130,11 @@ port_in_use() {
     return 1
   fi
   if command -v ss >/dev/null 2>&1; then
-    ss -lnt 2>/dev/null | grep -qE "[:.]$port[[:space:]]" && return 0
+    ss -lnt 2>/dev/null | grep -qE "[:.]${port}[[:space:]]" && return 0
     return 1
   fi
   if command -v netstat >/dev/null 2>&1; then
-    netstat -lnt 2>/dev/null | grep -qE "[:.]$port[[:space:]]" && return 0
+    netstat -lnt 2>/dev/null | grep -qE "[:.]${port}[[:space:]]" && return 0
     return 1
   fi
   return 1
