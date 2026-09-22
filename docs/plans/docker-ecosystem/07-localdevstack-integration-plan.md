@@ -822,7 +822,7 @@ LocalDevStack defaults.
 
 For a brand-new graph, `lds graphify` runs code-only `extract --no-cluster`, clusters
 the structural graph, then runs a normal incremental `extract --no-cluster` to enrich
-semantic files and clusters the combined graph. Existing graphs keep the single
+semantic files and reclusters and force-relabels the combined graph. Existing graphs keep the single
 incremental extract + `cluster-only` flow. Explicit `--code-only` remains single-phase.
 Graphify remains a host/external consumer.
 
