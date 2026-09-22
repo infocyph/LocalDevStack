@@ -679,7 +679,7 @@ def _response_metadata(body: bytes) -> tuple[dict[str, Any], str | None]:
     }, content
 
 
-class DiagnosticHandler(BaseHTTPRequestHandler):
+class GraphifyCompatHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     upstream: str = ""
     provider: str = ""
@@ -733,7 +733,7 @@ class DiagnosticHandler(BaseHTTPRequestHandler):
 
         status = 502
         response_headers: dict[str, str] = {"Content-Type": "application/json"}
-        response_body = b'{"error":{"message":"LocalDevStack Graphify diagnostic proxy upstream failure"}}'
+        response_body = b'{"error":{"message":"LocalDevStack Graphify compatibility proxy upstream failure"}}'
 
         try:
             request_timeout = self.structured_timeout if structured_primary else self.upstream_timeout
@@ -910,16 +910,16 @@ def main() -> int:
     parser.add_argument("--preview-chars", type=int, default=4096)
     args = parser.parse_args()
 
-    DiagnosticHandler.upstream = args.upstream
-    DiagnosticHandler.provider = args.provider
-    DiagnosticHandler.diagnostics = args.diagnostics == "on"
-    DiagnosticHandler.upstream_timeout = max(1, args.timeout)
-    DiagnosticHandler.structured_timeout = max(1, args.structured_timeout)
-    DiagnosticHandler.max_output_tokens = max(512, args.max_output_tokens)
-    DiagnosticHandler.log_file = Path(args.log_file)
-    DiagnosticHandler.preview_chars = max(256, args.preview_chars)
+    GraphifyCompatHandler.upstream = args.upstream
+    GraphifyCompatHandler.provider = args.provider
+    GraphifyCompatHandler.diagnostics = args.diagnostics == "on"
+    GraphifyCompatHandler.upstream_timeout = max(1, args.timeout)
+    GraphifyCompatHandler.structured_timeout = max(1, args.structured_timeout)
+    GraphifyCompatHandler.max_output_tokens = max(512, args.max_output_tokens)
+    GraphifyCompatHandler.log_file = Path(args.log_file)
+    GraphifyCompatHandler.preview_chars = max(256, args.preview_chars)
 
-    server = ThreadingHTTPServer(("127.0.0.1", 0), DiagnosticHandler)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), GraphifyCompatHandler)
     ready = Path(args.ready_file)
     ready.parent.mkdir(parents=True, exist_ok=True)
     ready.write_text(str(server.server_address[1]), encoding="utf-8")
