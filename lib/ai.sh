@@ -207,10 +207,17 @@ _graphify_python_bin() {
 
 _graphify_version_preflight() {
   local graphify_bin="${1:-graphify}" version min_version="${LDS_GRAPHIFY_MIN_VERSION:-0.9.65}"
+  local v_major v_minor v_patch m_major m_minor m_patch
+
   version="$("$graphify_bin" --version 2>/dev/null | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || true)"
   [[ -n "$version" ]] ||
     die "Unable to determine Graphify version. LocalDevStack requires graphifyy >= $min_version."
-  if [[ "$(printf '%s\n%s\n' "$min_version" "$version" | sort -V | head -n1)" != "$min_version" ]]; then
+
+  IFS=. read -r v_major v_minor v_patch <<<"$version"
+  IFS=. read -r m_major m_minor m_patch <<<"$min_version"
+  if ((v_major < m_major)) ||
+    ((v_major == m_major && v_minor < m_minor)) ||
+    ((v_major == m_major && v_minor == m_minor && v_patch < m_patch)); then
     die "Graphify $version is too old. LocalDevStack requires graphifyy >= $min_version."
   fi
 }
