@@ -466,14 +466,14 @@ def _normalize_response_usage(body: bytes) -> bytes:
 
 
 def _fastflow_stream_completion(upstream_response, model: str | None) -> bytes:
-    """Collapse one FastFlow SSE response and drain it through its terminal event.
+    """Collapse one FastFlow SSE response through its terminal tool-call event.
 
-    FastFlow keeps a bounded pool of HTTP connections. Returning as soon as the
-    TOOL_DONE delta arrives leaves the server-side SSE request alive until its
-    producer notices the disconnected client; repeated Graphify chunks can then
-    exhaust FastFlow's connection limit. Retain the completed tool call but keep
-    consuming the stream through [DONE]/EOF so the upstream request is released
-    cleanly and its trailing usage event is preserved.
+    FastFlow keeps a bounded pool of HTTP connections. Returning on the first
+    TOOL_DONE delta is too early because trailing usage/finish metadata may not
+    have arrived yet; waiting all the way for [DONE] is too strict because some
+    FastFlow tool streams stop after the terminal finish_reason=tool_calls chunk.
+    Retain the tool call, consume through that terminal chunk, then let the caller
+    close the upstream response immediately.
     """
     content_parts: list[str] = []
     normalized_calls: list[dict[str, Any]] = []
@@ -528,6 +528,13 @@ def _fastflow_stream_completion(upstream_response, model: str | None) -> bytes:
         calls = delta.get("tool_calls")
         if isinstance(calls, list) and calls:
             normalized_calls.extend(call for call in calls if isinstance(call, dict))
+
+        # FastFlow's terminal tool event is authoritative. Do not wait for a
+        # separate [DONE] sentinel that may never arrive; the surrounding
+        # urlopen context closes the response immediately after this function
+        # returns, and structured requests already carry Connection: close.
+        if normalized_calls and finish_reason == "tool_calls":
+            break
 
     message: dict[str, Any] = {
         "role": "assistant",
