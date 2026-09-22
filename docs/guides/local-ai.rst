@@ -307,19 +307,19 @@ A structurally valid all-empty graph remains valid and is passed back to Graphif
 unchanged; Graphify then decides whether to retry it as a hollow extraction.
 
 Structured generations are deliberately bounded independently of Graphify's larger
-general output allowance. LocalDevStack caps a structured extraction at 2048 output
-tokens and defaults each structured request to a 120-second timeout
-(``LDS_GRAPHIFY_STRUCTURED_TIMEOUT``). This is important for FastFlow because its
-Qwen3.5 non-stream tool parser recognizes ``<tool_call>`` only after generation
-finishes. The LDS FastFlow adapter therefore consumes the streaming parser instead;
-the 2048-token/120-second bounds remain the safety ceiling if no complete tool call
-arrives.
+general output allowance. LocalDevStack defaults a structured extraction to 8192 output
+tokens (``LDS_GRAPHIFY_OUTPUT_TOKENS``) and a 300-second provider timeout
+(``LDS_GRAPHIFY_STRUCTURED_TIMEOUT``). The output budget is also included when
+LocalDevStack derives Ollama context headroom, so the request budget and context window
+remain consistent instead of relying on fixed padding.
 
 LocalDevStack deliberately performs exactly one provider-native structured request
 per Graphify extraction attempt. It does not add its own structured retry or
-free-form fallback chain. If the provider times out or returns an unusable structured
-response, the proxy returns a bounded ``finish_reason=length`` signal so Graphify
-can split the offending chunk through its existing adaptive-retry logic.
+free-form fallback chain. Genuine provider output truncation remains
+``finish_reason=length`` and may be bisected by Graphify's adaptive retry. A transport
+timeout is returned as a timeout error instead: it is not rewritten as truncation,
+because splitting a slow request does not prove the response was too large. Increase
+``LDS_GRAPHIFY_STRUCTURED_TIMEOUT`` or reduce ``--token-budget`` when needed.
 
 For local providers, hidden retry amplification is bounded at both outer layers:
 the OpenAI SDK retry count defaults to zero (``LDS_GRAPHIFY_SDK_RETRIES=0``) and
@@ -353,11 +353,13 @@ FastFlow Qwen3.5 non-stream parser can leave ``<think>...</think>`` text inside
 structured extraction path. ``LDS_GRAPHIFY_THINK=on`` and
 ``LDS_GRAPHIFY_THINK=auto`` remain diagnostic overrides, not recommended defaults.
 
-Before extraction, LocalDevStack checks ``/v1/models`` and fails fast when the
-selected model is absent.
+Before extraction, LocalDevStack verifies the installed Graphify CLI is compatible
+(``graphifyy >= 0.9.65`` by default, overrideable with ``LDS_GRAPHIFY_MIN_VERSION``)
+and checks ``/v1/models``, failing fast when the selected model is absent.
 
-When ``<target>/graphify-out/graph.json`` already exists, ``lds graphify`` keeps
-using Graphify's lower-level ``extract`` pipeline, which automatically switches to
+When both ``<target>/graphify-out/graph.json`` and
+``<target>/graphify-out/manifest.json`` exist, ``lds graphify`` keeps using
+Graphify's lower-level ``extract`` pipeline, which automatically switches to
 incremental mode: only changed code/docs/papers/images are re-extracted, deleted or
 excluded sources are reconciled, and the result is merged into the existing graph.
 This is intentionally preferred over the literal ``graphify update`` CLI command,
