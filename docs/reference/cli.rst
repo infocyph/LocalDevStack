@@ -204,23 +204,20 @@ Host Graphify Workflow
 
    lds graphify
    lds graphify ./your-project
-   lds graphify ./your-project --mode deep --token-budget 4000 --max-concurrency 1
+   lds graphify ./your-project --mode deep --token-budget 3000 --max-concurrency 1
 
 This command runs the host ``graphify`` CLI against the common LocalDevStack LLM route.
-It performs ``extract --backend ollama --no-cluster`` followed by
-``cluster-only <same-path> --backend ollama`` so clustering happens once. Graphify's
-backend is currently named ``ollama`` even though LocalDevStack presents a provider-neutral
-OpenAI-compatible ``/v1`` endpoint.
+For a brand-new graph it performs a code-only ``extract --no-cluster`` first, clusters
+that structural graph, then performs a normal incremental ``extract --no-cluster`` to
+enrich docs/papers/images and clusters the combined graph again. Existing graphs use a
+single incremental extract followed by one ``cluster-only`` pass. Explicit ``--code-only``
+remains a single structural build.
 
-By default it derives:
-
-- ``OLLAMA_BASE_URL=http://llm.localhost:11434/v1`` through Nginx;
-- ``OLLAMA_MODEL`` from the effective provider model;
-- ``GRAPHIFY_API_TIMEOUT`` from ``LDS_AI_TIMEOUT``.
-
-Before extraction, LocalDevStack checks ``/v1/models`` and fails immediately when the
-selected model is unavailable. An explicitly supplied ``OLLAMA_BASE_URL`` bypasses that
-local-provider preflight.
+Backend selection follows the active provider: FastFlow/NPU uses LocalDevStack's
+OpenAI-compatible adapter and Ollama runtimes use the Ollama adapter. The selected model
+comes from the active provider and ``GRAPHIFY_API_TIMEOUT`` defaults from ``LDS_AI_TIMEOUT``.
+Before extraction, LocalDevStack checks ``/v1/models`` for the built-in local route and
+fails immediately when the selected model is unavailable.
 
 LLM Provider
 ------------
