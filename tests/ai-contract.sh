@@ -102,6 +102,8 @@ assert_file_contains "$ROOT/lib/ai.sh" 'lds-ollama'
 assert_file_contains "$ROOT/lib/ai.sh" 'extra_body: {think: false}'
 assert_file_contains "$ROOT/lib/ai.sh" 'reasoning_effort: "none"'
 assert_file_contains "$ROOT/lib/ai.sh" 'graphify-compat-proxy.py'
+assert_file_contains "$ROOT/scripts/graphify-compat-proxy.py" 'request_headers["Connection"] = "close"'
+assert_file_contains "$ROOT/scripts/graphify-compat-proxy.py" 'FastFlow keeps a bounded pool of HTTP connections'
 assert_file_contains "$ROOT/lib/ai.sh" 'http://127.0.0.1:${proxy_port}/v1'
 assert_file_contains "$ROOT/lib/ai.sh" '--provider "$provider"'
 assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_DIAGNOSTICS:-0'
@@ -426,13 +428,13 @@ stream_bytes = (
 collapsed = module._fastflow_stream_completion(io.BytesIO(stream_bytes), "qwen3.5:9b")
 collapsed_json = json.loads(collapsed)
 assert collapsed_json["choices"][0]["finish_reason"] == "tool_calls"
-# FastFlow's tool-call event can arrive before the final SSE usage event. Graphify
-# compares output_tokens numerically, so the compatibility response must never
-# expose null counters through the OpenAI SDK.
+# FastFlow's tool-call event can arrive before the final SSE usage event. The
+# compatibility adapter must drain through [DONE], both to release FastFlow's
+# bounded HTTP connection slot and to retain the trailing usage counters.
 assert collapsed_json["usage"] == {
-    "prompt_tokens": 0,
-    "completion_tokens": 0,
-    "total_tokens": 0,
+    "prompt_tokens": 100,
+    "completion_tokens": 30,
+    "total_tokens": 130,
 }
 assert module._extract_fastflow_structured_graph(collapsed) == graph
 assert module._normalized_usage({
