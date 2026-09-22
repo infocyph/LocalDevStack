@@ -273,8 +273,8 @@ Generic service operations also accept ``llm`` and resolve it to the active prov
    lds exec llm ...
    lds rebuild llm
 
-Provider defaults are ``qwen3.5:9b`` for FastFlow/NPU and ``qwen3.5:9b`` for Ollama.
-Leaving ``LDS_AI_MODEL`` blank allows the runtime-specific default to apply.
+FastFlow/NPU and Ollama both default to ``qwen3.5:9b``. Leaving ``LDS_AI_MODEL``
+blank allows the provider default to apply.
 Rebuild
 -------
 
