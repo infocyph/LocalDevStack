@@ -257,7 +257,7 @@ lds llm runtime amd
 lds llm runtime cpu
 ```
 
-Provider defaults are intentionally different: FastFlow/NPU uses `qwen3.5:9b`; Ollama uses `qwen3:14b`. New setup leaves `LDS_AI_MODEL` blank so the selected provider default can apply. An explicit `LDS_AI_MODEL` overrides whichever provider is active.
+Provider defaults are intentionally different: FastFlow/NPU uses `qwen3.5:9b`; Ollama uses `qwen3.5:9b`. New setup leaves `LDS_AI_MODEL` blank so the selected provider default can apply. An explicit `LDS_AI_MODEL` overrides whichever provider is active.
 
 Common commands:
 
