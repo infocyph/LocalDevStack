@@ -343,13 +343,12 @@ def _decode_jsonish(value: Any) -> Any:
     return current
 
 
-def _coerce_graph_array(value: Any) -> list[dict[str, Any]] | None:
+def _coerce_graph_array(value: Any) -> list[dict[str, Any]]:
+    """Mirror Graphify's fragment sanitizer for provider tool arguments."""
     value = _decode_jsonish(value)
     if not isinstance(value, list):
-        return None
-    if any(not isinstance(entry, dict) for entry in value):
-        return None
-    return value
+        return []
+    return [entry for entry in value if isinstance(entry, dict)]
 
 
 def _coerce_graph_object(value: Any) -> dict[str, Any] | None:
@@ -359,19 +358,20 @@ def _coerce_graph_object(value: Any) -> dict[str, Any] | None:
 
     # Some OpenAI-compatible servers wrap the function payload one level deeper.
     for wrapper in ("arguments", "graph", "payload", "data"):
-        if wrapper in value and not all(key in value for key in _GRAPH_KEYS):
+        if wrapper in value and not any(key in value for key in _GRAPH_KEYS):
             nested = _decode_jsonish(value.get(wrapper))
             if isinstance(nested, dict):
                 value = nested
                 break
 
-    graph: dict[str, Any] = {}
-    for key in _GRAPH_KEYS:
-        array = _coerce_graph_array(value.get(key))
-        if array is None:
-            return None
-        graph[key] = array
-    return graph
+    # Do not turn an unrelated function payload into an empty graph, but once a
+    # graph-shaped payload is present, sanitize it the same way Graphify does:
+    # malformed/missing arrays become empty and stray non-object entries are
+    # discarded rather than rejecting the whole successful chunk.
+    if not any(key in value for key in _GRAPH_KEYS):
+        return None
+
+    return {key: _coerce_graph_array(value.get(key)) for key in _GRAPH_KEYS}
 
 
 def _tool_call_candidates(message: dict[str, Any]) -> list[dict[str, Any]]:
