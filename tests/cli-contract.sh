@@ -68,8 +68,10 @@ grep -Fq 'ollama_base=http://custom-ollama.test:11434/v1 ollama_model=test-ollam
   fail "Graphify Ollama code-first bootstrap contract failed"
 grep -Fq 'ollama_base=http://custom-ollama.test:11434/v1 ollama_model=test-ollama openai_base= openai_model= timeout=42 args=extract . --backend ollama --no-cluster --api-timeout 42 --mode deep' "$graphify_log" ||
   fail "Graphify Ollama semantic enrichment contract failed"
-[[ "$(grep -Fc 'args=cluster-only . --backend ollama' "$graphify_log")" -eq 2 ]] ||
-  fail "Graphify Ollama bootstrap must cluster structural and enriched graphs"
+[[ "$(grep -Fc 'args=cluster-only . --backend ollama' "$graphify_log")" -eq 1 ]] ||
+  fail "Graphify Ollama bootstrap must cluster the structural graph once"
+grep -Fq 'args=label . --backend ollama' "$graphify_log" ||
+  fail "Graphify Ollama bootstrap must relabel the enriched graph"
 if grep -Fq 'args=cluster-only . --backend ollama --max-concurrency 1' "$graphify_log"; then
   fail "External native Ollama should rely on Graphify's built-in serial labeling guard"
 fi
@@ -89,8 +91,10 @@ grep -Fq 'ollama_base= ollama_model= openai_base=http://custom-fastflow.test:114
   fail "Graphify FastFlow code-first bootstrap contract failed"
 grep -Fq 'ollama_base= ollama_model= openai_base=http://custom-fastflow.test:11434/v1 openai_model=test-fastflow timeout=1800 args=extract . --backend openai --no-cluster --token-budget 3000 --max-concurrency 1 --mode deep' "$graphify_log" ||
   fail "Graphify FastFlow semantic enrichment contract failed"
-[[ "$(grep -Fc 'args=cluster-only . --backend openai --max-concurrency 1' "$graphify_log")" -eq 2 ]] ||
-  fail "Graphify FastFlow bootstrap must cluster structural and enriched graphs"
+[[ "$(grep -Fc 'args=cluster-only . --backend openai --max-concurrency 1' "$graphify_log")" -eq 1 ]] ||
+  fail "Graphify FastFlow bootstrap must cluster the structural graph once"
+grep -Fq 'args=label . --backend openai --max-concurrency 1' "$graphify_log" ||
+  fail "Graphify FastFlow bootstrap must relabel the enriched graph"
 
 # Explicit Graphify resource controls always win over LocalDevStack defaults.
 : >"$graphify_log"
@@ -106,7 +110,9 @@ grep -Fq 'args=extract . --backend openai --no-cluster --code-only --token-budge
 grep -Fq 'args=extract . --backend openai --no-cluster --token-budget 6000 --max-concurrency 2' "$graphify_log" ||
   fail "Graphify FastFlow explicit resource overrides were not preserved in semantic enrichment"
 grep -Fq 'args=cluster-only . --backend openai --max-concurrency 2' "$graphify_log" ||
-  fail "Graphify FastFlow explicit concurrency override was not preserved for community labeling"
+  fail "Graphify FastFlow explicit concurrency override was not preserved for structural labeling"
+grep -Fq 'args=label . --backend openai --max-concurrency 2' "$graphify_log" ||
+  fail "Graphify FastFlow explicit concurrency override was not preserved for final relabeling"
 
 # Explicit --code-only remains a single structural build; it does not opt into
 # automatic semantic enrichment.
