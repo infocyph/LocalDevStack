@@ -6,6 +6,7 @@ on:
       - main
       - "plan/**"
       - "feature/**"
+      - "graphify/**"
   pull_request:
   schedule:
     # Related moving latest images refresh weekly; re-run the full compatibility
