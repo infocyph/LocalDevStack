@@ -163,8 +163,8 @@ Both provider definitions live in ``docker/compose/companion.yaml`` but dynamic 
 selection ensures they are mutually exclusive. FastFlow uses ``infocyph/llm-fastflow:latest``
 for ``npu``. Ollama uses ``latest`` for CPU/NVIDIA and ``amd-latest`` for AMD/ROCm.
 
-Provider defaults also differ: FastFlow uses ``qwen3.5:9b`` and Ollama uses
-``qwen3.5:9b`` unless ``LDS_AI_MODEL`` is explicitly set.
+FastFlow and Ollama both default to ``qwen3.5:9b`` unless ``LDS_AI_MODEL`` is
+explicitly set.
 
 NVIDIA/ROCm hardware augmentation is generated temporarily under ``docker/.runtime/``.
 FastFlow's XDNA2 device and memlock contract is tracked directly in its service definition.
