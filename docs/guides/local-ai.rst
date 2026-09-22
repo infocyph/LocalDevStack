@@ -285,9 +285,13 @@ Ollama / CPU, NVIDIA or ROCm:
 
 The Ollama provider definition also keeps explicit context headroom for Graphify's
 local chunks. Both local providers default to ``--token-budget 3000
---max-concurrency 1`` unless the caller supplied those flags. These limits and the
-no-thinking request are separate protections: the former prevents local context/resource
-pressure, while the latter keeps reasoning out of the structured response channel.
+--max-concurrency 1`` unless the caller supplied those flags. The same concurrency
+value is also forwarded to ``cluster-only`` community labeling. This matters for the
+custom ``lds-fastflow`` / ``lds-ollama`` backends because Graphify's built-in
+Ollama serialization guard only recognizes the literal ``ollama`` backend name.
+These limits and the no-thinking request are separate protections: the former prevents
+local context/resource pressure, while the latter keeps reasoning out of the structured
+response channel.
 
 Structured extraction is provider-specific:
 
