@@ -222,6 +222,11 @@ _graphify_version_preflight() {
   fi
 }
 
+_graphify_has_incremental_state() {
+  local target="${1:-.}"
+  [[ -d "$target" && -f "$target/graphify-out/graph.json" && -f "$target/graphify-out/manifest.json" ]]
+}
+
 _graphify_diagnostics_enabled() {
   case "${LDS_GRAPHIFY_DIAGNOSTICS:-0}" in
   1 | true | TRUE | yes | YES | on | ON) return 0 ;;
@@ -399,7 +404,7 @@ cmd_graphify() {
   graphify_target="$target"
   provider_dir=""
 
-  if [[ -d "$target_abs" && -f "$target_abs/graphify-out/graph.json" && -f "$target_abs/graphify-out/manifest.json" ]]; then
+  if _graphify_has_incremental_state "$target_abs"; then
     if ((force_rebuild)); then
       printf '%s\n' "[lds graphify] existing graph detected; --force requested, performing a full rebuild" >&2
     else
