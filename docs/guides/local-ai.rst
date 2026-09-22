@@ -113,7 +113,7 @@ Ollama state persists in ``LLMModels`` mounted at ``/root/.ollama``.
 Model Defaults
 --------------
 
-Provider defaults are different:
+Both provider families use the same default model:
 
 .. code-block:: text
 
@@ -122,8 +122,8 @@ Provider defaults are different:
 
 New setup leaves ``LDS_AI_MODEL`` blank so the selected provider default can apply.
 An explicit ``LDS_AI_MODEL`` in ``docker/.env`` overrides whichever provider is active.
-Because the providers may publish different model names, keep this blank when relying on
-automatic runtime switching unless the override exists in both providers.
+Keep ``LDS_AI_MODEL`` blank when you want the common ``qwen3.5:9b`` default to follow
+automatic runtime switching; set it only for an intentional override.
 
 Thinking Control
 ----------------
