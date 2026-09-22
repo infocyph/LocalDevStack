@@ -209,6 +209,9 @@ _graphify_version_preflight() {
   local graphify_bin="${1:-graphify}" version min_version="${LDS_GRAPHIFY_MIN_VERSION:-0.9.65}"
   local v_major v_minor v_patch m_major m_minor m_patch
 
+  [[ "$min_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
+    die "LDS_GRAPHIFY_MIN_VERSION must use MAJOR.MINOR.PATCH format."
+
   version="$("$graphify_bin" --version 2>/dev/null | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || true)"
   [[ -n "$version" ]] ||
     die "Unable to determine Graphify version. LocalDevStack requires graphifyy >= $min_version."
