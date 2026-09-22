@@ -229,9 +229,9 @@ runtime in this order: supported XDNA2 NPU, NVIDIA, AMD ROCm, CPU.
 Provider mapping is::
 
    npu     -> FastFlow / infocyph/llm-fastflow:latest / qwen3.5:9b
-   nvidia  -> Ollama   / infocyph/llm-ollama:latest / qwen3:14b
-   amd     -> Ollama   / infocyph/llm-ollama:amd-latest / qwen3:14b
-   cpu     -> Ollama   / infocyph/llm-ollama:latest / qwen3:14b
+   nvidia  -> Ollama   / infocyph/llm-ollama:latest / qwen3.5:9b
+   amd     -> Ollama   / infocyph/llm-ollama:amd-latest / qwen3.5:9b
+   cpu     -> Ollama   / infocyph/llm-ollama:latest / qwen3.5:9b
 
 Only one provider service is enabled. The selected service owns the ``llm`` Docker alias
 on port ``11434``.
