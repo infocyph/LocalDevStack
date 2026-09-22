@@ -914,6 +914,7 @@ def main() -> int:
     DiagnosticHandler.diagnostics = args.diagnostics == "on"
     DiagnosticHandler.upstream_timeout = max(1, args.timeout)
     DiagnosticHandler.structured_timeout = max(1, args.structured_timeout)
+    DiagnosticHandler.max_output_tokens = max(512, args.max_output_tokens)
     DiagnosticHandler.log_file = Path(args.log_file)
     DiagnosticHandler.preview_chars = max(256, args.preview_chars)
 
