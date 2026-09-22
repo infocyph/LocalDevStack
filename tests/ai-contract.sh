@@ -29,21 +29,21 @@ done
 models="$(
   docker exec "$container" python -c     'import urllib.request; print(urllib.request.urlopen("http://127.0.0.1:11434/v1/models", timeout=2).read().decode())'
 )"
-assert_contains "$models" "qwen3:14b"
+assert_contains "$models" "qwen3.5:9b"
 
 tags="$(
   docker exec "$container" python -c     'import urllib.request; print(urllib.request.urlopen("http://127.0.0.1:11434/api/tags", timeout=2).read().decode())'
 )"
-assert_contains "$tags" "qwen3:14b"
+assert_contains "$tags" "qwen3.5:9b"
 pass "fake provider exposes common OpenAI API plus Ollama-native compatibility"
 
 docker pull infocyph/tools:latest >/dev/null
 provider_status="$(
-  docker run --rm --network "$network"     --entrypoint askai     -e LDS_AI_ENABLED=1     -e LDS_AI_PROVIDER=llm     -e LDS_AI_URL=http://llm:11434     -e LDS_AI_MODEL=qwen3:14b     infocyph/tools:latest --status
+  docker run --rm --network "$network"     --entrypoint askai     -e LDS_AI_ENABLED=1     -e LDS_AI_PROVIDER=llm     -e LDS_AI_URL=http://llm:11434     -e LDS_AI_MODEL=qwen3.5:9b     infocyph/tools:latest --status
 )"
 assert_contains "$provider_status" "provider=llm"
 assert_contains "$provider_status" "available=1"
-assert_contains "$provider_status" "model=qwen3:14b"
+assert_contains "$provider_status" "model=qwen3.5:9b"
 pass "latest Tools reaches the common LocalDevStack llm contract"
 
 [[ ! -e "$ROOT/docker/compose/ai.yaml" ]] || fail "base AI service must remain consolidated into companion.yaml"
@@ -59,7 +59,7 @@ assert_file_contains "$ROOT/docker/compose/companion.yaml" 'profiles: ["${LDS_AI
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'aliases: [llm]'
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'lds_llm:/root/.ollama'
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'lds_llm_fastflow:/models'
-assert_file_contains "$ROOT/docker/compose/companion.yaml" 'LLM_OLLAMA_MODEL=${LDS_AI_MODEL:-qwen3:14b}'
+assert_file_contains "$ROOT/docker/compose/companion.yaml" 'LLM_OLLAMA_MODEL=${LDS_AI_MODEL:-qwen3.5:9b}'
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'LLM_FASTFLOW_MODEL=${LDS_AI_MODEL:-qwen3.5:9b}'
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'LLM_THINK=${LDS_AI_THINK:-}'
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'LDS_AI_THINK=${LDS_AI_THINK:-}'
@@ -101,20 +101,24 @@ assert_file_contains "$ROOT/lib/ai.sh" 'lds-fastflow'
 assert_file_contains "$ROOT/lib/ai.sh" 'lds-ollama'
 assert_file_contains "$ROOT/lib/ai.sh" 'extra_body: {think: false}'
 assert_file_contains "$ROOT/lib/ai.sh" 'reasoning_effort: "none"'
-assert_file_contains "$ROOT/lib/ai.sh" 'graphify-diagnostic-proxy.py'
+assert_file_contains "$ROOT/lib/ai.sh" 'graphify-compat-proxy.py'
 assert_file_contains "$ROOT/lib/ai.sh" 'http://127.0.0.1:${proxy_port}/v1'
 assert_file_contains "$ROOT/lib/ai.sh" '--provider "$provider"'
 assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_DIAGNOSTICS:-0'
 assert_file_contains "$ROOT/lib/ai.sh" '--diagnostics "$diagnostic_mode"'
-assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_STRUCTURED_TIMEOUT:-120'
+assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_STRUCTURED_TIMEOUT:-300'
+assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_OUTPUT_TOKENS:-8192'
+assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_MIN_VERSION:-0.9.65'
+assert_file_contains "$ROOT/lib/ai.sh" 'manifest.json'
 assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_SDK_RETRIES:-0'
 assert_file_contains "$ROOT/lib/ai.sh" 'export GRAPHIFY_MAX_RETRIES="$graphify_sdk_retries"'
 assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_MAX_RETRY_DEPTH:-1'
 assert_file_contains "$ROOT/lib/ai.sh" 'export GRAPHIFY_MAX_RETRY_DEPTH="$graphify_retry_depth"'
 assert_file_contains "$ROOT/lib/ai.sh" 'existing graph detected; using Graphify incremental update (changed files only)'
 assert_file_contains "$ROOT/lib/ai.sh" 'existing graph detected; --force requested, performing a full rebuild'
-assert_file_contains "$ROOT/lib/ai.sh" 'no existing graph detected; performing initial full build'
+assert_file_contains "$ROOT/lib/ai.sh" 'no complete incremental state detected; performing full build'
 assert_file_contains "$ROOT/lib/ai.sh" '--structured-timeout "$structured_timeout"'
+assert_file_contains "$ROOT/lib/ai.sh" '--max-output-tokens "$structured_output_tokens"'
 assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_THINK:-off'
 assert_file_contains "$ROOT/lib/ai.sh" 'lds-graphify-diagnostics.jsonl'
 assert_file_contains "$ROOT/lib/ai.sh" 'llm think <auto|on|off>'
@@ -125,12 +129,12 @@ pass "LLM CLI and Graphify resolve through provider-aware common endpoint"
   need_bin() { :; }
   die() { return 1; }
   curl() {
-    printf '%s\n' '{"object":"list","data":[{"id":"qwen3:14b"},{"id":"qwen3.5:9b"}]}'
+    printf '%s\n' '{"object":"list","data":[{"id":"qwen3.5:9b"},{"id":"qwen3.5:9b"}]}'
   }
   # shellcheck source=lib/ai.sh
   source "$ROOT/lib/ai.sh"
 
-  _graphify_local_model_preflight qwen3:14b ||
+  _graphify_local_model_preflight qwen3.5:9b ||
     fail "Graphify rejected the Ollama default through common model catalog"
   _graphify_local_model_preflight qwen3.5:9b ||
     fail "Graphify rejected the FastFlow default through common model catalog"
@@ -178,15 +182,15 @@ pass "Graphify backend selection follows active LLM provider"
   jq -e '(."lds-fastflow" | has("extra_body") | not) and (."lds-fastflow" | has("reasoning_effort") | not)' "$tmp/.graphify/providers.json" >/dev/null ||
     fail "FastFlow Graphify auto override must omit thinking controls"
 
-  [[ "$(_graphify_write_local_provider "$tmp" ollama http://llm.localhost:11434/v1 qwen3:14b 4000)" == lds-ollama ]] ||
+  [[ "$(_graphify_write_local_provider "$tmp" ollama http://llm.localhost:11434/v1 qwen3.5:9b 4000)" == lds-ollama ]] ||
     fail "Ollama local Graphify provider name drifted"
   jq -e '."lds-ollama".reasoning_effort == "none" and ."lds-ollama".extra_body.options.num_ctx >= 8192' "$tmp/.graphify/providers.json" >/dev/null ||
     fail "Ollama local Graphify provider must disable thinking and retain context headroom"
 )
 pass "Graphify local providers enforce structured no-thinking contracts"
 
-python3 -m py_compile "$ROOT/scripts/graphify-diagnostic-proxy.py"
-python3 - "$ROOT/scripts/graphify-diagnostic-proxy.py" <<'PY'
+python3 -m py_compile "$ROOT/scripts/graphify-compat-proxy.py"
+python3 - "$ROOT/scripts/graphify-compat-proxy.py" <<'PY'
 import importlib.util
 import io
 import json
@@ -262,13 +266,13 @@ assert recovery_json["stream"] is True
 assert recovery_json["think"] is False
 assert "STRUCTURED OUTPUT" in recovery_json["messages"][0]["content"]
 assert recovery_json["temperature"] == 0
-assert recovery_json["max_completion_tokens"] == 2048
+assert recovery_json["max_completion_tokens"] == 8192
 
 assert recovery_json["tools"][0]["function"]["parameters"] == module._GRAPH_SCHEMA
 assert "rationale_for" not in module._GRAPH_SCHEMA["properties"]["edges"]["items"]["properties"]["relation"]["enum"]
 
 ollama_body = json.dumps({
-    "model": "qwen3:14b",
+    "model": "qwen3.5:9b",
     "messages": [
         {"role": "system", "content": "You are a graphify semantic extraction agent."},
         {"role": "user", "content": "private corpus content"}
@@ -284,7 +288,7 @@ ollama_json = json.loads(ollama_request)
 assert ollama_json["reasoning_effort"] == "none"
 assert ollama_json["options"]["num_ctx"] == 8192
 assert ollama_json["temperature"] == 0
-assert ollama_json["max_completion_tokens"] == 2048
+assert ollama_json["max_completion_tokens"] == 8192
 assert ollama_json["response_format"]["type"] == "json_schema"
 assert ollama_json["response_format"]["json_schema"]["strict"] is True
 assert ollama_json["response_format"]["json_schema"]["schema"] == module._GRAPH_SCHEMA
