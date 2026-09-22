@@ -99,7 +99,7 @@ _graphify_local_backend_for_provider() {
 }
 
 _graphify_write_local_provider() {
-  local dir="$1" provider="$2" base_url="$3" model="$4" token_budget="$5" think_mode="${6:-off}"
+  local dir="$1" provider="$2" base_url="$3" model="$4" token_budget="$5" think_mode="${6:-off}" output_budget="${7:-8192}"
   local backend num_ctx
   backend="$(_graphify_local_backend_for_provider "$provider")" || return 1
 
@@ -153,8 +153,8 @@ _graphify_write_local_provider() {
     esac
     ;;
   ollama)
-    num_ctx=$((token_budget + 8192 + 2400))
-    ((num_ctx < 8192)) && num_ctx=8192
+    num_ctx=$((token_budget + output_budget + 4096))
+    ((num_ctx < 16384)) && num_ctx=16384
     ((num_ctx > 131072)) && num_ctx=131072
     num_ctx=$((((num_ctx + 1023) / 1024) * 1024))
     jq -n \
@@ -205,6 +205,16 @@ _graphify_python_bin() {
   return 1
 }
 
+_graphify_version_preflight() {
+  local graphify_bin="${1:-graphify}" version min_version="${LDS_GRAPHIFY_MIN_VERSION:-0.9.65}"
+  version="$("$graphify_bin" --version 2>/dev/null | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || true)"
+  [[ -n "$version" ]] ||
+    die "Unable to determine Graphify version. LocalDevStack requires graphifyy >= $min_version."
+  if [[ "$(printf '%s\n%s\n' "$min_version" "$version" | sort -V | head -n1)" != "$min_version" ]]; then
+    die "Graphify $version is too old. LocalDevStack requires graphifyy >= $min_version."
+  fi
+}
+
 _graphify_diagnostics_enabled() {
   case "${LDS_GRAPHIFY_DIAGNOSTICS:-0}" in
   1 | true | TRUE | yes | YES | on | ON) return 0 ;;
@@ -222,7 +232,7 @@ cmd_graphify() {
 
   local runtime provider backend base_url timeout model api_key graphify_bin arg provider_dir target_abs graphify_target
   local graphify_python="" diagnostic_root="" diagnostic_log="" diagnostic_preview="4096" graphify_think="off"
-  local diagnostic_mode="off" structured_timeout="" graphify_sdk_retries="" graphify_retry_depth=""
+  local diagnostic_mode="off" structured_timeout="" structured_output_tokens="" graphify_sdk_retries="" graphify_retry_depth=""
   local local_provider=0 force_rebuild=0
   local next_is_model=0 next_is_timeout=0 next_is_token_budget=0 next_is_max_concurrency=0
   local has_token_budget=0 has_max_concurrency=0
@@ -259,9 +269,13 @@ cmd_graphify() {
 
   timeout="${GRAPHIFY_API_TIMEOUT:-$(compose_control_value LDS_AI_TIMEOUT 1800)}"
 
-  structured_timeout="${LDS_GRAPHIFY_STRUCTURED_TIMEOUT:-120}"
+  structured_timeout="${LDS_GRAPHIFY_STRUCTURED_TIMEOUT:-300}"
   [[ "$structured_timeout" =~ ^[0-9]+$ ]] && ((structured_timeout >= 1)) ||
     die "LDS_GRAPHIFY_STRUCTURED_TIMEOUT must be a positive integer"
+
+  structured_output_tokens="${LDS_GRAPHIFY_OUTPUT_TOKENS:-8192}"
+  [[ "$structured_output_tokens" =~ ^[0-9]+$ ]] && ((structured_output_tokens >= 512)) ||
+    die "LDS_GRAPHIFY_OUTPUT_TOKENS must be an integer >= 512"
 
   graphify_sdk_retries="${GRAPHIFY_MAX_RETRIES:-${LDS_GRAPHIFY_SDK_RETRIES:-0}}"
   [[ "$graphify_sdk_retries" =~ ^[0-9]+$ ]] ||
@@ -373,18 +387,19 @@ cmd_graphify() {
   ((local_provider == 0)) || _graphify_local_model_preflight "$model"
 
   graphify_bin="$(bin_path graphify)"
+  _graphify_version_preflight "$graphify_bin"
   target_abs="$(_realpath "$target")"
   graphify_target="$target"
   provider_dir=""
 
-  if [[ -d "$target_abs" && -f "$target_abs/graphify-out/graph.json" ]]; then
+  if [[ -d "$target_abs" && -f "$target_abs/graphify-out/graph.json" && -f "$target_abs/graphify-out/manifest.json" ]]; then
     if ((force_rebuild)); then
       printf '%s\n' "[lds graphify] existing graph detected; --force requested, performing a full rebuild" >&2
     else
       printf '%s\n' "[lds graphify] existing graph detected; using Graphify incremental update (changed files only)" >&2
     fi
   else
-    printf '%s\n' "[lds graphify] no existing graph detected; performing initial full build" >&2
+    printf '%s\n' "[lds graphify] no complete incremental state detected; performing full build" >&2
   fi
 
   if ((local_provider)); then
@@ -433,12 +448,13 @@ cmd_graphify() {
           : >"$diagnostic_log"
         fi
 
-        "$graphify_python" "$DIR/scripts/graphify-diagnostic-proxy.py" \
+        "$graphify_python" "$DIR/scripts/graphify-compat-proxy.py" \
           --upstream "${base_url%/v1}" \
           --provider "$provider" \
           --diagnostics "$diagnostic_mode" \
           --timeout "$timeout" \
           --structured-timeout "$structured_timeout" \
+          --max-output-tokens "$structured_output_tokens" \
           --ready-file "$ready_file" \
           --log-file "$diagnostic_log" \
           --preview-chars "$diagnostic_preview" &
@@ -463,7 +479,7 @@ cmd_graphify() {
         fi
       fi
 
-      backend="$(_graphify_write_local_provider "$provider_dir" "$provider" "$local_provider_base_url" "$model" "$token_budget_value" "$graphify_think")" ||
+      backend="$(_graphify_write_local_provider "$provider_dir" "$provider" "$local_provider_base_url" "$model" "$token_budget_value" "$graphify_think" "$structured_output_tokens")" ||
         die "Unable to build LocalDevStack Graphify provider configuration"
 
       unset OPENAI_BASE_URL OPENAI_API_KEY OPENAI_MODEL OLLAMA_BASE_URL OLLAMA_API_KEY OLLAMA_MODEL
