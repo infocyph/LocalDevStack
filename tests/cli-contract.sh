@@ -82,9 +82,9 @@ LDS_AI_TIMEOUT=1800 \
 GRAPHIFY_TEST_LOG="$graphify_log" \
   "$ROOT/lds" graphify . --mode deep >/dev/null
 
-grep -Fq 'ollama_base= ollama_model= openai_base=http://custom-fastflow.test:11434/v1 openai_model=test-fastflow timeout=1800 args=extract . --backend openai --no-cluster --code-only --token-budget 4000 --max-concurrency 1 --mode deep' "$graphify_log" ||
+grep -Fq 'ollama_base= ollama_model= openai_base=http://custom-fastflow.test:11434/v1 openai_model=test-fastflow timeout=1800 args=extract . --backend openai --no-cluster --code-only --token-budget 3000 --max-concurrency 1 --mode deep' "$graphify_log" ||
   fail "Graphify FastFlow code-first bootstrap contract failed"
-grep -Fq 'ollama_base= ollama_model= openai_base=http://custom-fastflow.test:11434/v1 openai_model=test-fastflow timeout=1800 args=extract . --backend openai --no-cluster --token-budget 4000 --max-concurrency 1 --mode deep' "$graphify_log" ||
+grep -Fq 'ollama_base= ollama_model= openai_base=http://custom-fastflow.test:11434/v1 openai_model=test-fastflow timeout=1800 args=extract . --backend openai --no-cluster --token-budget 3000 --max-concurrency 1 --mode deep' "$graphify_log" ||
   fail "Graphify FastFlow semantic enrichment contract failed"
 [[ "$(grep -Fc 'args=cluster-only . --backend openai' "$graphify_log")" -eq 2 ]] ||
   fail "Graphify FastFlow bootstrap must cluster structural and enriched graphs"
@@ -115,7 +115,7 @@ GRAPHIFY_TEST_LOG="$graphify_log" \
 
 [[ "$(grep -Fc 'args=extract . --backend openai --no-cluster' "$graphify_log")" -eq 1 ]] ||
   fail "Explicit Graphify --code-only must remain single-phase"
-grep -Fq 'args=extract . --backend openai --no-cluster --token-budget 4000 --max-concurrency 1 --code-only' "$graphify_log" ||
+grep -Fq 'args=extract . --backend openai --no-cluster --token-budget 3000 --max-concurrency 1 --code-only' "$graphify_log" ||
   fail "Explicit Graphify --code-only flag was not preserved"
 [[ "$(grep -Fc 'args=cluster-only . --backend openai' "$graphify_log")" -eq 1 ]] ||
   fail "Explicit Graphify --code-only must cluster exactly once"
@@ -123,7 +123,7 @@ grep -Fq 'args=extract . --backend openai --no-cluster --token-budget 4000 --max
 rm -f "$graphify_log"
 assert_file_contains "$ROOT/lib/ai.sh" "http://llm.localhost:11434/v1"
 assert_file_contains "$ROOT/lib/ai.sh" 'fastflow) printf '\''%s'\'' openai'
-assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_TOKEN_BUDGET:-4000'
+assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_TOKEN_BUDGET:-3000'
 assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_MAX_CONCURRENCY:-1'
 assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_MIN_VERSION:-0.9.65'
 assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_OUTPUT_TOKENS:-8192'
