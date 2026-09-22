@@ -68,7 +68,7 @@ grep -Fq 'ollama_base=http://custom-ollama.test:11434/v1 ollama_model=test-ollam
   fail "Graphify Ollama code-first bootstrap contract failed"
 grep -Fq 'ollama_base=http://custom-ollama.test:11434/v1 ollama_model=test-ollama openai_base= openai_model= timeout=42 args=extract . --backend ollama --no-cluster --api-timeout 42 --mode deep' "$graphify_log" ||
   fail "Graphify Ollama semantic enrichment contract failed"
-[[ "$(grep -Fc 'args=cluster-only . --backend ollama' "$graphify_log")" -eq 2 ]] ||
+[[ "$(grep -Fc 'args=cluster-only . --backend ollama --max-concurrency 1' "$graphify_log")" -eq 2 ]] ||
   fail "Graphify Ollama bootstrap must cluster structural and enriched graphs"
 
 # FastFlow runtime uses Graphify's generic OpenAI backend and conservative local
@@ -86,7 +86,7 @@ grep -Fq 'ollama_base= ollama_model= openai_base=http://custom-fastflow.test:114
   fail "Graphify FastFlow code-first bootstrap contract failed"
 grep -Fq 'ollama_base= ollama_model= openai_base=http://custom-fastflow.test:11434/v1 openai_model=test-fastflow timeout=1800 args=extract . --backend openai --no-cluster --token-budget 3000 --max-concurrency 1 --mode deep' "$graphify_log" ||
   fail "Graphify FastFlow semantic enrichment contract failed"
-[[ "$(grep -Fc 'args=cluster-only . --backend openai' "$graphify_log")" -eq 2 ]] ||
+[[ "$(grep -Fc 'args=cluster-only . --backend openai --max-concurrency 1' "$graphify_log")" -eq 2 ]] ||
   fail "Graphify FastFlow bootstrap must cluster structural and enriched graphs"
 
 # Explicit Graphify resource controls always win over LocalDevStack defaults.
@@ -117,7 +117,7 @@ GRAPHIFY_TEST_LOG="$graphify_log" \
   fail "Explicit Graphify --code-only must remain single-phase"
 grep -Fq 'args=extract . --backend openai --no-cluster --token-budget 3000 --max-concurrency 1 --code-only' "$graphify_log" ||
   fail "Explicit Graphify --code-only flag was not preserved"
-[[ "$(grep -Fc 'args=cluster-only . --backend openai' "$graphify_log")" -eq 1 ]] ||
+[[ "$(grep -Fc 'args=cluster-only . --backend openai --max-concurrency 1' "$graphify_log")" -eq 1 ]] ||
   fail "Explicit Graphify --code-only must cluster exactly once"
 
 rm -f "$graphify_log"
