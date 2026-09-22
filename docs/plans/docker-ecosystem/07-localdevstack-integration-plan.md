@@ -105,7 +105,7 @@ Host
         ├── databases and admin clients
         │
         └── llm-ollama current stable (optional)
-              ├── qwen3:14b baked default
+              ├── qwen3.5:9b baked default
               ├── persistent /root/.ollama
               └── Ollama API :11434
 ```
@@ -600,7 +600,7 @@ Mount it to:
 
 The volume is authoritative runtime model state.
 
-A fresh volume receives the image-baked `qwen3:14b`.
+A fresh volume receives the image-baked `qwen3.5:9b`.
 
 Existing populated volumes must never be silently replaced/reset during upgrades.
 
@@ -687,7 +687,7 @@ Pass the published Tools AI contract into `server-tools`:
 LDS_AI_ENABLED=auto
 LDS_AI_PROVIDER=ollama
 LDS_AI_URL=http://llm-ollama:11434
-LDS_AI_MODEL=qwen3:14b
+LDS_AI_MODEL=qwen3.5:9b
 ```
 
 Allow user overrides.
@@ -708,7 +708,7 @@ default. Forward `LDS_AI_TIMEOUT` to the Nginx container as
 long-running request budget. Do not reintroduce a shorter independent UI/process timeout
 for Admin AI analysis.
 
-Why LocalDevStack should default `LDS_AI_MODEL=qwen3:14b`:
+Why LocalDevStack should default `LDS_AI_MODEL=qwen3.5:9b`:
 
 - `llm-ollama:latest` ships that model;
 - the 14B Qwen3 default provides materially stronger instruction/structured-output behavior than the previous 3B model while remaining practical on modern 32 GB unified-memory developer hosts;
@@ -907,7 +907,7 @@ Prompt only relevant AI settings:
 
 - enable AI yes/no;
 - detected runtime is shown, not prompted by default;
-- preferred model default `qwen3:14b`;
+- preferred model default `qwen3.5:9b`;
 - optional direct localhost port yes/no.
 
 Do not ask users for low-level timeout/byte-limit settings during normal setup.
@@ -1841,7 +1841,7 @@ With fake provider on normal CI:
 With real provider on manual/release gate when feasible:
 
 - `infocyph/llm-ollama:latest`;
-- baked `qwen3:14b`;
+- baked `qwen3.5:9b`;
 - persistent model volume;
 - Tools generation;
 - Nginx `llm-ollama.localhost`.
@@ -2323,7 +2323,7 @@ The default model follows the runtime:
 
 ```text
 FastFlow / NPU -> qwen3.5:9b
-Ollama         -> qwen3:14b
+Ollama         -> qwen3.5:9b
 ```
 
 Setup leaves `LDS_AI_MODEL` blank by default so the correct provider default can apply.
