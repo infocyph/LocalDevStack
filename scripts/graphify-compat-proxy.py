@@ -304,7 +304,12 @@ def _build_tool_recovery_request(body: bytes, maximum: int = _STRUCTURED_MAX_TOK
         "\n\nSTRUCTURED OUTPUT: Do not emit the graph as ordinary assistant text. "
         "Call the submit_graph tool exactly once. Put the complete extraction "
         "fragment into its nodes, edges, and hyperedges arguments. Do not add "
-        "new facts; follow the original Graphify schema and source_file rules."
+        "new facts; follow the original Graphify schema and source_file rules. "
+        "For every non-empty source file in this chunk, emit at least one "
+        "evidence-backed node whose source_file is that exact file. If the file "
+        "contains no richer entity, use a conservative file-level document node "
+        "derived only from its filename/title. Do not invent relationships merely "
+        "to avoid an empty graph; edges and hyperedges may remain empty."
     )
     injected = False
     for message in messages:
