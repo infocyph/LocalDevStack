@@ -406,7 +406,24 @@ stream_bytes = (
 collapsed = module._fastflow_stream_completion(io.BytesIO(stream_bytes), "qwen3.5:9b")
 collapsed_json = json.loads(collapsed)
 assert collapsed_json["choices"][0]["finish_reason"] == "tool_calls"
+# FastFlow's tool-call event can arrive before the final SSE usage event. Graphify
+# compares output_tokens numerically, so the compatibility response must never
+# expose null counters through the OpenAI SDK.
+assert collapsed_json["usage"] == {
+    "prompt_tokens": 0,
+    "completion_tokens": 0,
+    "total_tokens": 0,
+}
 assert module._extract_fastflow_structured_graph(collapsed) == graph
+assert module._normalized_usage({
+    "prompt_tokens": 12,
+    "completion_tokens": None,
+    "total_tokens": None,
+}) == {
+    "prompt_tokens": 12,
+    "completion_tokens": 0,
+    "total_tokens": 12,
+}
 
 content_only_response = {
     "choices": [{
