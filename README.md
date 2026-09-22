@@ -278,7 +278,7 @@ lds llm chat ...
 # Host Graphify through the common LocalDevStack /v1 endpoint
 lds graphify
 lds graphify ./your-project --mode deep
-# FastFlow already defaults to --token-budget 4000 --max-concurrency 1;
+# FastFlow already defaults to --token-budget 3000 --max-concurrency 1;
 # pass explicit values only when you want to override them.
 ```
 
@@ -286,7 +286,7 @@ lds graphify ./your-project --mode deep
 
 Nginx owns the loopback-only native route `127.0.0.1:11434 -> nginx:11434 -> llm:11434`. Provider containers do not publish host ports.
 
-`lds graphify` uses `http://llm.localhost:11434/v1` and validates the selected model through `/v1/models`. Backend selection follows the active provider automatically: FastFlow uses Graphify's generic `openai` backend, while Ollama uses Graphify's native `ollama` backend. For FastFlow, LocalDevStack also defaults to `--token-budget 4000 --max-concurrency 1` unless explicitly overridden; this keeps Qwen3.5 9B semantic chunks inside a safe local context budget.
+`lds graphify` uses `http://llm.localhost:11434/v1` and validates the selected model through `/v1/models`. Backend selection follows the active provider automatically: FastFlow uses Graphify's generic `openai` backend, while Ollama uses Graphify's native `ollama` backend. Local Graphify defaults to `--token-budget 3000 --max-concurrency 1` unless explicitly overridden. On a brand-new graph, `lds graphify` first builds and clusters the code-only structural graph, then incrementally enriches it with semantic files and clusters the combined graph.
 
 The built-in Compose layout keeps both provider definitions in `docker/compose/companion.yaml`, but runtime-generated profile selectors enable exactly one. NVIDIA/ROCm hardware augmentation is generated ephemerally under `docker/.runtime/`; FastFlow's `/dev/accel/accel0` + memlock contract lives in its tracked service definition.
 
