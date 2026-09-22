@@ -425,6 +425,16 @@ assert module._normalized_usage({
     "total_tokens": 12,
 }
 
+normalized_body = module._normalize_response_usage(json.dumps({
+    "choices": [{"message": {"content": "{}"}, "finish_reason": "stop"}],
+    "usage": {"prompt_tokens": None, "completion_tokens": None, "total_tokens": None},
+}).encode())
+assert json.loads(normalized_body)["usage"] == {
+    "prompt_tokens": 0,
+    "completion_tokens": 0,
+    "total_tokens": 0,
+}
+
 content_only_response = {
     "choices": [{
         "index": 0,
