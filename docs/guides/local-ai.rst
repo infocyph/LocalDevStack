@@ -118,7 +118,7 @@ Provider defaults are different:
 .. code-block:: text
 
    FastFlow / NPU -> qwen3.5:9b
-   Ollama         -> qwen3:14b
+   Ollama         -> qwen3.5:9b
 
 New setup leaves ``LDS_AI_MODEL`` blank so the selected provider default can apply.
 An explicit ``LDS_AI_MODEL`` in ``docker/.env`` overrides whichever provider is active.
