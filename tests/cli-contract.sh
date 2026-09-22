@@ -102,6 +102,8 @@ grep -Fq 'args=extract . --backend openai --no-cluster --code-only --token-budge
   fail "Graphify FastFlow explicit resource overrides were not preserved in bootstrap"
 grep -Fq 'args=extract . --backend openai --no-cluster --token-budget 6000 --max-concurrency 2' "$graphify_log" ||
   fail "Graphify FastFlow explicit resource overrides were not preserved in semantic enrichment"
+grep -Fq 'args=cluster-only . --backend openai --max-concurrency 2' "$graphify_log" ||
+  fail "Graphify FastFlow explicit concurrency override was not preserved for community labeling"
 
 # Explicit --code-only remains a single structural build; it does not opt into
 # automatic semantic enrichment.
