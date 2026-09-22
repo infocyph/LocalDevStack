@@ -225,6 +225,11 @@ _graphify_version_preflight() {
   fi
 }
 
+_graphify_has_graph() {
+  local target="${1:-.}"
+  [[ -d "$target" && -f "$target/graphify-out/graph.json" ]]
+}
+
 _graphify_has_incremental_state() {
   local target="${1:-.}"
   [[ -d "$target" && -f "$target/graphify-out/graph.json" && -f "$target/graphify-out/manifest.json" ]]
@@ -248,7 +253,7 @@ cmd_graphify() {
   local runtime provider backend base_url timeout model api_key graphify_bin arg provider_dir target_abs graphify_target
   local graphify_python="" diagnostic_root="" diagnostic_log="" diagnostic_preview="4096" graphify_think="off"
   local diagnostic_mode="off" structured_timeout="" structured_output_tokens="" graphify_sdk_retries="" graphify_retry_depth=""
-  local local_provider=0 force_rebuild=0
+  local local_provider=0 force_rebuild=0 explicit_code_only=0 bootstrap_code_first=0
   local next_is_model=0 next_is_timeout=0 next_is_token_budget=0 next_is_max_concurrency=0
   local has_token_budget=0 has_max_concurrency=0
   local token_budget_value="" max_concurrency_value=""
@@ -355,6 +360,9 @@ cmd_graphify() {
     --force)
       force_rebuild=1
       ;;
+    --code-only)
+      explicit_code_only=1
+      ;;
     --backend | --backend=*)
       die "lds graphify selects the Graphify backend from the active LLM provider; do not pass --backend"
       ;;
@@ -413,8 +421,15 @@ cmd_graphify() {
     else
       printf '%s\n' "[lds graphify] existing graph detected; using Graphify incremental update (changed files only)" >&2
     fi
+  elif _graphify_has_graph "$target_abs"; then
+    printf '%s\n' "[lds graphify] existing graph detected without complete manifest; letting Graphify recover from the graph baseline" >&2
+  elif ((explicit_code_only)); then
+    printf '%s\n' "[lds graphify] no graph detected; performing requested code-only build" >&2
+  elif ((force_rebuild)); then
+    printf '%s\n' "[lds graphify] no graph detected; --force requested, performing a full build" >&2
   else
-    printf '%s\n' "[lds graphify] no complete incremental state detected; performing full build" >&2
+    bootstrap_code_first=1
+    printf '%s\n' "[lds graphify] no graph detected; bootstrapping code-first before semantic enrichment" >&2
   fi
 
   if ((local_provider)); then
@@ -518,8 +533,17 @@ cmd_graphify() {
       esac
     fi
 
-    "$graphify_bin" extract "$graphify_target" --backend "$backend" --no-cluster "${graphify_defaults[@]}" "$@" &&
-      "$graphify_bin" cluster-only "$graphify_target" --backend "$backend"
+    if ((bootstrap_code_first)); then
+      printf '%s\n' "[lds graphify] phase 1/2: extracting code structure and clustering the structural graph" >&2
+      "$graphify_bin" extract "$graphify_target" --backend "$backend" --no-cluster --code-only "${graphify_defaults[@]}" "$@" &&
+        "$graphify_bin" cluster-only "$graphify_target" --backend "$backend" &&
+        printf '%s\n' "[lds graphify] phase 2/2: enriching the existing graph with semantic files" >&2 &&
+        "$graphify_bin" extract "$graphify_target" --backend "$backend" --no-cluster "${graphify_defaults[@]}" "$@" &&
+        "$graphify_bin" cluster-only "$graphify_target" --backend "$backend"
+    else
+      "$graphify_bin" extract "$graphify_target" --backend "$backend" --no-cluster "${graphify_defaults[@]}" "$@" &&
+        "$graphify_bin" cluster-only "$graphify_target" --backend "$backend"
+    fi
   )
 }
 
