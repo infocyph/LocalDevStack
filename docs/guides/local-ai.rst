@@ -284,7 +284,7 @@ Ollama / CPU, NVIDIA or ROCm:
    reasoning_effort=none
 
 The Ollama provider definition also keeps explicit context headroom for Graphify's
-local chunks. Both local providers default to ``--token-budget 4000
+local chunks. Both local providers default to ``--token-budget 3000
 --max-concurrency 1`` unless the caller supplied those flags. These limits and the
 no-thinking request are separate protections: the former prevents local context/resource
 pressure, while the latter keeps reasoning out of the structured response channel.
@@ -303,7 +303,10 @@ Structured extraction is provider-specific:
   the same Graphify schema and ``temperature=0``. Ollama maps that schema to its
   native structured-output ``format`` field.
 
-A structurally valid all-empty graph remains valid and is passed back to Graphify
+FastFlow tool arguments are sanitized with the same tolerance Graphify applies to
+semantic fragments: malformed/missing graph arrays become empty and stray non-object
+entries are discarded instead of rejecting an otherwise graph-shaped ``submit_graph``
+call. A structurally valid all-empty graph remains valid and is passed back to Graphify
 unchanged; Graphify then decides whether to retry it as a hollow extraction.
 
 Structured generations are deliberately bounded independently of Graphify's larger
@@ -323,8 +326,8 @@ because splitting a slow request does not prove the response was too large. Incr
 
 For local providers, hidden retry amplification is bounded at both outer layers:
 the OpenAI SDK retry count defaults to zero (``LDS_GRAPHIFY_SDK_RETRIES=0``) and
-Graphify's adaptive retry depth defaults to one
-(``LDS_GRAPHIFY_MAX_RETRY_DEPTH=1``). Explicit
+Graphify's adaptive retry depth defaults to two
+(``LDS_GRAPHIFY_MAX_RETRY_DEPTH=2``). Explicit
 ``GRAPHIFY_MAX_RETRIES`` / ``GRAPHIFY_MAX_RETRY_DEPTH`` values still win.
 
 Detailed suspect-response logging is optional and does not control the compatibility
@@ -357,15 +360,20 @@ Before extraction, LocalDevStack verifies the installed Graphify CLI is compatib
 (``graphifyy >= 0.9.65`` by default, overrideable with ``LDS_GRAPHIFY_MIN_VERSION``)
 and checks ``/v1/models``, failing fast when the selected model is absent.
 
+On a brand-new project, ``lds graphify`` first runs a code-only structural extract
+and clusters it immediately. It then runs the normal ``extract`` pipeline again against
+that graph so previously unprocessed semantic files are incrementally added, followed by
+a final clustering pass. This gives a useful code graph early and avoids making the whole
+initial build depend on semantic inference. Explicit ``--code-only`` remains single-phase.
+
 When both ``<target>/graphify-out/graph.json`` and
-``<target>/graphify-out/manifest.json`` exist, ``lds graphify`` keeps using
-Graphify's lower-level ``extract`` pipeline, which automatically switches to
-incremental mode: only changed code/docs/papers/images are re-extracted, deleted or
-excluded sources are reconciled, and the result is merged into the existing graph.
-This is intentionally preferred over the literal ``graphify update`` CLI command,
-because current Graphify ``update`` refreshes code only and delegates semantic
-document refreshes to the assistant update workflow. Pass ``--force`` only when a
-full rebuild is intentionally required.
+``<target>/graphify-out/manifest.json`` exist, ``lds graphify`` uses Graphify's lower-level
+``extract`` pipeline incrementally: only changed code/docs/papers/images are re-extracted,
+deleted or excluded sources are reconciled, and the result is merged into the existing
+graph. This is intentionally preferred over the literal ``graphify update`` CLI command,
+because current Graphify ``update`` refreshes code only and delegates semantic document
+refreshes to the assistant update workflow. Pass ``--force`` only when a full rebuild is
+intentionally required.
 
 Override the local chunk defaults with explicit Graphify flags, or set
 ``LDS_GRAPHIFY_TOKEN_BUDGET`` / ``LDS_GRAPHIFY_MAX_CONCURRENCY``. If a local
