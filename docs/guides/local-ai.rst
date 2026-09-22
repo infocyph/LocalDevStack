@@ -307,6 +307,8 @@ Structured extraction is provider-specific:
   the same Graphify schema and ``temperature=0``. Ollama maps that schema to its
   native structured-output ``format`` field.
 
+FastFlow semantic extraction also requires at least one evidence-backed node per non-empty source file; when a file has no richer entity, the model may emit a conservative file-level document node rather than an all-empty graph. This makes Graphify's same-chunk hollow retry useful less often without inventing relationships.
+
 FastFlow tool arguments are sanitized with the same tolerance Graphify applies to
 semantic fragments: malformed/missing graph arrays become empty and stray non-object
 entries are discarded instead of rejecting an otherwise graph-shaped ``submit_graph``
