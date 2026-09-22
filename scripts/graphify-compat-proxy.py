@@ -466,8 +466,17 @@ def _normalize_response_usage(body: bytes) -> bytes:
 
 
 def _fastflow_stream_completion(upstream_response, model: str | None) -> bytes:
-    """Collapse FastFlow SSE into one OpenAI completion, returning on a tool call."""
+    """Collapse one FastFlow SSE response and drain it through its terminal event.
+
+    FastFlow keeps a bounded pool of HTTP connections. Returning as soon as the
+    TOOL_DONE delta arrives leaves the server-side SSE request alive until its
+    producer notices the disconnected client; repeated Graphify chunks can then
+    exhaust FastFlow's connection limit. Retain the completed tool call but keep
+    consuming the stream through [DONE]/EOF so the upstream request is released
+    cleanly and its trailing usage event is preserved.
+    """
     content_parts: list[str] = []
+    normalized_calls: list[dict[str, Any]] = []
     last_id = "chatcmpl-lds-fastflow"
     finish_reason = "stop"
     usage: dict[str, Any] = {}
@@ -518,27 +527,15 @@ def _fastflow_stream_completion(upstream_response, model: str | None) -> bytes:
 
         calls = delta.get("tool_calls")
         if isinstance(calls, list) and calls:
-            normalized_calls = [call for call in calls if isinstance(call, dict)]
-            if normalized_calls:
-                # FastFlow emits the complete function arguments in TOOL_DONE,
-                # not incremental argument fragments. Stop reading immediately
-                # so a model that fails to emit EOS cannot hold Graphify open.
-                response = {
-                    "id": last_id,
-                    "object": "chat.completion",
-                    "model": model,
-                    "choices": [{
-                        "index": 0,
-                        "message": {
-                            "role": "assistant",
-                            "content": "".join(content_parts) or None,
-                            "tool_calls": normalized_calls,
-                        },
-                        "finish_reason": "tool_calls",
-                    }],
-                    "usage": _normalized_usage(usage),
-                }
-                return json.dumps(response, ensure_ascii=False).encode("utf-8")
+            normalized_calls.extend(call for call in calls if isinstance(call, dict))
+
+    message: dict[str, Any] = {
+        "role": "assistant",
+        "content": "".join(content_parts) or None,
+    }
+    if normalized_calls:
+        message["tool_calls"] = normalized_calls
+        finish_reason = "tool_calls"
 
     response = {
         "id": last_id,
@@ -546,10 +543,7 @@ def _fastflow_stream_completion(upstream_response, model: str | None) -> bytes:
         "model": model,
         "choices": [{
             "index": 0,
-            "message": {
-                "role": "assistant",
-                "content": "".join(content_parts),
-            },
+            "message": message,
             "finish_reason": finish_reason,
         }],
         "usage": _normalized_usage(usage),
@@ -758,6 +752,7 @@ class GraphifyCompatHandler(BaseHTTPRequestHandler):
         upstream_url = self.upstream.rstrip("/") + self.path
         if structured_primary == "fastflow-tool":
             request_headers["Accept"] = "text/event-stream"
+            request_headers["Connection"] = "close"
 
         request = urllib.request.Request(
             upstream_url,
