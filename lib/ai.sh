@@ -543,7 +543,7 @@ cmd_graphify() {
         "$graphify_bin" cluster-only "$graphify_target" --backend "$backend" "${graphify_cluster_defaults[@]}" &&
         printf '%s\n' "[lds graphify] phase 2/2: enriching the existing graph with semantic files" >&2 &&
         "$graphify_bin" extract "$graphify_target" --backend "$backend" --no-cluster "${graphify_defaults[@]}" "$@" &&
-        "$graphify_bin" cluster-only "$graphify_target" --backend "$backend" "${graphify_cluster_defaults[@]}"
+        "$graphify_bin" label "$graphify_target" --backend "$backend" "${graphify_cluster_defaults[@]}"
     else
       "$graphify_bin" extract "$graphify_target" --backend "$backend" --no-cluster "${graphify_defaults[@]}" "$@" &&
         "$graphify_bin" cluster-only "$graphify_target" --backend "$backend" "${graphify_cluster_defaults[@]}"
