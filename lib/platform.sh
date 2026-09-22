@@ -68,7 +68,7 @@ ai_service_for_runtime() {
 ai_model_default_for_runtime() {
   case "${1,,}" in
   npu) printf '%s' 'qwen3.5:9b' ;;
-  "" | cpu | nvidia | amd) printf '%s' 'qwen3:14b' ;;
+  "" | cpu | nvidia | amd) printf '%s' 'qwen3.5:9b' ;;
   *) return 1 ;;
   esac
 }
