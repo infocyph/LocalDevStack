@@ -149,13 +149,13 @@ assert set(s["networks"]) == {"frontend","backend"}
 assert {v["target"] for v in s["volumes"]} == {"/root/.ollama"}
 assert d["volumes"]["lds_llm"]["name"] == "LLMModels"
 env=s["environment"]
-assert env["LLM_OLLAMA_MODEL"] == "qwen3:14b"
+assert env["LLM_OLLAMA_MODEL"] == "qwen3.5:9b"
 assert env["OLLAMA_NO_CLOUD"] == "1"
 tools=services["server-tools"]["environment"]
 assert tools["LDS_AI_ENABLED"] == "auto"
 assert tools["LDS_AI_PROVIDER"] == "llm"
 assert tools["LDS_AI_URL"] == "http://llm:11434"
-assert tools["LDS_AI_MODEL"] == "qwen3:14b"
+assert tools["LDS_AI_MODEL"] == "qwen3.5:9b"
 nginx=services["nginx"]
 assert nginx["environment"]["LLM_PROXY_TIMEOUT_SECONDS"] == "1800"
 native=[p for p in nginx.get("ports", []) if int(p["target"]) == 11434]
@@ -227,7 +227,7 @@ s=services["llm-ollama"]
 assert s["image"] == "infocyph/llm-ollama:amd-latest"
 devices=" ".join(str(x) for x in s.get("devices", []))
 assert "/dev/kfd" in devices and "/dev/dri" in devices
-assert s["environment"]["LLM_OLLAMA_MODEL"] == "qwen3:14b"
+assert s["environment"]["LLM_OLLAMA_MODEL"] == "qwen3.5:9b"
 ' <<<"$amd_json"
 pass "AMD runtime selects only Ollama with generated ROCm devices"
 
@@ -241,7 +241,7 @@ assert "llm-fastflow" not in services
 s=services["llm-ollama"]
 assert s["image"] == "infocyph/llm-ollama:latest"
 assert s.get("gpus")
-assert s["environment"]["LLM_OLLAMA_MODEL"] == "qwen3:14b"
+assert s["environment"]["LLM_OLLAMA_MODEL"] == "qwen3.5:9b"
 ' <<<"$nvidia_json"
 pass "NVIDIA runtime selects only Ollama with GPU augmentation"
 
@@ -252,7 +252,7 @@ d=json.load(sys.stdin)
 services=d["services"]
 assert "llm-ollama" in services
 assert "llm-fastflow" not in services
-assert services["llm-ollama"]["environment"]["LLM_OLLAMA_MODEL"] == "qwen3:14b"
+assert services["llm-ollama"]["environment"]["LLM_OLLAMA_MODEL"] == "qwen3.5:9b"
 ' <<<"$cpu_json"
 pass "CPU runtime selects only Ollama"
 
