@@ -95,7 +95,7 @@ assert_file_contains "$ROOT/lib/ai.sh" 'llm-fastflow'
 assert_file_contains "$ROOT/lib/ai.sh" 'llm-ollama'
 assert_file_contains "$ROOT/lib/ai.sh" 'fastflow) printf '\''%s'\'' openai'
 assert_file_contains "$ROOT/lib/ai.sh" 'ollama) printf '\''%s'\'' ollama'
-assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_TOKEN_BUDGET:-4000'
+assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_TOKEN_BUDGET:-3000'
 assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_MAX_CONCURRENCY:-1'
 assert_file_contains "$ROOT/lib/ai.sh" 'lds-fastflow'
 assert_file_contains "$ROOT/lib/ai.sh" 'lds-ollama'
@@ -112,7 +112,7 @@ assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_MIN_VERSION:-0.9.65'
 assert_file_contains "$ROOT/lib/ai.sh" 'manifest.json'
 assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_SDK_RETRIES:-0'
 assert_file_contains "$ROOT/lib/ai.sh" 'export GRAPHIFY_MAX_RETRIES="$graphify_sdk_retries"'
-assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_MAX_RETRY_DEPTH:-1'
+assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_MAX_RETRY_DEPTH:-2'
 assert_file_contains "$ROOT/lib/ai.sh" 'export GRAPHIFY_MAX_RETRY_DEPTH="$graphify_retry_depth"'
 assert_file_contains "$ROOT/lib/ai.sh" 'existing graph detected; using Graphify incremental update (changed files only)'
 assert_file_contains "$ROOT/lib/ai.sh" 'existing graph detected; --force requested, performing a full rebuild'
@@ -154,10 +154,15 @@ pass "Graphify validates either provider model through /v1/models"
   trap 'rm -rf "$tmp"' EXIT
   mkdir -p "$tmp/project/graphify-out"
 
+  if _graphify_has_graph "$tmp/project"; then
+    fail "Graphify graph baseline detected before graph.json exists"
+  fi
   if _graphify_has_incremental_state "$tmp/project"; then
     fail "Graphify incremental state accepted without graph/manifest pair"
   fi
   : >"$tmp/project/graphify-out/graph.json"
+  _graphify_has_graph "$tmp/project" ||
+    fail "Graphify graph baseline was not detected from graph.json"
   if _graphify_has_incremental_state "$tmp/project"; then
     fail "Graphify incremental state accepted without manifest"
   fi
@@ -366,6 +371,19 @@ assert graph == {
 }
 
 assert module._extract_fastflow_structured_graph(json.dumps(tool_response).encode()) == graph
+
+# Mirror Graphify's own semantic-fragment sanitizer: malformed/missing graph
+# arrays do not invalidate an otherwise graph-shaped provider tool call.
+sanitized = module._coerce_graph_object({
+    "nodes": [{"id": "a"}, "junk", None],
+    "edges": "not-an-array",
+    "input_tokens": 123,
+})
+assert sanitized == {
+    "nodes": [{"id": "a"}],
+    "edges": [],
+    "hyperedges": [],
+}
 
 sse_tool_event = {
     "id": "chatcmpl-stream-test",
