@@ -311,6 +311,13 @@ assert recovery is not None
 recovery_json = json.loads(recovery)
 assert recovery_json["tools"][0]["function"]["name"] == "submit_graph"
 assert recovery_json["tool_choice"] == "auto"
+system_text = "\n".join(
+    str(message.get("content", ""))
+    for message in recovery_json["messages"]
+    if isinstance(message, dict) and message.get("role") == "system"
+)
+assert "For every non-empty source file in this chunk" in system_text
+assert "conservative file-level document node" in system_text
 assert recovery_json["stream"] is True
 assert recovery_json["think"] is False
 assert "STRUCTURED OUTPUT" in recovery_json["messages"][0]["content"]
