@@ -814,16 +814,17 @@ Supported patterns:
   backend-specific environment variables;
 - Tools `aiops graphify --file <output>` -> analyze an explicitly supplied Graphify output file.
 
-FastFlow defaults to `--token-budget 4000 --max-concurrency 1` unless the caller
+Local Graphify defaults to `--token-budget 3000 --max-concurrency 1` unless the caller
 supplies explicit values. These defaults keep Qwen3.5 9B semantic extraction below the
 practical local context ceiling that can otherwise produce `Max length reached!`.
 `LDS_GRAPHIFY_TOKEN_BUDGET` and `LDS_GRAPHIFY_MAX_CONCURRENCY` override the
 LocalDevStack defaults.
 
-The `lds graphify` workflow always runs `extract --no-cluster` followed by
-`cluster-only <same-path>` with the same provider-appropriate Graphify backend, so the
-requested two-phase flow clusters once rather than re-clustering immediately after the
-extraction command's default clustering pass. Graphify remains a host/external consumer.
+For a brand-new graph, `lds graphify` runs code-only `extract --no-cluster`, clusters
+the structural graph, then runs a normal incremental `extract --no-cluster` to enrich
+semantic files and clusters the combined graph. Existing graphs keep the single
+incremental extract + `cluster-only` flow. Explicit `--code-only` remains single-phase.
+Graphify remains a host/external consumer.
 
 ## 8.10 AI admin panel
 
