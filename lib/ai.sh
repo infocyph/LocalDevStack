@@ -257,7 +257,7 @@ cmd_graphify() {
   local next_is_model=0 next_is_timeout=0 next_is_token_budget=0 next_is_max_concurrency=0
   local has_token_budget=0 has_max_concurrency=0
   local token_budget_value="" max_concurrency_value=""
-  local -a graphify_defaults=()
+  local -a graphify_defaults=() graphify_cluster_defaults=()
 
   runtime="$(_active_llm_runtime)"
   provider="$(_active_llm_provider)"
@@ -407,6 +407,10 @@ cmd_graphify() {
     fi
   fi
 
+  if [[ -n "$max_concurrency_value" ]]; then
+    graphify_cluster_defaults+=(--max-concurrency "$max_concurrency_value")
+  fi
+
   ((local_provider == 0)) || _graphify_local_model_preflight "$model"
 
   graphify_bin="$(bin_path graphify)"
@@ -536,13 +540,13 @@ cmd_graphify() {
     if ((bootstrap_code_first)); then
       printf '%s\n' "[lds graphify] phase 1/2: extracting code structure and clustering the structural graph" >&2
       "$graphify_bin" extract "$graphify_target" --backend "$backend" --no-cluster --code-only "${graphify_defaults[@]}" "$@" &&
-        "$graphify_bin" cluster-only "$graphify_target" --backend "$backend" &&
+        "$graphify_bin" cluster-only "$graphify_target" --backend "$backend" "${graphify_cluster_defaults[@]}" &&
         printf '%s\n' "[lds graphify] phase 2/2: enriching the existing graph with semantic files" >&2 &&
         "$graphify_bin" extract "$graphify_target" --backend "$backend" --no-cluster "${graphify_defaults[@]}" "$@" &&
-        "$graphify_bin" cluster-only "$graphify_target" --backend "$backend"
+        "$graphify_bin" cluster-only "$graphify_target" --backend "$backend" "${graphify_cluster_defaults[@]}"
     else
       "$graphify_bin" extract "$graphify_target" --backend "$backend" --no-cluster "${graphify_defaults[@]}" "$@" &&
-        "$graphify_bin" cluster-only "$graphify_target" --backend "$backend"
+        "$graphify_bin" cluster-only "$graphify_target" --backend "$backend" "${graphify_cluster_defaults[@]}"
     fi
   )
 }
