@@ -45,6 +45,10 @@ pass "Graphify workflow help"
 graphify_log="$(mktemp)"
 cat >"$tmpbin/graphify" <<'SH'
 #!/usr/bin/env sh
+if [ "${1-}" = "--version" ]; then
+  printf '%s\n' 'graphify 0.9.65'
+  exit 0
+fi
 printf 'ollama_base=%s ollama_model=%s openai_base=%s openai_model=%s timeout=%s args=%s\n' \
   "${OLLAMA_BASE_URL-}" "${OLLAMA_MODEL-}" "${OPENAI_BASE_URL-}" "${OPENAI_MODEL-}" \
   "${GRAPHIFY_API_TIMEOUT-}" "$*" >>"$GRAPHIFY_TEST_LOG"
@@ -98,6 +102,8 @@ assert_file_contains "$ROOT/lib/ai.sh" "http://llm.localhost:11434/v1"
 assert_file_contains "$ROOT/lib/ai.sh" 'fastflow) printf '\''%s'\'' openai'
 assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_TOKEN_BUDGET:-4000'
 assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_MAX_CONCURRENCY:-1'
+assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_MIN_VERSION:-0.9.65'
+assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_OUTPUT_TOKENS:-8192'
 pass "Graphify provider-aware host workflow wrapper"
 
 assert_file_contains "$ROOT/lds" 'exec "$DIR/bin/tool-runner" "$cmd" "$@"'
