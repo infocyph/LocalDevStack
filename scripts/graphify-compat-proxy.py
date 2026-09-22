@@ -430,6 +430,28 @@ def _extract_fastflow_structured_graph(body: bytes) -> dict[str, Any] | None:
     return parse_graph_content(content)
 
 
+def _normalized_usage(usage: Any) -> dict[str, int]:
+    """Return OpenAI usage counters with integers even when a stream omits the tail event."""
+    if not isinstance(usage, dict):
+        usage = {}
+
+    def _counter(name: str) -> int:
+        value = usage.get(name, 0)
+        return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
+
+    prompt_tokens = _counter("prompt_tokens")
+    completion_tokens = _counter("completion_tokens")
+    total_tokens = _counter("total_tokens")
+    if total_tokens == 0 and (prompt_tokens or completion_tokens):
+        total_tokens = prompt_tokens + completion_tokens
+
+    return {
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "total_tokens": total_tokens,
+    }
+
+
 def _fastflow_stream_completion(upstream_response, model: str | None) -> bytes:
     """Collapse FastFlow SSE into one OpenAI completion, returning on a tool call."""
     content_parts: list[str] = []
@@ -501,7 +523,7 @@ def _fastflow_stream_completion(upstream_response, model: str | None) -> bytes:
                         },
                         "finish_reason": "tool_calls",
                     }],
-                    "usage": usage,
+                    "usage": _normalized_usage(usage),
                 }
                 return json.dumps(response, ensure_ascii=False).encode("utf-8")
 
@@ -517,7 +539,7 @@ def _fastflow_stream_completion(upstream_response, model: str | None) -> bytes:
             },
             "finish_reason": finish_reason,
         }],
-        "usage": usage,
+        "usage": _normalized_usage(usage),
     }
     return json.dumps(response, ensure_ascii=False).encode("utf-8")
 
