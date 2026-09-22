@@ -452,6 +452,19 @@ def _normalized_usage(usage: Any) -> dict[str, int]:
     }
 
 
+def _normalize_response_usage(body: bytes) -> bytes:
+    """Ensure an OpenAI-compatible completion never exposes null usage counters."""
+    try:
+        response = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return body
+    if not isinstance(response, dict):
+        return body
+    response = dict(response)
+    response["usage"] = _normalized_usage(response.get("usage"))
+    return json.dumps(response, ensure_ascii=False).encode("utf-8")
+
+
 def _fastflow_stream_completion(upstream_response, model: str | None) -> bytes:
     """Collapse FastFlow SSE into one OpenAI completion, returning on a tool call."""
     content_parts: list[str] = []
@@ -847,6 +860,9 @@ class GraphifyCompatHandler(BaseHTTPRequestHandler):
                         file=sys.stderr,
                         flush=True,
                     )
+
+        if structured_primary and 200 <= status < 300:
+            response_body = _normalize_response_usage(response_body)
 
         self.send_response(status)
         for name, value in response_headers.items():
