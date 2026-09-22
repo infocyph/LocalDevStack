@@ -146,6 +146,45 @@ pass "Graphify validates either provider model through /v1/models"
 
 (
   set -euo pipefail
+  die() { return 1; }
+  # shellcheck source=lib/ai.sh
+  source "$ROOT/lib/ai.sh"
+
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' EXIT
+  mkdir -p "$tmp/project/graphify-out"
+
+  if _graphify_has_incremental_state "$tmp/project"; then
+    fail "Graphify incremental state accepted without graph/manifest pair"
+  fi
+  : >"$tmp/project/graphify-out/graph.json"
+  if _graphify_has_incremental_state "$tmp/project"; then
+    fail "Graphify incremental state accepted without manifest"
+  fi
+  : >"$tmp/project/graphify-out/manifest.json"
+  _graphify_has_incremental_state "$tmp/project" ||
+    fail "Graphify incremental state rejected complete graph/manifest pair"
+
+  cat >"$tmp/graphify-new" <<'SH'
+#!/usr/bin/env sh
+printf '%s\n' 'graphify 0.9.65'
+SH
+  cat >"$tmp/graphify-old" <<'SH'
+#!/usr/bin/env sh
+printf '%s\n' 'graphify 0.9.64'
+SH
+  chmod +x "$tmp/graphify-new" "$tmp/graphify-old"
+
+  _graphify_version_preflight "$tmp/graphify-new" ||
+    fail "Graphify minimum compatible version was rejected"
+  if _graphify_version_preflight "$tmp/graphify-old"; then
+    fail "Graphify version below compatibility floor was accepted"
+  fi
+)
+pass "Graphify incremental state and minimum-version contracts are enforced"
+
+(
+  set -euo pipefail
   # shellcheck source=lib/ai.sh
   source "$ROOT/lib/ai.sh"
 
@@ -197,7 +236,7 @@ import json
 import sys
 
 path = sys.argv[1]
-spec = importlib.util.spec_from_file_location("lds_graphify_diagnostic_proxy", path)
+spec = importlib.util.spec_from_file_location("lds_graphify_compat_proxy", path)
 module = importlib.util.module_from_spec(spec)
 assert spec and spec.loader
 spec.loader.exec_module(module)
