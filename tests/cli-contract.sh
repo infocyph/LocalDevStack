@@ -64,10 +64,12 @@ LDS_AI_TIMEOUT=1800 \
 GRAPHIFY_TEST_LOG="$graphify_log" \
   "$ROOT/lds" graphify . --api-timeout 42 --mode deep >/dev/null
 
+grep -Fq 'ollama_base=http://custom-ollama.test:11434/v1 ollama_model=test-ollama openai_base= openai_model= timeout=42 args=extract . --backend ollama --no-cluster --code-only --api-timeout 42 --mode deep' "$graphify_log" ||
+  fail "Graphify Ollama code-first bootstrap contract failed"
 grep -Fq 'ollama_base=http://custom-ollama.test:11434/v1 ollama_model=test-ollama openai_base= openai_model= timeout=42 args=extract . --backend ollama --no-cluster --api-timeout 42 --mode deep' "$graphify_log" ||
-  fail "Graphify Ollama extract wrapper contract failed"
-grep -Fq 'args=cluster-only . --backend ollama' "$graphify_log" ||
-  fail "Graphify Ollama cluster wrapper contract failed"
+  fail "Graphify Ollama semantic enrichment contract failed"
+[[ "$(grep -Fc 'args=cluster-only . --backend ollama' "$graphify_log")" -eq 2 ]] ||
+  fail "Graphify Ollama bootstrap must cluster structural and enriched graphs"
 
 # FastFlow runtime uses Graphify's generic OpenAI backend and conservative local
 # chunking defaults so qwen3.5:9b does not receive oversized semantic requests.
@@ -80,10 +82,12 @@ LDS_AI_TIMEOUT=1800 \
 GRAPHIFY_TEST_LOG="$graphify_log" \
   "$ROOT/lds" graphify . --mode deep >/dev/null
 
+grep -Fq 'ollama_base= ollama_model= openai_base=http://custom-fastflow.test:11434/v1 openai_model=test-fastflow timeout=1800 args=extract . --backend openai --no-cluster --code-only --token-budget 4000 --max-concurrency 1 --mode deep' "$graphify_log" ||
+  fail "Graphify FastFlow code-first bootstrap contract failed"
 grep -Fq 'ollama_base= ollama_model= openai_base=http://custom-fastflow.test:11434/v1 openai_model=test-fastflow timeout=1800 args=extract . --backend openai --no-cluster --token-budget 4000 --max-concurrency 1 --mode deep' "$graphify_log" ||
-  fail "Graphify FastFlow extract wrapper contract failed"
-grep -Fq 'args=cluster-only . --backend openai' "$graphify_log" ||
-  fail "Graphify FastFlow cluster wrapper contract failed"
+  fail "Graphify FastFlow semantic enrichment contract failed"
+[[ "$(grep -Fc 'args=cluster-only . --backend openai' "$graphify_log")" -eq 2 ]] ||
+  fail "Graphify FastFlow bootstrap must cluster structural and enriched graphs"
 
 # Explicit Graphify resource controls always win over LocalDevStack defaults.
 : >"$graphify_log"
@@ -94,8 +98,27 @@ OPENAI_MODEL=test-fastflow \
 GRAPHIFY_TEST_LOG="$graphify_log" \
   "$ROOT/lds" graphify . --token-budget 6000 --max-concurrency 2 >/dev/null
 
+grep -Fq 'args=extract . --backend openai --no-cluster --code-only --token-budget 6000 --max-concurrency 2' "$graphify_log" ||
+  fail "Graphify FastFlow explicit resource overrides were not preserved in bootstrap"
 grep -Fq 'args=extract . --backend openai --no-cluster --token-budget 6000 --max-concurrency 2' "$graphify_log" ||
-  fail "Graphify FastFlow explicit resource overrides were not preserved"
+  fail "Graphify FastFlow explicit resource overrides were not preserved in semantic enrichment"
+
+# Explicit --code-only remains a single structural build; it does not opt into
+# automatic semantic enrichment.
+: >"$graphify_log"
+PATH="$tmpbin:$PATH" \
+LDS_AI_RUNTIME=npu \
+OPENAI_BASE_URL=http://custom-fastflow.test:11434/v1 \
+OPENAI_MODEL=test-fastflow \
+GRAPHIFY_TEST_LOG="$graphify_log" \
+  "$ROOT/lds" graphify . --code-only >/dev/null
+
+[[ "$(grep -Fc 'args=extract . --backend openai --no-cluster' "$graphify_log")" -eq 1 ]] ||
+  fail "Explicit Graphify --code-only must remain single-phase"
+grep -Fq 'args=extract . --backend openai --no-cluster --token-budget 4000 --max-concurrency 1 --code-only' "$graphify_log" ||
+  fail "Explicit Graphify --code-only flag was not preserved"
+[[ "$(grep -Fc 'args=cluster-only . --backend openai' "$graphify_log")" -eq 1 ]] ||
+  fail "Explicit Graphify --code-only must cluster exactly once"
 
 rm -f "$graphify_log"
 assert_file_contains "$ROOT/lib/ai.sh" "http://llm.localhost:11434/v1"
