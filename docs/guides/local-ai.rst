@@ -286,7 +286,7 @@ Ollama / CPU, NVIDIA or ROCm:
 The Ollama provider definition also keeps explicit context headroom for Graphify's
 local chunks. Both local providers default to ``--token-budget 3000
 --max-concurrency 1`` unless the caller supplied those flags. The same concurrency
-value is also forwarded to ``cluster-only`` community labeling. This matters for the
+value is also forwarded to ``cluster-only`` community labeling. FastFlow keeps a bounded connection pool, so the compatibility proxy drains each structured SSE response through ``[DONE]`` and requests ``Connection: close`` before returning the collapsed tool result; this prevents repeated Graphify chunks from exhausting FastFlow's connection slots. This matters for the
 custom ``lds-fastflow`` / ``lds-ollama`` backends because Graphify's built-in
 Ollama serialization guard only recognizes the literal ``ollama`` backend name.
 These limits and the no-thinking request are separate protections: the former prevents
