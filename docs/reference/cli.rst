@@ -209,7 +209,7 @@ Host Graphify Workflow
 This command runs the host ``graphify`` CLI against the common LocalDevStack LLM route.
 For a brand-new graph it performs a code-only ``extract --no-cluster`` first, clusters
 that structural graph, then performs a normal incremental ``extract --no-cluster`` to
-enrich docs/papers/images and clusters the combined graph again. Existing graphs use a
+enrich docs/papers/images and reclusters and force-relabels the combined graph again. Existing graphs use a
 single incremental extract followed by one ``cluster-only`` pass. Explicit ``--code-only``
 remains a single structural build.
 
