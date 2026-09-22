@@ -301,7 +301,7 @@ cmd_graphify() {
   [[ "$graphify_sdk_retries" =~ ^[0-9]+$ ]] ||
     die "GRAPHIFY_MAX_RETRIES/LDS_GRAPHIFY_SDK_RETRIES must be a non-negative integer"
 
-  graphify_retry_depth="${GRAPHIFY_MAX_RETRY_DEPTH:-${LDS_GRAPHIFY_MAX_RETRY_DEPTH:-1}}"
+  graphify_retry_depth="${GRAPHIFY_MAX_RETRY_DEPTH:-${LDS_GRAPHIFY_MAX_RETRY_DEPTH:-2}}"
   [[ "$graphify_retry_depth" =~ ^[0-9]+$ ]] ||
     die "GRAPHIFY_MAX_RETRY_DEPTH/LDS_GRAPHIFY_MAX_RETRY_DEPTH must be a non-negative integer"
 
@@ -394,7 +394,7 @@ cmd_graphify() {
   # serialized requests. Callers can still override both limits explicitly.
   if [[ "$provider" == fastflow ]] || ((local_provider)); then
     if ((has_token_budget == 0)); then
-      token_budget_value="${LDS_GRAPHIFY_TOKEN_BUDGET:-4000}"
+      token_budget_value="${LDS_GRAPHIFY_TOKEN_BUDGET:-3000}"
       [[ "$token_budget_value" =~ ^[0-9]+$ ]] && ((token_budget_value >= 1)) ||
         die "LDS_GRAPHIFY_TOKEN_BUDGET must be a positive integer"
       graphify_defaults+=(--token-budget "$token_budget_value")
