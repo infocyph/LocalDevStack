@@ -434,10 +434,12 @@ Exit criterion: execution behavior is stable across supported host environments.
 
 ## Batch 7 — documentation and release hardening
 
-- [ ] update `docs/reference/cli.rst`;
-- [ ] update embedded `lds help` / `help --markdown`;
-- [ ] update README examples only where useful;
-- [ ] update docs contracts;
+Status: **in progress**
+
+- [x] update `docs/reference/cli.rst`;
+- [x] update embedded `lds help` / `help --markdown`;
+- [x] update README examples only where useful;
+- [x] update docs contracts;
 - [ ] run ShellCheck/static/contracts;
 - [ ] run Compose/network/permission contracts;
 - [ ] run Windows bridge contract;
