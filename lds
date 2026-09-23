@@ -884,6 +884,20 @@ EOF
 }
 
 
+_dispatch_builtin_command() {
+  local cmd="${1:-}"
+  shift || true
+
+  case "$cmd" in
+    stack|domain|support|bundle|graphify|diag|sniff|config|images|doctor|run|    up|start|stop|down|restart|reboot|ps|status|logs|urls|open|profiles|    secrets|cert|host|ui|exec|events|clean|rebuild|tools|http|cli|core|    setup|certificate|notify)
+      "cmd_$cmd" "$@"
+      ;;
+    *)
+      return 127
+      ;;
+  esac
+}
+
 ###############################################################################
 # 7. MAIN
 ###############################################################################
@@ -959,9 +973,11 @@ main() {
   llm) cmd_llm "$@" ;;
   vpn-fix) cmd_vpn_fix "$@" ;;
   *)
-    if declare -F "cmd_$cmd" >/dev/null 2>&1; then
-      "cmd_$cmd" "$@"
+    if _dispatch_builtin_command "$cmd" "$@"; then
+      :
     else
+      local rc=$?
+      [[ "$rc" -eq 127 ]] || return "$rc"
       exec "$DIR/bin/tool-runner" "$cmd" "$@"
     fi
     ;;
