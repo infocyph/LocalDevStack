@@ -254,90 +254,89 @@ FastFlow's XDNA2 device/memlock contract is part of its tracked service definiti
 Graphify
 --------
 
-``lds graphify [path]`` uses the common LocalDevStack endpoint and selects the
-Graphify backend from the active provider.
+``lds graphify [path]`` keeps Graphify as the owner of code AST extraction,
+clustering, labeling, and unsupported semantic formats, while delegating supported
+documentation/config structure to docker-tools.
 
-For the built-in LocalDevStack endpoint, LDS creates an ephemeral Graphify custom-provider
-file for the invocation and points it directly at:
+The built-in host Graphify provider still uses:
 
 .. code-block:: text
 
    http://llm.localhost:11434/v1
 
-There is no LocalDevStack Graphify HTTP proxy and no Python compatibility script.
-Graphify owns the OpenAI-compatible request/response contract, JSON parsing, hollow and
-truncation detection, adaptive retry, semantic cache, and partial-file bookkeeping.
+That host route is necessary because the Graphify CLI runs on the host. Tools-side AI
+review runs inside Docker and resolves its provider directly from ``LDS_AI_RUNTIME``
+(``llm-fastflow:11434`` for NPU; ``llm-ollama:11434`` otherwise).
 
-FastFlow / NPU uses:
+There is no LocalDevStack Graphify HTTP proxy or Python compatibility adapter.
 
-.. code-block:: text
+Document-first hybrid
+~~~~~~~~~~~~~~~~~~~~~
 
-   backend=lds-fastflow
-   model=<effective FastFlow model>
-   max_tokens=8192
-   extra_body={"think": false}
+When the active docker-tools image exposes the docstruct Graphify handoff,
+``LDS_GRAPHIFY_DOCSTRUCT=auto`` enables the hybrid path automatically:
 
-Ollama / CPU, NVIDIA or ROCm uses:
+1. on a new graph, Graphify extracts code first with ``--code-only --no-cluster``;
+2. Graphify performs its normal extract for code changes and semantic formats not owned
+   by docstruct;
+3. LocalDevStack excludes these docstruct-owned extensions from Graphify's raw semantic
+   LLM pass:
 
-.. code-block:: text
+   .. code-block:: text
 
-   backend=lds-ollama
-   model=<effective Ollama model>
-   max_tokens=8192
-   reasoning_effort=none
+      .md .markdown .rst .yaml .yml .json .toml .ini .cfg
 
-The Ollama provider definition also derives explicit ``num_ctx`` headroom from the
-semantic input budget plus output allowance. ``GRAPHIFY_MAX_OUTPUT_TOKENS`` wins when
-set; otherwise ``LDS_GRAPHIFY_OUTPUT_TOKENS`` defaults to 8192.
+4. docker-tools mechanically extracts those files with Pandoc plus the narrow
+   RST/Sphinx/config parsers;
+5. optional semantic review runs in bounded chunks against the active local model;
+6. docker-tools emits a Graphify-compatible fragment;
+7. Graphify's public ``merge-chunks`` validates that fragment;
+8. docker-tools atomically replaces only the reserved ``docstruct_`` semantic layer;
+9. ``graphify label`` reclusters and relabels the final combined graph.
 
-Both local providers default to ``--token-budget 3000 --max-concurrency 1`` unless
-the caller supplies those flags. The same concurrency value is forwarded to community
-labeling. These conservative limits keep the local Qwen3.5 9B path serialized and bound
-the amount of text handled by one semantic request.
+This removes Markdown/RST/config parsing from the fragile raw LLM extraction path while
+preserving Graphify's existing support for other semantic formats such as papers/images.
 
-LocalDevStack does not reinterpret Graphify responses. A hollow response stays hollow,
-a genuine ``finish_reason=length`` stays truncated, and provider/API errors remain
-provider/API errors. Graphify's own retry and incremental machinery decides what gets
-retried or re-queued.
+The document merge never parses or replaces code nodes. It owns only its reserved
+document namespace and also replaces legacy semantic nodes sourced from the supported
+document/config extensions during migration.
 
-Hidden retry amplification remains bounded for the built-in local route: the OpenAI SDK
-retry count defaults to zero (``LDS_GRAPHIFY_SDK_RETRIES=0``) and Graphify's adaptive
-retry depth defaults to two (``LDS_GRAPHIFY_MAX_RETRY_DEPTH=2``). Explicit
-``GRAPHIFY_MAX_RETRIES`` / ``GRAPHIFY_MAX_RETRY_DEPTH`` values still win.
+Controls
+~~~~~~~~
 
-FastFlow Graphify defaults to ``LDS_GRAPHIFY_THINK=off`` so the model spends its
-response budget on Graphify's requested JSON instead of reasoning text.
-``LDS_GRAPHIFY_THINK=on`` and ``LDS_GRAPHIFY_THINK=auto`` remain explicit
-operator overrides.
+``LDS_GRAPHIFY_DOCSTRUCT``:
 
-Before extraction, LocalDevStack verifies the installed Graphify CLI is compatible
-(``graphifyy >= 0.9.65`` by default, overrideable with
-``LDS_GRAPHIFY_MIN_VERSION``) and checks ``/v1/models``, failing fast when the
-selected model is absent.
+- ``auto`` (default): use docstruct when the Tools image supports it; otherwise warn
+  and fall back to Graphify's existing semantic extraction;
+- ``on``: require docstruct support;
+- ``off``: use the legacy Graphify semantic path.
 
-On a brand-new project, ``lds graphify`` first runs a code-only structural extract
-and clusters it immediately. It then runs the normal ``extract`` pipeline against that
-existing graph so semantic files are added incrementally, followed by ``graphify label``
-to recluster and refresh community names. Explicit ``--code-only`` remains
-single-phase.
+``LDS_GRAPHIFY_DOC_REVIEW``:
 
-When both ``<target>/graphify-out/graph.json`` and
-``<target>/graphify-out/manifest.json`` exist, ``lds graphify`` uses Graphify's
-lower-level ``extract`` pipeline incrementally: only changed code/docs/papers/images
-are re-extracted, deleted or excluded sources are reconciled, and the result is merged
-into the existing graph. This is intentionally preferred over the literal
-``graphify update`` CLI command, because current Graphify ``update`` refreshes code
-only. Pass ``--force`` only when a full rebuild is intentionally required.
+- ``auto`` (default): review bounded document chunks on the built-in local provider;
+  if review fails, keep the deterministic structure and continue;
+- ``on``: require semantic review to succeed;
+- ``off``: use deterministic document structure only.
 
-Override the local chunk defaults with explicit Graphify flags, or set
-``LDS_GRAPHIFY_TOKEN_BUDGET`` / ``LDS_GRAPHIFY_MAX_CONCURRENCY``:
+Explicit ``lds graphify --code-only`` remains a single Graphify structural build and
+does not invoke docstruct.
 
-.. code-block:: bash
+Provider/runtime details
+~~~~~~~~~~~~~~~~~~~~~~~~
 
-   lds graphify . --token-budget 3000 --max-concurrency 1
+FastFlow uses Graphify's generic OpenAI-compatible provider and defaults to thinking off.
+Ollama uses the custom local provider with explicit context headroom and reasoning
+disabled. ``GRAPHIFY_MAX_OUTPUT_TOKENS`` wins when set; otherwise
+``LDS_GRAPHIFY_OUTPUT_TOKENS`` defaults to 8192.
 
-Explicit ``OPENAI_BASE_URL`` (FastFlow path) or ``OLLAMA_BASE_URL`` (Ollama path)
-remains caller-controlled and bypasses the built-in local-provider preflight.
+Local semantic requests that remain on Graphify default to
+``--token-budget 3000 --max-concurrency 1``. Explicit Graphify flags or
+``LDS_GRAPHIFY_TOKEN_BUDGET`` / ``LDS_GRAPHIFY_MAX_CONCURRENCY`` can override
+those defaults.
+
+LocalDevStack requires ``graphifyy >= 0.9.65`` by default
+(``LDS_GRAPHIFY_MIN_VERSION`` overrides the floor) and validates the selected model
+through ``/v1/models`` before local-provider extraction.
 
 Trust Boundary
 --------------
