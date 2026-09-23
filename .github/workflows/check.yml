@@ -41,6 +41,10 @@ jobs:
       - name: CLI contract
         run: tests/cli-contract.sh
 
+      - name: Execution baseline contract
+        run: tests/execution-contract.sh
+
+
       - name: Environment contract
         run: tests/env-contract.sh
 
