@@ -362,9 +362,10 @@ lds stack exec redis -- redis-cli ping
 # server-tools only.
 lds tools sh
 lds tools exec -- jq --version
+lds tools shell-exec 'printf "%s\n" "hello world" | cat'
 ```
 
-Explicit commands preserve argv rather than being flattened into a shell string. Interactive shells receive a TTY; piped/non-interactive commands do not force one. See `docs/reference/cli.rst` for target resolution and exit-code details.
+Explicit commands preserve argv rather than being flattened into a shell string. Use `lds tools shell-exec` only for intentional shell syntax. Interactive shells/TUIs require a real TTY; piped/non-interactive commands do not force one. See `docs/reference/cli.rst` for target resolution and exit-code details.
 
 ## Ad-hoc Dockerfile runner
 
