@@ -286,7 +286,7 @@ lds graphify ./your-project --mode deep
 
 Nginx owns the loopback-only native route `127.0.0.1:11434 -> nginx:11434 -> llm:11434`. Provider containers do not publish host ports.
 
-`lds graphify` uses `http://llm.localhost:11434/v1` directly and validates the selected model through `/v1/models`. LDS creates only a temporary Graphify provider configuration—there is no Graphify proxy service or Python adapter. Local runs default to `--token-budget 3000 --max-concurrency 1`. On a brand-new graph, LDS builds and clusters the code-only structural graph first, then incrementally enriches semantic files and force-relabels the combined graph.
+`lds graphify` keeps the host Graphify CLI on `http://llm.localhost:11434/v1`, with no Graphify proxy service or Python adapter. When the Tools image supports `docstruct`, `.md/.rst/.yaml/.yml/.json/.toml/.ini/.cfg` files are extracted mechanically, optionally reviewed in bounded AI chunks, validated as a Graphify fragment, and merged into a reserved document layer; Graphify continues to own code ASTs and unsupported semantic formats. `LDS_GRAPHIFY_DOCSTRUCT=auto|on|off` and `LDS_GRAPHIFY_DOC_REVIEW=auto|on|off` control the handoff. Explicit `--code-only` remains code-only.
 
 The built-in Compose layout keeps both provider definitions in `docker/compose/companion.yaml`, but runtime-generated profile selectors enable exactly one. NVIDIA/ROCm hardware augmentation is generated ephemerally under `docker/.runtime/`; FastFlow's `/dev/accel/accel0` + memlock contract lives in its tracked service definition.
 
