@@ -62,12 +62,14 @@ run_case() {
           "{{.Id}}|mixedCase-container") printf '%s\n' cid-mixed ;;
           "{{.Id}}|worker.local") printf '%s\n' cid-domainlike ;;
           "{{.Id}}|NODE") printf '%s\n' cid-node ;;
+          "{{.Id}}|node") printf '%s\n' cid-node-container ;;
           "{{.Id}}|stopped-container") printf '%s\n' cid-stopped ;;
           "{{.Id}}|"*) return 1 ;;
           "{{.Name}}|cid-demo") printf '%s\n' /demo-container ;;
           "{{.Name}}|cid-mixed") printf '%s\n' /mixedCase-container ;;
           "{{.Name}}|cid-domainlike") printf '%s\n' /worker.local ;;
           "{{.Name}}|cid-node") printf '%s\n' /NODE ;;
+          "{{.Name}}|cid-node-container") printf '%s\n' /node ;;
           "{{.Name}}|cid-php84") printf '%s\n' /PHP84 ;;
           "{{.Name}}|cid-one") printf '%s\n' /ONE ;;
           "{{.Name}}|cid-two") printf '%s\n' /TWO ;;
@@ -76,6 +78,7 @@ run_case() {
           "{{ index .Config.Labels \"com.docker.compose.service\" }}|cid-mixed") printf '\n' ;;
           "{{ index .Config.Labels \"com.docker.compose.service\" }}|cid-domainlike") printf '\n' ;;
           "{{ index .Config.Labels \"com.docker.compose.service\" }}|cid-node") printf '%s\n' node ;;
+          "{{ index .Config.Labels \"com.docker.compose.service\" }}|cid-node-container") printf '%s\n' external-node ;;
           "{{ index .Config.Labels \"com.docker.compose.service\" }}|cid-stopped") printf '\n' ;;
           "{{.State.Running}}|cid-demo") printf '%s\n' true ;;
           "{{.State.Running}}|cid-mixed") printf '%s\n' true ;;
@@ -87,6 +90,8 @@ run_case() {
           "{{.State.Running}}|mixedCase-container") printf '%s\n' true ;;
           "{{.State.Running}}|worker.local") printf '%s\n' true ;;
           "{{.State.Running}}|stopped-container") printf '%s\n' false ;;
+          "{{.State.Running}}|node") printf '%s\n' true ;;
+          "{{.State.Running}}|cid-node-container") printf '%s\n' true ;;
           "{{.State.Running}}|SERVER_TOOLS") printf '%s\n' true ;;
           "{{.State.Running}}|billing"|"{{.State.Running}}|missing-shell"|"{{.State.Running}}|php:8.4-alpine") return 1 ;;
           "{{.State.Running}}|"*) printf '%s\n' true ;;
@@ -108,6 +113,9 @@ run_case() {
             printf '%s\n' billing node
             return 0
           fi
+        fi
+        if [[ " $* " == *" signal-test "* ]]; then
+          return 130
         fi
         case " $* " in
           *" domain-which --list-domains "*)
@@ -360,6 +368,90 @@ case_shell_interactive_command() {
 run_case case_shell_interactive_command
 assert_file_contains "$log" 'docker: <exec> <-it> <SERVER_TOOLS> <lazydocker>'
 pass "shell batch 3: --interactive routes TUI argv through shared interactive helper"
+
+case_shell_collision_precedence() {
+  _shell_resolve_target node
+  printf 'collision:unqualified|%s|%s\n' "$_SHELL_TARGET_KIND" "$_SHELL_CONTAINER_ID" >>"$EXECUTION_TEST_LOG"
+  _shell_resolve_target container:node
+  printf 'collision:qualified|%s|%s\n' "$_SHELL_TARGET_KIND" "$_SHELL_CONTAINER_ID" >>"$EXECUTION_TEST_LOG"
+}
+run_case case_shell_collision_precedence
+assert_file_contains "$log" 'collision:unqualified|service|cid-node'
+assert_file_contains "$log" 'collision:qualified|container|cid-node-container'
+pass "shell batch 6: service precedence and qualified container escape are deterministic"
+
+case_shell_domainlike_container_command() {
+  _container_stdin_is_tty() { return 1; }
+  _container_stdout_is_tty() { return 1; }
+  _container_stdin_has_data() { return 1; }
+  cmd_shell worker.local -- echo ok
+}
+run_case case_shell_domainlike_container_command
+assert_file_contains "$log" 'docker: <exec> <cid-domainlike> <echo> <ok>'
+if grep -Fq 'domain-which --app --quiet worker.local' "$log"; then
+  fail "lds shell guessed hostname-shaped container was a domain"
+fi
+pass "shell batch 6: domain-like container names stay containers unless discovered"
+
+case_shell_mixed_case_container() {
+  force_interactive_tty
+  cmd_shell mixedCase-container
+}
+run_case case_shell_mixed_case_container
+assert_file_contains "$log" 'docker: <exec> <-it> <cid-mixed> <bash> <--login>'
+if grep -Fq 'MIXEDCASE-CONTAINER' "$log"; then
+  fail "lds shell rewrote mixed-case container target"
+fi
+pass "shell batch 6: exact mixed-case containers are preserved"
+
+set +e
+run_case cmd_shell multi >/dev/null 2>&1
+rc=$?
+set -e
+[[ "$rc" -eq 65 ]] || fail "lds shell ambiguous service returned $rc instead of 65"
+assert_file_contains "$log" 'err:Service resolves to multiple containers: multi'
+pass "shell batch 6: ambiguous service targets preserve exit 65"
+
+set +e
+run_case cmd_shell stopped-container >/dev/null 2>&1
+rc=$?
+set -e
+[[ "$rc" -eq 69 ]] || fail "lds shell stopped container returned $rc instead of 69"
+assert_file_contains "$log" 'err:Container is not running: cid-stopped'
+pass "shell batch 6: stopped target error wins before TTY validation"
+
+set +e
+run_case cmd_shell missing-shell >/dev/null 2>&1
+rc=$?
+set -e
+[[ "$rc" -eq 66 ]] || fail "lds shell missing target returned $rc instead of 66"
+pass "shell batch 6: missing targets preserve exit 66"
+
+case_shell_nontty_existing_target() {
+  _container_stdin_is_tty() { return 1; }
+  _container_stdout_is_tty() { return 1; }
+  cmd_shell demo-container
+}
+set +e
+run_case case_shell_nontty_existing_target >/dev/null 2>&1
+rc=$?
+set -e
+[[ "$rc" -eq 64 ]] || fail "lds shell non-TTY interactive target returned $rc instead of 64"
+assert_file_contains "$log" 'err:Interactive container session requires a TTY'
+pass "shell batch 6: interactive shell requires a real TTY"
+
+case_shell_signal_exit() {
+  _container_stdin_is_tty() { return 1; }
+  _container_stdout_is_tty() { return 1; }
+  _container_stdin_has_data() { return 1; }
+  cmd_shell demo-container -- signal-test
+}
+set +e
+run_case case_shell_signal_exit >/dev/null 2>&1
+rc=$?
+set -e
+[[ "$rc" -eq 130 ]] || fail "lds shell child exit 130 became $rc"
+pass "shell batch 6: child Ctrl-C style exit status propagates unchanged"
 
 case_cli_command() {
   _container_stdin_is_tty() { return 1; }
