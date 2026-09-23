@@ -179,4 +179,84 @@ resolved_dir="$(_container_first_existing_dir cid-php84 /missing /app /)"
 pass "shared workdir resolver selects the first existing container directory"
 
 
+# Cross-platform wrapper behavior is isolated in subshells so environment
+# overrides do not affect the Linux contracts above.
+msys_log="$tmp/msys.log"
+(
+  set -euo pipefail
+  err() { :; }
+  docker() {
+    printf 'env:%s:%s args:' "${MSYS_NO_PATHCONV:-}" "${MSYS2_ARG_CONV_EXCL:-}" >>"$msys_log"
+    printf ' <%s>' "$@" >>"$msys_log"
+    printf '\n' >>"$msys_log"
+    if [[ "${1:-}" == inspect && "${2:-}" == -f && "${3:-}" == '{{.State.Running}}' ]]; then
+      printf '%s\n' true
+    fi
+  }
+  # shellcheck source=lib/container-exec.sh
+  source "$ROOT/lib/container-exec.sh"
+  export MSYSTEM=MINGW64
+  export OSTYPE=msys
+  _container_stdin_is_tty() { return 1; }
+  _container_stdout_is_tty() { return 1; }
+  _container_stdin_has_data() { return 1; }
+  _container_exec_argv cid-win --workdir '/app/path with spaces' -- printf '%s' '$(danger)'
+)
+assert_file_contains "$msys_log" 'env:1:* args: <exec> <--workdir> </app/path with spaces> <cid-win> <printf> <%s> <$(danger)>'
+pass "Git Bash/MSYS disables Docker path conversion and preserves argv"
+
+linux_log="$tmp/linux.log"
+(
+  set -euo pipefail
+  err() { :; }
+  docker() {
+    printf 'env:%s:%s args:' "${MSYS_NO_PATHCONV:-}" "${MSYS2_ARG_CONV_EXCL:-}" >>"$linux_log"
+    printf ' <%s>' "$@" >>"$linux_log"
+    printf '\n' >>"$linux_log"
+    if [[ "${1:-}" == inspect && "${2:-}" == -f && "${3:-}" == '{{.State.Running}}' ]]; then
+      printf '%s\n' true
+    fi
+  }
+  # shellcheck source=lib/container-exec.sh
+  source "$ROOT/lib/container-exec.sh"
+  unset MSYSTEM CYGWIN
+  export OSTYPE=linux-gnu
+  _container_stdin_is_tty() { return 1; }
+  _container_stdout_is_tty() { return 1; }
+  _container_stdin_has_data() { return 1; }
+  _container_exec_argv cid-linux -- echo ok
+)
+assert_file_contains "$linux_log" 'env:: args: <exec> <cid-linux> <echo> <ok>'
+pass "Linux/WSL path keeps native Docker argument behavior"
+
+signal_log="$tmp/signal.log"
+(
+  set -euo pipefail
+  err() { :; }
+  docker() {
+    if [[ "${1:-}" == inspect && "${2:-}" == -f && "${3:-}" == '{{.State.Running}}' ]]; then
+      printf '%s\n' true
+      return 0
+    fi
+    if [[ "${1:-}" == exec ]]; then
+      return 130
+    fi
+    return 0
+  }
+  # shellcheck source=lib/container-exec.sh
+  source "$ROOT/lib/container-exec.sh"
+  unset MSYSTEM CYGWIN
+  export OSTYPE=linux-gnu
+  _container_stdin_is_tty() { return 1; }
+  _container_stdout_is_tty() { return 1; }
+  _container_stdin_has_data() { return 1; }
+  set +e
+  _container_exec_argv cid-signal -- signal-test
+  rc=$?
+  set -e
+  printf '%s\n' "$rc" >"$signal_log"
+)
+[[ "$(cat "$signal_log")" == 130 ]] || fail "container exec did not propagate exit 130"
+pass "shared executor propagates SIGINT-style container exit status"
+
 printf 'Container execution substrate contract complete.\n'
