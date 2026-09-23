@@ -133,9 +133,9 @@ grep -Fq 'args=extract . --backend openai --no-cluster --token-budget 3000 --max
 
 rm -f "$graphify_log"
 
-# The deterministic document handoff is tested independently from the legacy
-# fallback above so current published Tools images can remain compatible until
-# the new docstruct-capable image is released.
+# The deterministic document handoff verifies both executor paths:
+# reuse SERVER_TOOLS for targets under /app, and exactly one temporary
+# container for arbitrary external repositories.
 (
   set -euo pipefail
   # shellcheck source=lib/ai.sh
@@ -144,59 +144,101 @@ rm -f "$graphify_log"
   hybrid_root="$(mktemp -d)"
   hybrid_log="$hybrid_root/docker.log"
   graphify_hybrid_log="$hybrid_root/graphify.log"
-  target="$hybrid_root/project"
-  mkdir -p "$target/graphify-out"
-  printf '%s\n' '{"nodes":[],"edges":[],"hyperedges":[]}' >"$target/graphify-out/graph.json"
+  mounted_root="$hybrid_root/mounted-project"
+  mounted_target="$mounted_root/subproject"
+  external_target="$hybrid_root/external-project"
+  container_tmp_host="$hybrid_root/container-tmp"
+  mkdir -p "$mounted_target/graphify-out" "$external_target/graphify-out" "$container_tmp_host"
+  printf '%s\n' '{"nodes":[],"edges":[],"hyperedges":[]}' >"$mounted_target/graphify-out/graph.json"
+  printf '%s\n' '{"nodes":[],"edges":[],"hyperedges":[]}' >"$external_target/graphify-out/graph.json"
 
   warn() { printf 'warn:%s\n' "$*" >>"$hybrid_log"; }
   die() { printf 'die:%s\n' "$*" >>"$hybrid_log"; return 1; }
+  _realpath() { readlink -f -- "$1"; }
+  _project_tools_container_running() { printf '%s' SERVER_TOOLS_TEST; }
 
   docker_compose() {
-    printf '%s\n' "$*" >>"$hybrid_log"
+    printf 'compose:%s\n' "$*" >>"$hybrid_log"
     case "$*" in
-      *"server-tools docstruct graphify-merge --help"*)
-        printf '%s\n' 'Usage: docstruct graphify-merge <graph.json> <fragment.json>'
-        return 0
-        ;;
-      *"server-tools docstruct /workspace "*)
-        local mount host=''
-        for mount in "$@"; do
-          case "$mount" in
-            *:/docstruct:rw) host="${mount%:/docstruct:rw}" ;;
-          esac
-        done
-        [[ -n "$host" ]] || return 91
-        printf '%s\n' '{"schema":"docker-tools.docstruct/v1","root":"/workspace","files":[],"nodes":[],"edges":[],"unresolved_references":[],"warnings":[],"stats":{"files":0,"nodes":0,"edges":0,"unresolved_references":0}}' >"$host/docstruct.json"
-        return 0
-        ;;
-      *"server-tools aiops document-review "*)
-        printf '%s\n' '{"schema":"docker-tools.docstruct-review/v1","base_schema":"docker-tools.docstruct/v1","base_sha256":"fixture","review_chunks":0,"patch":{"add_nodes":[],"add_edges":[],"corrections":[],"unresolved":[]}}'
-        return 0
-        ;;
-      *"server-tools docstruct graphify "*)
-        local mount host=''
-        for mount in "$@"; do
-          case "$mount" in
-            *:/docstruct:rw) host="${mount%:/docstruct:rw}" ;;
-          esac
-        done
-        [[ -n "$host" ]] || return 92
-        printf '%s\n' '{"nodes":[],"edges":[],"hyperedges":[],"input_tokens":0,"output_tokens":0}' >"$host/fragment.json"
-        return 0
-        ;;
-      *"server-tools docstruct graphify-merge "*)
-        local mount graph_host=''
-        for mount in "$@"; do
-          case "$mount" in
-            *:/graphify:ro) graph_host="${mount%:/graphify:ro}" ;;
-          esac
-        done
-        [[ -n "$graph_host" ]] || return 94
-        cat "$graph_host/graph.json"
+      *"run -d --no-deps "*"server-tools tail -f /dev/null"*)
+        printf '%s\n' EPHEMERAL_TOOLS_TEST
         return 0
         ;;
     esac
     return 93
+  }
+
+  docker() {
+    printf 'docker:%s\n' "$*" >>"$hybrid_log"
+    local op="${1:-}"
+    shift || true
+    case "$op" in
+      inspect)
+        if [[ "$*" == *'.Destination "/app"'* || "$*" == *'.Destination \"/app\"'* ]]; then
+          printf '%s\n' "$mounted_root"
+          return 0
+        fi
+        return 1
+        ;;
+      cp)
+        return 0
+        ;;
+      rm)
+        return 0
+        ;;
+      exec)
+        local -a args=("$@")
+        local i=0
+        while ((i < ${#args[@]})); do
+          case "${args[$i]}" in
+            -i) ((i += 1)) ;;
+            -e) ((i += 2)) ;;
+            *) break ;;
+          esac
+        done
+        local ctr="${args[$i]}"
+        ((i += 1))
+        local cmd="${args[$i]}"
+        ((i += 1))
+        local -a rest=("${args[@]:$i}")
+
+        case "$cmd" in
+          docstruct)
+            if [[ "${rest[*]}" == "graphify-merge --help" ]]; then
+              printf '%s\n' 'Usage: docstruct graphify-merge <graph.json> <fragment.json>'
+              return 0
+            fi
+            if [[ "${rest[0]:-}" == graphify && "${rest[1]:-}" != graphify-merge ]]; then
+              printf '%s\n' '{"nodes":[],"edges":[],"hyperedges":[],"input_tokens":0,"output_tokens":0}'
+              return 0
+            fi
+            if [[ "${rest[0]:-}" == graphify-merge ]]; then
+              if [[ "$ctr" == SERVER_TOOLS_TEST ]]; then
+                cat "$mounted_target/graphify-out/graph.json"
+              else
+                cat "$external_target/graphify-out/graph.json"
+              fi
+              return 0
+            fi
+            printf '%s\n' '{"schema":"docker-tools.docstruct/v1","root":"/workspace","files":[],"nodes":[],"edges":[],"unresolved_references":[],"warnings":[],"stats":{"files":0,"nodes":0,"edges":0,"unresolved_references":0}}'
+            return 0
+            ;;
+          aiops)
+            printf '%s\n' '{"schema":"docker-tools.docstruct-review/v1","base_schema":"docker-tools.docstruct/v1","base_sha256":"fixture","review_chunks":0,"patch":{"add_nodes":[],"add_edges":[],"corrections":[],"unresolved":[]}}'
+            return 0
+            ;;
+          mktemp)
+            printf '%s\n' '/tmp/lds-graphify-docstruct.TEST'
+            return 0
+            ;;
+          rm)
+            return 0
+            ;;
+        esac
+        return 94
+        ;;
+    esac
+    return 95
   }
 
   graphify_hybrid="$hybrid_root/graphify"
@@ -221,28 +263,39 @@ SH
 
   GRAPHIFY_HYBRID_LOG="$graphify_hybrid_log" \
     _graphify_docstruct_available ||
-    fail "docstruct capability probe rejected a compatible Tools command"
+    fail "docstruct capability probe rejected a compatible running Tools container"
 
+  : >"$hybrid_log"
   GRAPHIFY_HYBRID_LOG="$graphify_hybrid_log" \
-    _graphify_docstruct_enrich "$graphify_hybrid" "$target" auto --exclude ignored.md --no-gitignore
+    _graphify_docstruct_enrich "$graphify_hybrid" "$mounted_target" auto --exclude ignored.md --no-gitignore
 
-  grep -Fq 'server-tools docstruct /workspace --compact --output /docstruct/docstruct.json --exclude ignored.md --no-gitignore' "$hybrid_log" ||
-    fail "docstruct scan did not receive Graphify user exclusions"
-  grep -Fq 'DOCSTRUCT_REVIEW_ROOT=/workspace' "$hybrid_log" ||
-    fail "docstruct review was not confined to the mounted workspace"
-  grep -Fq "server-tools docstruct graphify /docstruct/docstruct.json --source-root $target" "$hybrid_log" ||
-    fail "Graphify fragment export did not preserve the host provenance root"
-  grep -Fq 'server-tools docstruct graphify-merge /graphify/graph.json /docstruct/fragment.json' "$hybrid_log" ||
-    fail "docstruct Graphify replacement merge was not invoked"
-  if grep -Fq -- '--output /docstruct/merged-graph.json' "$hybrid_log"; then
-    fail "docstruct Graphify replacement merge still publishes through the container bind mount"
+  grep -Fq 'documents: reusing existing SERVER_TOOLS container' /dev/null 2>/dev/null || true
+  if grep -Fq 'compose:run -d --no-deps' "$hybrid_log"; then
+    fail "target under SERVER_TOOLS /app unexpectedly created a temporary Tools container"
   fi
-  grep -Fq ":/graphify:ro" "$hybrid_log" ||
-    fail "Graphify output was not mounted read-only into the Tools merge container"
-  grep -Fq ":/docstruct:ro" "$hybrid_log" ||
-    fail "docstruct handoff was not mounted read-only for the merge container"
-  [[ -r "$target/graphify-out/graph.json" ]] ||
-    fail "host-side Graphify output publication failed"
+  grep -Fq 'docker:exec -i SERVER_TOOLS_TEST docstruct /app/subproject --compact --exclude ignored.md --no-gitignore' "$hybrid_log" ||
+    fail "mounted project was not processed through the existing SERVER_TOOLS container"
+  grep -Fq 'docker:exec -i -e DOCSTRUCT_REVIEW_ROOT=/app/subproject SERVER_TOOLS_TEST aiops document-review' "$hybrid_log" ||
+    fail "mounted project review did not use the existing SERVER_TOOLS container"
+  [[ -r "$mounted_target/graphify-out/graph.json" ]] ||
+    fail "existing-container graph publication failed"
+
+  : >"$hybrid_log"
+  GRAPHIFY_HYBRID_LOG="$graphify_hybrid_log" \
+    _graphify_docstruct_enrich "$graphify_hybrid" "$external_target" auto
+
+  [[ "$(grep -Fc 'compose:run -d --no-deps' "$hybrid_log")" -eq 1 ]] ||
+    fail "external project must create exactly one temporary Tools container"
+  grep -Fq -- "-v $external_target:/workspace:ro server-tools tail -f /dev/null" "$hybrid_log" ||
+    fail "external project was not mounted read-only into the temporary Tools container"
+  grep -Fq 'docker:exec -i EPHEMERAL_TOOLS_TEST docstruct /workspace --compact' "$hybrid_log" ||
+    fail "external docstruct extraction did not reuse the temporary Tools container"
+  grep -Fq 'docker:exec -i -e DOCSTRUCT_REVIEW_ROOT=/workspace EPHEMERAL_TOOLS_TEST aiops document-review' "$hybrid_log" ||
+    fail "external semantic review did not reuse the temporary Tools container"
+  [[ "$(grep -Fc 'docker:rm -f EPHEMERAL_TOOLS_TEST' "$hybrid_log")" -eq 1 ]] ||
+    fail "temporary Tools container was not cleaned up exactly once"
+  [[ -r "$external_target/graphify-out/graph.json" ]] ||
+    fail "external graph publication failed"
   grep -Fq 'merge-chunks ' "$graphify_hybrid_log" ||
     fail "Graphify public fragment validation was not invoked"
 
@@ -265,10 +318,13 @@ assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_DOCSTRUCT:-auto'
 assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_DOC_REVIEW:-auto'
 assert_file_contains "$ROOT/lib/ai.sh" "phase 3/3: merging deterministic document structure and relabeling"
 assert_file_contains "$ROOT/lib/ai.sh" "server-tools docstruct graphify-merge"
-assert_file_contains "$ROOT/lib/ai.sh" '/graphify:ro'
-assert_file_contains "$ROOT/lib/ai.sh" '/docstruct:ro'
-assert_file_contains "$ROOT/lib/ai.sh" 'server-tools docstruct graphify-merge'
-assert_file_contains "$ROOT/lib/ai.sh" '>"$publish_tmp"'
+assert_file_contains "$ROOT/lib/ai.sh" '_graphify_tools_app_target'
+assert_file_contains "$ROOT/lib/ai.sh" 'documents: reusing existing SERVER_TOOLS container'
+assert_file_contains "$ROOT/lib/ai.sh" 'documents: target is outside SERVER_TOOLS /app; starting one temporary Tools container'
+assert_file_contains "$ROOT/lib/ai.sh" 'docker_compose run -d --no-deps'
+assert_file_contains "$ROOT/lib/ai.sh" 'server-tools tail -f /dev/null'
+assert_file_contains "$ROOT/lib/ai.sh" 'docker exec -i "$_GRAPHIFY_TOOLS_CTR"'
+assert_file_contains "$ROOT/lib/ai.sh" 'docker rm -f "$ctr"'
 assert_file_contains "$ROOT/lib/ai.sh" 'mktemp "$target_abs/graphify-out/.graph.json.docstruct.XXXXXX"'
 assert_file_contains "$ROOT/lib/ai.sh" "--exclude 'requirements*.txt'"
 assert_file_contains "$ROOT/lib/ai.sh" "--exclude 'constraints*.txt'"
