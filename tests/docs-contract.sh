@@ -145,10 +145,17 @@ pass "documentation toctree targets exist"
 
 
 help_md="$("$ROOT/lds" help --markdown)"
-for required in   'lds profiles add <profile...>'   'lds support trace <domain>'   'lds support bundle [--redact|--full] [output.zip]'   'lds cli <container> [cmd...]'   'lds run shell|ps|logs|stop|rm|open'   'MongoDB:'   'Elasticsearch:'; do
+for required in   'lds profiles add <profile...>'   'lds support trace <domain>'   'lds support bundle [--redact|--full] [output.zip]'   'lds cli <service|container> [--] [command...]'   'lds core [domain|service|container] [--] [command...]'   'lds tools shell-exec'   'lds run shell|ps|logs|stop|rm|open'   'MongoDB:'   'Elasticsearch:'; do
   assert_contains "$help_md" "$required"
 done
 pass "embedded CLI help covers documented command groups"
+
+assert_file_contains "$cli" 'Current-project Compose services are resolved first.'
+assert_file_contains "$cli" 'Explicit commands preserve argv literally'
+assert_file_contains "$cli" 'interactive Bash shell when available'
+assert_file_contains "$cli" 'piped commands keep stdin with'
+assert_file_contains "$cli" 'tools exec'
+pass "CLI reference documents shared execution semantics"
 
 
 for stale in LDS_TOOLS_IMAGE LDS_RUNNER_IMAGE LDS_NGINX_IMAGE LDS_APACHE_IMAGE; do
