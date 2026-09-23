@@ -125,6 +125,10 @@ _container_exec_flags() {
 
   case "$mode" in
   shell)
+    if ! _container_stdin_is_tty || ! _container_stdout_is_tty; then
+      err "Interactive container session requires a TTY"
+      return 64
+    fi
     _CONTAINER_EXEC_FLAGS=(-it)
     ;;
   command)
@@ -161,6 +165,33 @@ _container_exec_argv() {
 
   _container_require_running "$target" || return $?
   _container_exec_flags command || return $?
+
+  local -a args=(exec "${_CONTAINER_EXEC_FLAGS[@]}")
+  [[ -n "$workdir" ]] && args+=(--workdir "$workdir")
+  args+=("$target" "$@")
+  _container_docker "${args[@]}"
+}
+
+_container_exec_interactive_argv() {
+  local target="${1:-}" workdir=''
+  shift || true
+
+  if [[ "${1:-}" == --workdir ]]; then
+    workdir="${2:-}"
+    [[ -n "$workdir" ]] || {
+      err "--workdir requires a path"
+      return 64
+    }
+    shift 2
+  fi
+  [[ "${1:-}" == -- ]] && shift
+  (($# > 0)) || {
+    err "Interactive container command is required"
+    return 64
+  }
+
+  _container_require_running "$target" || return $?
+  _container_exec_flags shell || return $?
 
   local -a args=(exec "${_CONTAINER_EXEC_FLAGS[@]}")
   [[ -n "$workdir" ]] && args+=(--workdir "$workdir")
@@ -212,9 +243,9 @@ _container_open_shell() {
     return 64
   }
 
+  _container_exec_flags shell || return $?
   local shell
   shell="$(_container_shell_name "$target")" || return $?
-  _container_exec_flags shell || return $?
 
   local -a args=(exec "${_CONTAINER_EXEC_FLAGS[@]}")
   [[ -n "$workdir" ]] && args+=(--workdir "$workdir")
