@@ -152,6 +152,23 @@ _container_exec_argv() {
   "${args[@]}"
 }
 
+_container_first_existing_dir() {
+  local target="${1:-}"
+  shift || true
+  _container_require_running "$target" || return $?
+
+  local path
+  for path in "$@"; do
+    [[ -n "$path" ]] || continue
+    if docker exec "$target" test -d "$path" >/dev/null 2>&1; then
+      printf '%s' "$path"
+      return 0
+    fi
+  done
+
+  printf '%s' /
+}
+
 _container_shell_name() {
   local target="${1:-}"
   _container_require_running "$target" || return $?
