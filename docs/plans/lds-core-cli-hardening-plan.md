@@ -405,12 +405,14 @@ Exit criterion: interactive/command execution semantics are consistent across LD
 
 ## Batch 5 — CLI routing and UX cleanup
 
-- [ ] review top-level dynamic `cmd_$cmd` routing for discoverability and collision safety;
-- [ ] ensure canonical grouped commands and shortcuts remain intentional;
-- [ ] standardize usage/error text;
-- [ ] standardize exit codes for missing target, unknown target, stopped target and no-TTY prompt;
-- [ ] make `--` command separation work consistently;
-- [ ] ensure help output clearly explains `core` vs `cli` vs `stack exec` vs `tools`.
+Status: **implemented — CI validation pending**
+
+- [x] review top-level dynamic `cmd_$cmd` routing for discoverability and collision safety;
+- [x] ensure canonical grouped commands and shortcuts remain intentional;
+- [x] standardize usage/error text;
+- [x] standardize exit codes for missing target, unknown target, stopped target and no-TTY prompt;
+- [x] make `--` command separation work consistently;
+- [x] ensure help output clearly explains `core` vs `cli` vs `stack exec` vs `tools`.
 
 Exit criterion: users can predict which execution command to use without knowing LDS internals.
 
