@@ -328,6 +328,8 @@ cmd_graphify() {
     --exclude '*.md' --exclude '*.markdown' --exclude '*.rst'
     --exclude '*.yaml' --exclude '*.yml' --exclude '*.json'
     --exclude '*.toml' --exclude '*.ini' --exclude '*.cfg'
+    --exclude 'requirements*.txt' --exclude 'constraints*.txt'
+    --exclude 'requirements/*.txt' --exclude '**/requirements/*.txt'
   )
 
   runtime="$(_active_llm_runtime)"
