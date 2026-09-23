@@ -65,10 +65,10 @@ run_case() {
           "{{.Name}}|cid-one") printf '%s\n' /ONE ;;
           "{{.Name}}|cid-two") printf '%s\n' /TWO ;;
           "{{.Name}}|cid-stopped") printf '%s\n' /stopped-container ;;
-          "{{ index .Config.Labels \"com.docker.compose.service\" }}|cid-demo") printf '%s\n' ;;
-          "{{ index .Config.Labels \"com.docker.compose.service\" }}|cid-mixed") printf '%s\n' ;;
+          "{{ index .Config.Labels \"com.docker.compose.service\" }}|cid-demo") printf '\n' ;;
+          "{{ index .Config.Labels \"com.docker.compose.service\" }}|cid-mixed") printf '\n' ;;
           "{{ index .Config.Labels \"com.docker.compose.service\" }}|cid-node") printf '%s\n' node ;;
-          "{{ index .Config.Labels \"com.docker.compose.service\" }}|cid-stopped") printf '%s\n' ;;
+          "{{ index .Config.Labels \"com.docker.compose.service\" }}|cid-stopped") printf '\n' ;;
           "{{.State.Running}}|cid-demo") printf '%s\n' true ;;
           "{{.State.Running}}|cid-mixed") printf '%s\n' true ;;
           "{{.State.Running}}|cid-node") printf '%s\n' true ;;
