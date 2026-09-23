@@ -204,23 +204,28 @@ Host Graphify Workflow
 
    lds graphify
    lds graphify ./your-project
-   lds graphify ./your-project --mode deep --token-budget 4000 --max-concurrency 1
+   lds graphify ./your-project --mode deep --token-budget 3000 --max-concurrency 1
 
-This command runs the host ``graphify`` CLI against the common LocalDevStack LLM route.
-It performs ``extract --backend ollama --no-cluster`` followed by
-``cluster-only <same-path> --backend ollama`` so clustering happens once. Graphify's
-backend is currently named ``ollama`` even though LocalDevStack presents a provider-neutral
-OpenAI-compatible ``/v1`` endpoint.
+This command runs the host ``graphify`` CLI against the LocalDevStack LLM route.
+When the docker-tools image supports docstruct, Markdown/RST/config files are extracted
+mechanically and merged into Graphify after fragment validation; they are not sent through
+Graphify's raw semantic LLM extractor. Other semantic formats remain Graphify-owned.
 
-By default it derives:
+Use ``LDS_GRAPHIFY_DOCSTRUCT=off`` to force the legacy path,
+``LDS_GRAPHIFY_DOCSTRUCT=on`` to require the deterministic path, and
+``LDS_GRAPHIFY_DOC_REVIEW=off|auto|on`` to control bounded semantic review.
+For a brand-new graph it performs a code-only ``extract --no-cluster`` first, clusters
+that structural graph, then performs a normal incremental ``extract --no-cluster`` to
+enrich docs/papers/images and reclusters and force-relabels the combined graph again. Existing graphs use a
+single incremental extract followed by one ``cluster-only`` pass. Explicit ``--code-only``
+remains a single structural build.
 
-- ``OLLAMA_BASE_URL=http://llm.localhost:11434/v1`` through Nginx;
-- ``OLLAMA_MODEL`` from the effective provider model;
-- ``GRAPHIFY_API_TIMEOUT`` from ``LDS_AI_TIMEOUT``.
-
+For the built-in local route, LocalDevStack creates a temporary Graphify provider
+configuration that points directly to ``http://llm.localhost:11434/v1``. No Graphify
+proxy process or Python compatibility script is used. The selected model comes from the
+active provider and ``GRAPHIFY_API_TIMEOUT`` defaults from ``LDS_AI_TIMEOUT``.
 Before extraction, LocalDevStack checks ``/v1/models`` and fails immediately when the
-selected model is unavailable. An explicitly supplied ``OLLAMA_BASE_URL`` bypasses that
-local-provider preflight.
+selected model is unavailable.
 
 LLM Provider
 ------------
@@ -273,8 +278,8 @@ Generic service operations also accept ``llm`` and resolve it to the active prov
    lds exec llm ...
    lds rebuild llm
 
-Provider defaults are ``qwen3.5:9b`` for FastFlow/NPU and ``qwen3:14b`` for Ollama.
-Leaving ``LDS_AI_MODEL`` blank allows the runtime-specific default to apply.
+FastFlow/NPU and Ollama both default to ``qwen3.5:9b``. Leaving ``LDS_AI_MODEL``
+blank allows the provider default to apply.
 Rebuild
 -------
 

@@ -29,22 +29,24 @@ done
 models="$(
   docker exec "$container" python -c     'import urllib.request; print(urllib.request.urlopen("http://127.0.0.1:11434/v1/models", timeout=2).read().decode())'
 )"
-assert_contains "$models" "qwen3:14b"
+assert_contains "$models" "qwen3.5:9b"
 
 tags="$(
   docker exec "$container" python -c     'import urllib.request; print(urllib.request.urlopen("http://127.0.0.1:11434/api/tags", timeout=2).read().decode())'
 )"
-assert_contains "$tags" "qwen3:14b"
+assert_contains "$tags" "qwen3.5:9b"
 pass "fake provider exposes common OpenAI API plus Ollama-native compatibility"
 
 docker pull infocyph/tools:latest >/dev/null
 provider_status="$(
-  docker run --rm --network "$network"     --entrypoint askai     -e LDS_AI_ENABLED=1     -e LDS_AI_PROVIDER=llm     -e LDS_AI_URL=http://llm:11434     -e LDS_AI_MODEL=qwen3:14b     infocyph/tools:latest --status
+  docker run --rm --network "$network"     --entrypoint askai     -e LDS_AI_ENABLED=1     -e LDS_AI_RUNTIME=cpu     -e LDS_AI_MODEL=qwen3.5:9b     infocyph/tools:latest --status
 )"
-assert_contains "$provider_status" "provider=llm"
+assert_contains "$provider_status" "runtime=cpu"
+assert_contains "$provider_status" "provider=ollama"
+assert_contains "$provider_status" "url=http://llm-ollama:11434"
 assert_contains "$provider_status" "available=1"
-assert_contains "$provider_status" "model=qwen3:14b"
-pass "latest Tools reaches the common LocalDevStack llm contract"
+assert_contains "$provider_status" "model=qwen3.5:9b"
+pass "latest Tools resolves the LocalDevStack runtime to direct Ollama container DNS"
 
 [[ ! -e "$ROOT/docker/compose/ai.yaml" ]] || fail "base AI service must remain consolidated into companion.yaml"
 if find "$ROOT/docker/compose" -maxdepth 1 -type f -name 'ai-*.yaml' -print -quit | grep -q .; then
@@ -59,19 +61,17 @@ assert_file_contains "$ROOT/docker/compose/companion.yaml" 'profiles: ["${LDS_AI
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'aliases: [llm]'
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'lds_llm:/root/.ollama'
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'lds_llm_fastflow:/models'
-assert_file_contains "$ROOT/docker/compose/companion.yaml" 'LLM_OLLAMA_MODEL=${LDS_AI_MODEL:-qwen3:14b}'
+assert_file_contains "$ROOT/docker/compose/companion.yaml" 'LLM_OLLAMA_MODEL=${LDS_AI_MODEL:-qwen3.5:9b}'
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'LLM_FASTFLOW_MODEL=${LDS_AI_MODEL:-qwen3.5:9b}'
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'LLM_THINK=${LDS_AI_THINK:-}'
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'LDS_AI_THINK=${LDS_AI_THINK:-}'
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'FLM_SERVE_PORT=11434'
-assert_file_contains "$ROOT/docker/compose/companion.yaml" 'LDS_AI_PROVIDER=${LDS_AI_PROVIDER:-llm}'
-assert_file_contains "$ROOT/docker/compose/companion.yaml" 'LDS_AI_URL=${LDS_AI_URL:-http://llm:11434}'
+assert_file_contains "$ROOT/docker/compose/companion.yaml" 'LDS_AI_RUNTIME=${LDS_AI_RUNTIME:-cpu}'
 assert_file_contains "$ROOT/docker/compose/http.yaml" 'LLM_PROXY_TIMEOUT_SECONDS=${LDS_AI_TIMEOUT:-1800}'
 assert_file_contains "$ROOT/docker/compose/http.yaml" '"127.0.0.1:11434:11434"'
 pass "companion defines mutually exclusive provider services behind common llm alias"
 
-assert_file_contains "$ROOT/lib/compose.sh" 'LDS_AI_PROVIDER=llm'
-assert_file_contains "$ROOT/lib/compose.sh" 'LDS_AI_URL=http://llm:11434'
+assert_file_contains "$ROOT/lib/compose.sh" 'LDS_AI_RUNTIME="$ai_runtime"'
 assert_file_contains "$ROOT/lib/compose.sh" 'ollama_profile=__lds-ai-disabled-ollama'
 assert_file_contains "$ROOT/lib/compose.sh" 'fastflow_profile=ai'
 assert_file_contains "$ROOT/lib/compose.sh" 'ollama_profile=ai'
@@ -95,28 +95,27 @@ assert_file_contains "$ROOT/lib/ai.sh" 'llm-fastflow'
 assert_file_contains "$ROOT/lib/ai.sh" 'llm-ollama'
 assert_file_contains "$ROOT/lib/ai.sh" 'fastflow) printf '\''%s'\'' openai'
 assert_file_contains "$ROOT/lib/ai.sh" 'ollama) printf '\''%s'\'' ollama'
-assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_TOKEN_BUDGET:-4000'
+assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_TOKEN_BUDGET:-3000'
 assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_MAX_CONCURRENCY:-1'
 assert_file_contains "$ROOT/lib/ai.sh" 'lds-fastflow'
 assert_file_contains "$ROOT/lib/ai.sh" 'lds-ollama'
 assert_file_contains "$ROOT/lib/ai.sh" 'extra_body: {think: false}'
 assert_file_contains "$ROOT/lib/ai.sh" 'reasoning_effort: "none"'
-assert_file_contains "$ROOT/lib/ai.sh" 'graphify-diagnostic-proxy.py'
-assert_file_contains "$ROOT/lib/ai.sh" 'http://127.0.0.1:${proxy_port}/v1'
-assert_file_contains "$ROOT/lib/ai.sh" '--provider "$provider"'
-assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_DIAGNOSTICS:-0'
-assert_file_contains "$ROOT/lib/ai.sh" '--diagnostics "$diagnostic_mode"'
-assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_STRUCTURED_TIMEOUT:-120'
+assert_file_contains "$ROOT/lib/ai.sh" 'backend="$(_graphify_write_local_provider "$provider_dir" "$provider" "$base_url"'
+assert_file_contains "$ROOT/lib/ai.sh" 'export GRAPHIFY_MAX_OUTPUT_TOKENS="$structured_output_tokens"'
+assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_OUTPUT_TOKENS:-8192'
+assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_MIN_VERSION:-0.9.65'
+assert_file_contains "$ROOT/lib/ai.sh" 'manifest.json'
 assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_SDK_RETRIES:-0'
 assert_file_contains "$ROOT/lib/ai.sh" 'export GRAPHIFY_MAX_RETRIES="$graphify_sdk_retries"'
-assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_MAX_RETRY_DEPTH:-1'
+assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_MAX_RETRY_DEPTH:-2'
 assert_file_contains "$ROOT/lib/ai.sh" 'export GRAPHIFY_MAX_RETRY_DEPTH="$graphify_retry_depth"'
 assert_file_contains "$ROOT/lib/ai.sh" 'existing graph detected; using Graphify incremental update (changed files only)'
 assert_file_contains "$ROOT/lib/ai.sh" 'existing graph detected; --force requested, performing a full rebuild'
-assert_file_contains "$ROOT/lib/ai.sh" 'no existing graph detected; performing initial full build'
-assert_file_contains "$ROOT/lib/ai.sh" '--structured-timeout "$structured_timeout"'
+assert_file_contains "$ROOT/lib/ai.sh" 'no graph detected; bootstrapping code-first before semantic enrichment'
+assert_file_contains "$ROOT/lib/ai.sh" 'phase 1/2: extracting code structure and clustering the structural graph'
+assert_file_contains "$ROOT/lib/ai.sh" 'phase 2/2: enriching the existing graph with semantic files'
 assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_THINK:-off'
-assert_file_contains "$ROOT/lib/ai.sh" 'lds-graphify-diagnostics.jsonl'
 assert_file_contains "$ROOT/lib/ai.sh" 'llm think <auto|on|off>'
 pass "LLM CLI and Graphify resolve through provider-aware common endpoint"
 
@@ -125,12 +124,12 @@ pass "LLM CLI and Graphify resolve through provider-aware common endpoint"
   need_bin() { :; }
   die() { return 1; }
   curl() {
-    printf '%s\n' '{"object":"list","data":[{"id":"qwen3:14b"},{"id":"qwen3.5:9b"}]}'
+    printf '%s\n' '{"object":"list","data":[{"id":"qwen3.5:9b"},{"id":"qwen3.5:9b"}]}'
   }
   # shellcheck source=lib/ai.sh
   source "$ROOT/lib/ai.sh"
 
-  _graphify_local_model_preflight qwen3:14b ||
+  _graphify_local_model_preflight qwen3.5:9b ||
     fail "Graphify rejected the Ollama default through common model catalog"
   _graphify_local_model_preflight qwen3.5:9b ||
     fail "Graphify rejected the FastFlow default through common model catalog"
@@ -139,6 +138,50 @@ pass "LLM CLI and Graphify resolve through provider-aware common endpoint"
   fi
 )
 pass "Graphify validates either provider model through /v1/models"
+
+(
+  set -euo pipefail
+  die() { return 1; }
+  # shellcheck source=lib/ai.sh
+  source "$ROOT/lib/ai.sh"
+
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' EXIT
+  mkdir -p "$tmp/project/graphify-out"
+
+  if _graphify_has_graph "$tmp/project"; then
+    fail "Graphify graph baseline detected before graph.json exists"
+  fi
+  if _graphify_has_incremental_state "$tmp/project"; then
+    fail "Graphify incremental state accepted without graph/manifest pair"
+  fi
+  : >"$tmp/project/graphify-out/graph.json"
+  _graphify_has_graph "$tmp/project" ||
+    fail "Graphify graph baseline was not detected from graph.json"
+  if _graphify_has_incremental_state "$tmp/project"; then
+    fail "Graphify incremental state accepted without manifest"
+  fi
+  : >"$tmp/project/graphify-out/manifest.json"
+  _graphify_has_incremental_state "$tmp/project" ||
+    fail "Graphify incremental state rejected complete graph/manifest pair"
+
+  cat >"$tmp/graphify-new" <<'SH'
+#!/usr/bin/env sh
+printf '%s\n' 'graphify 0.9.65'
+SH
+  cat >"$tmp/graphify-old" <<'SH'
+#!/usr/bin/env sh
+printf '%s\n' 'graphify 0.9.64'
+SH
+  chmod +x "$tmp/graphify-new" "$tmp/graphify-old"
+
+  _graphify_version_preflight "$tmp/graphify-new" ||
+    fail "Graphify minimum compatible version was rejected"
+  if _graphify_version_preflight "$tmp/graphify-old"; then
+    fail "Graphify version below compatibility floor was accepted"
+  fi
+)
+pass "Graphify incremental state and minimum-version contracts are enforced"
 
 (
   set -euo pipefail
@@ -165,8 +208,8 @@ pass "Graphify backend selection follows active LLM provider"
 
   [[ "$(_graphify_write_local_provider "$tmp" fastflow http://llm.localhost:11434/v1 qwen3.5:9b 4000 off)" == lds-fastflow ]] ||
     fail "FastFlow local Graphify provider name drifted"
-  jq -e '."lds-fastflow".extra_body.think == false and (."lds-fastflow" | has("reasoning_effort") | not)' "$tmp/.graphify/providers.json" >/dev/null ||
-    fail "FastFlow local Graphify provider must default to no-thinking"
+  jq -e '."lds-fastflow".base_url == "http://llm.localhost:11434/v1" and ."lds-fastflow".max_tokens == 8192 and ."lds-fastflow".extra_body.think == false and (."lds-fastflow" | has("reasoning_effort") | not)' "$tmp/.graphify/providers.json" >/dev/null ||
+    fail "FastFlow local Graphify provider must use the direct endpoint, output cap and no-thinking"
 
   [[ "$(_graphify_write_local_provider "$tmp" fastflow http://llm.localhost:11434/v1 qwen3.5:9b 4000 on)" == lds-fastflow ]] ||
     fail "FastFlow local Graphify thinking-on provider name drifted"
@@ -178,289 +221,21 @@ pass "Graphify backend selection follows active LLM provider"
   jq -e '(."lds-fastflow" | has("extra_body") | not) and (."lds-fastflow" | has("reasoning_effort") | not)' "$tmp/.graphify/providers.json" >/dev/null ||
     fail "FastFlow Graphify auto override must omit thinking controls"
 
-  [[ "$(_graphify_write_local_provider "$tmp" ollama http://llm.localhost:11434/v1 qwen3:14b 4000)" == lds-ollama ]] ||
+  [[ "$(_graphify_write_local_provider "$tmp" ollama http://llm.localhost:11434/v1 qwen3.5:9b 4000)" == lds-ollama ]] ||
     fail "Ollama local Graphify provider name drifted"
-  jq -e '."lds-ollama".reasoning_effort == "none" and ."lds-ollama".extra_body.options.num_ctx >= 8192' "$tmp/.graphify/providers.json" >/dev/null ||
-    fail "Ollama local Graphify provider must disable thinking and retain context headroom"
+  jq -e '."lds-ollama".base_url == "http://llm.localhost:11434/v1" and ."lds-ollama".max_tokens == 8192 and ."lds-ollama".reasoning_effort == "none" and ."lds-ollama".extra_body.options.num_ctx >= 16384' "$tmp/.graphify/providers.json" >/dev/null ||
+    fail "Ollama local Graphify provider must use the direct endpoint, output cap, no-thinking and context headroom"
 )
-pass "Graphify local providers enforce structured no-thinking contracts"
+pass "Graphify local providers use direct OpenAI-compatible endpoints"
 
-python3 -m py_compile "$ROOT/scripts/graphify-diagnostic-proxy.py"
-python3 - "$ROOT/scripts/graphify-diagnostic-proxy.py" <<'PY'
-import importlib.util
-import io
-import json
-import sys
-
-path = sys.argv[1]
-spec = importlib.util.spec_from_file_location("lds_graphify_diagnostic_proxy", path)
-module = importlib.util.module_from_spec(spec)
-assert spec and spec.loader
-spec.loader.exec_module(module)
-
-suspect, reason = module.classify_graph_content('{"nodes":[],"edges":[],"hyperedges":[]}')
-assert suspect and reason == "valid but empty graph fragment"
-
-suspect, reason = module.classify_graph_content('{"nodes":["A","B"],"edges":[]}')
-assert suspect and "no usable object entries" in reason
-
-suspect, _ = module.classify_graph_content(
-    '{"nodes":[{"id":"a","label":"A"}],"edges":[],"hyperedges":[]}'
-)
-assert not suspect
-
-fence = chr(96) * 3
-suspect, _ = module.classify_graph_content(
-    "answer follows\n" + fence + "json\n" +
-    '{"nodes":[{"id":"a"}],"edges":[]}' + "\n" + fence
-)
-assert not suspect
-
-suspect, reason = module.classify_graph_content("I found nothing useful in these documents.")
-assert suspect and "not parseable" in reason
-
-suspect, reason = module.classify_graph_content(
-    '{"nodes":[{"id":"a","source_file:".github/x.md"}],"edges":[]}'
-)
-assert suspect and reason == "malformed graph JSON"
-
-assert module.parse_graph_content('{"nodes":[],"edges":[],"hyperedges":[]}') == {
-    "nodes": [],
-    "edges": [],
-    "hyperedges": [],
-}
-assert module.parse_graph_content('{"nodes":["bad"],"edges":[],"hyperedges":[]}') is None
-
-assert module.parse_graph_content(
-    '{"nodes":[{"id":"a"}],"edges":[],"hyperedges":[]}'
-) == {
-    "nodes": [{"id": "a"}],
-    "edges": [],
-    "hyperedges": [],
-}
-
-body = json.dumps({
-    "model": "qwen3.5:9b",
-    "messages": [
-        {"role": "system", "content": "You are a graphify semantic extraction agent."},
-        {"role": "user", "content": "private corpus content"}
-    ],
-    "think": False,
-    "stream": False
-}).encode()
-metadata = module._request_metadata(body)
-assert metadata["_extraction_request"] is True
-assert metadata["think"] is False
-assert "private corpus content" not in json.dumps(metadata)
-
-recovery = module._build_tool_recovery_request(body)
-assert recovery is not None
-recovery_json = json.loads(recovery)
-assert recovery_json["tools"][0]["function"]["name"] == "submit_graph"
-assert recovery_json["tool_choice"] == "auto"
-assert recovery_json["stream"] is True
-assert recovery_json["think"] is False
-assert "STRUCTURED OUTPUT" in recovery_json["messages"][0]["content"]
-assert recovery_json["temperature"] == 0
-assert recovery_json["max_completion_tokens"] == 2048
-
-assert recovery_json["tools"][0]["function"]["parameters"] == module._GRAPH_SCHEMA
-assert "rationale_for" not in module._GRAPH_SCHEMA["properties"]["edges"]["items"]["properties"]["relation"]["enum"]
-
-ollama_body = json.dumps({
-    "model": "qwen3:14b",
-    "messages": [
-        {"role": "system", "content": "You are a graphify semantic extraction agent."},
-        {"role": "user", "content": "private corpus content"}
-    ],
-    "reasoning_effort": "none",
-    "stream": False,
-    "temperature": 0,
-    "options": {"num_ctx": 8192},
-}).encode()
-ollama_request = module._build_ollama_schema_request(ollama_body)
-assert ollama_request is not None
-ollama_json = json.loads(ollama_request)
-assert ollama_json["reasoning_effort"] == "none"
-assert ollama_json["options"]["num_ctx"] == 8192
-assert ollama_json["temperature"] == 0
-assert ollama_json["max_completion_tokens"] == 2048
-assert ollama_json["response_format"]["type"] == "json_schema"
-assert ollama_json["response_format"]["json_schema"]["strict"] is True
-assert ollama_json["response_format"]["json_schema"]["schema"] == module._GRAPH_SCHEMA
-
-tool_response = {
-    "id": "chatcmpl-test",
-    "object": "chat.completion",
-    "choices": [{
-        "index": 0,
-        "finish_reason": "tool_calls",
-        "message": {
-            "role": "assistant",
-            "reasoning_content": "private reasoning",
-            "content": "<think>private reasoning</think>",
-            "tool_calls": [{
-                "id": "call_1",
-                "type": "function",
-                "function": {
-                    "name": "submit_graph",
-                    "arguments": json.dumps({
-                        "nodes": [{"id": "readme_pathwise", "label": "Pathwise"}],
-                        "edges": [],
-                        "hyperedges": [],
-                    }),
-                },
-            }],
-        },
-    }],
-    "usage": {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
-}
-graph = module._extract_graph_tool_result(json.dumps(tool_response).encode())
-assert graph == {
-    "nodes": [{"id": "readme_pathwise", "label": "Pathwise"}],
-    "edges": [],
-    "hyperedges": [],
-}
-
-assert module._extract_fastflow_structured_graph(json.dumps(tool_response).encode()) == graph
-
-sse_tool_event = {
-    "id": "chatcmpl-stream-test",
-    "object": "chat.completion.chunk",
-    "model": "qwen3.5:9b",
-    "choices": [{
-        "index": 0,
-        "delta": {
-            "tool_calls": [{
-                "index": 0,
-                "id": "call_stream",
-                "type": "function",
-                "function": {
-                    "name": "submit_graph",
-                    "arguments": json.dumps(graph),
-                },
-            }],
-        },
-        "finish_reason": None,
-    }],
-}
-sse_tail = {
-    "id": "chatcmpl-stream-test",
-    "object": "chat.completion.chunk",
-    "model": "qwen3.5:9b",
-    "choices": [{
-        "index": 0,
-        "delta": {"content": None},
-        "finish_reason": "tool_calls",
-    }],
-    "usage": {"prompt_tokens": 100, "completion_tokens": 30, "total_tokens": 130},
-}
-stream_bytes = (
-    "data: " + json.dumps(sse_tool_event) + "\n\n"
-    + "data: " + json.dumps(sse_tail) + "\n\n"
-    + "data: [DONE]\n\n"
-).encode()
-collapsed = module._fastflow_stream_completion(io.BytesIO(stream_bytes), "qwen3.5:9b")
-collapsed_json = json.loads(collapsed)
-assert collapsed_json["choices"][0]["finish_reason"] == "tool_calls"
-assert module._extract_fastflow_structured_graph(collapsed) == graph
-
-content_only_response = {
-    "choices": [{
-        "index": 0,
-        "finish_reason": "stop",
-        "message": {
-            "role": "assistant",
-            "content": json.dumps(graph),
-        },
-    }],
-    "usage": {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
-}
-assert module._extract_fastflow_structured_graph(
-    json.dumps(content_only_response).encode()
-) == graph
-
-replacement = module._replace_response_content(json.dumps(tool_response).encode(), graph)
-assert replacement is not None
-replacement_json = json.loads(replacement)
-message = replacement_json["choices"][0]["message"]
-assert json.loads(message["content"]) == graph
-assert "tool_calls" not in message
-assert "reasoning_content" not in message
-assert replacement_json["choices"][0]["finish_reason"] == "stop"
-
-split = module._graphify_split_response(json.dumps(tool_response).encode(), "qwen3.5:9b")
-split_json = json.loads(split)
-assert split_json["model"] == "qwen3.5:9b"
-assert split_json["choices"][0]["finish_reason"] == "length"
-assert json.loads(split_json["choices"][0]["message"]["content"]) == {
-    "nodes": [],
-    "edges": [],
-    "hyperedges": [],
-}
-
-split_graph = module._extract_fastflow_structured_graph(split)
-assert split_graph == {"nodes": [], "edges": [], "hyperedges": []}
-split_replacement = module._replace_response_content(split, split_graph)
-assert split_replacement is not None
-split_replacement_json = json.loads(split_replacement)
-assert split_replacement_json["choices"][0]["finish_reason"] == "length"
-
-string_array_response = json.loads(json.dumps(tool_response))
-string_array_response["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"] = json.dumps({
-    "nodes": json.dumps([{"id": "a"}]),
-    "edges": "[]",
-    "hyperedges": "[]",
-})
-assert module._extract_graph_tool_result(json.dumps(string_array_response).encode()) == {
-    "nodes": [{"id": "a"}],
-    "edges": [],
-    "hyperedges": [],
-}
-
-nested_arguments_response = json.loads(json.dumps(tool_response))
-nested_arguments_response["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"] = json.dumps({
-    "arguments": json.dumps({
-        "nodes": [{"id": "nested"}],
-        "edges": [],
-        "hyperedges": [],
-    })
-})
-assert module._extract_graph_tool_result(json.dumps(nested_arguments_response).encode()) == {
-    "nodes": [{"id": "nested"}],
-    "edges": [],
-    "hyperedges": [],
-}
-
-name_drift_response = json.loads(json.dumps(tool_response))
-name_drift_response["choices"][0]["message"]["tool_calls"][0]["function"]["name"] = " submit_graph "
-assert module._extract_graph_tool_result(json.dumps(name_drift_response).encode()) == graph
-
-flat_call_response = json.loads(json.dumps(tool_response))
-call = flat_call_response["choices"][0]["message"]["tool_calls"][0]
-flat_call_response["choices"][0]["message"]["tool_calls"][0] = {
-    "name": "submit_graph",
-    "arguments": call["function"]["arguments"],
-}
-assert module._extract_graph_tool_result(json.dumps(flat_call_response).encode()) == graph
-
-summary = module._tool_call_summary(json.dumps(tool_response).encode())
-assert "submit_graph:keys=" in summary
-assert "nodes" in summary
-
-empty_tool_response = json.loads(json.dumps(tool_response))
-empty_tool_response["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"] = json.dumps({
-    "nodes": [],
-    "edges": [],
-    "hyperedges": [],
-})
-assert module._extract_graph_tool_result(json.dumps(empty_tool_response).encode()) == {
-    "nodes": [],
-    "edges": [],
-    "hyperedges": [],
-}
-PY
-pass "Graphify diagnostic proxy identifies and structurally recovers suspect responses"
+if [[ -e "$ROOT/scripts/graphify-diagnostic-proxy.py" || -e "$ROOT/scripts/graphify-compat-proxy.py" ]]; then
+  fail "Graphify integration must not ship a LocalDevStack Python compatibility proxy"
+fi
+if grep -Fq 'graphify-compat-proxy.py' "$ROOT/lib/ai.sh" ||
+   grep -Fq 'graphify-diagnostic-proxy.py' "$ROOT/lib/ai.sh"; then
+  fail "Graphify wrapper still references a removed compatibility proxy"
+fi
+pass "Graphify integration is proxy-free"
 
 
 (

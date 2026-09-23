@@ -20,7 +20,7 @@ runner="$ROOT/docs/guides/ad-hoc-runner.rst"
 notify="$ROOT/docs/guides/notifications.rst"
 secrets="$ROOT/docs/guides/secrets-sops-age.rst"
 cli="$ROOT/docs/reference/cli.rst"
-plan="$ROOT/docs/plans/docker-ecosystem/07-localdevstack-integration-plan.md"
+plan="$ROOT/docs/plans/lds-core-cli-hardening-plan.md"
 
 for file in "$index" "$readme" "$quick" "$arch" "$profiles" "$storage" "$domain" "$tls" "$ai" "$databases" "$ops" "$runner" "$notify" "$secrets" "$cli" "$plan"; do
   assert_file "$file"
@@ -67,9 +67,9 @@ assert_file_contains "$ai" 'llm-fastflow'
 assert_file_contains "$ai" 'llm-ollama'
 assert_file_contains "$ai" 'mutually exclusive'
 assert_file_contains "$ai" 'qwen3.5:9b'
-assert_file_contains "$ai" 'qwen3:14b'
-assert_file_contains "$ai" 'LDS_AI_PROVIDER=llm'
-assert_file_contains "$ai" 'LDS_AI_URL=http://llm:11434'
+assert_file_contains "$ai" 'qwen3.5:9b'
+assert_file_contains "$ai" 'npu             -> http://llm-fastflow:11434/v1'
+assert_file_contains "$ai" 'cpu|nvidia|amd  -> http://llm-ollama:11434/v1'
 assert_file_contains "$ai" 'FLM_SERVE_PORT=11434'
 assert_file_contains "$ai" '/dev/accel/accel0'
 assert_file_contains "$ai" 'LLMFastFlowModels'
@@ -90,20 +90,22 @@ assert_file_contains "$ai" 'extra_body={"think": false}'
 assert_file_contains "$ai" 'reasoning_effort=none'
 assert_file_contains "$ai" 'lds llm think'
 assert_file_contains "$ai" 'LDS_AI_THINK'
-assert_file_contains "$ai" 'LDS_GRAPHIFY_DIAGNOSTICS=1'
-assert_file_contains "$ai" 'submit_graph'
-assert_file_contains "$ai" 'response_format.type=json_schema'
-assert_file_contains "$ai" 'automatically switches to'
-assert_file_contains "$ai" 'incremental mode'
-assert_file_contains "$ai" 'Pass ``--force`` only when a'
-assert_file_contains "$ai" 'lds-graphify-diagnostics.jsonl'
+assert_file_contains "$ai" 'extracts code first with ``--code-only --no-cluster``'
+assert_file_contains "$ai" '.md .markdown .rst .yaml .yml .json .toml .ini .cfg'
+assert_file_contains "$ai" 'LDS_GRAPHIFY_DOCSTRUCT'
+assert_file_contains "$ai" 'LDS_GRAPHIFY_DOC_REVIEW'
+assert_file_contains "$ai" '--token-budget 3000'
+assert_file_contains "$ai" 'There is no LocalDevStack Graphify HTTP proxy or Python compatibility adapter.'
+assert_file_contains "$ai" 'Graphify'
+assert_file_contains "$ai" 'docstruct'
 assert_file_contains "$ai" 'think'
 assert_file_contains "$ai" 'reasoning_effort'
 if grep -RqsF 'LDS_LLM_ARCH' "$ROOT/README.md" "$ROOT/docs" --exclude-dir=plans; then
   fail "user-facing docs expose removed LDS_LLM_ARCH setting"
 fi
-assert_file_contains "$profiles" 'LDS_AI_PROVIDER=llm'
-assert_file_contains "$profiles" 'LDS_AI_URL=http://llm:11434'
+assert_file_contains "$profiles" 'LDS_AI_RUNTIME=<optional explicit cpu|nvidia|amd|npu>'
+assert_file_contains "$profiles" 'llm-fastflow:11434'
+assert_file_contains "$profiles" 'llm-ollama:11434'
 assert_file_contains "$profiles" 'infocyph/llm-fastflow:latest'
 assert_file_contains "$profiles" 'LLM_OLLAMA_ALLOW_LARGE_INPUT=0'
 assert_file_contains "$profiles" 'LLM_FASTFLOW_ALLOW_LARGE_INPUT=0'
@@ -157,20 +159,13 @@ done
 assert_file_contains "$ai" 'Both provider definitions live in ``docker/compose/companion.yaml``'
 pass "docs reflect fixed infrastructure images and ephemeral AI overrides"
 
-assert_file_contains "$plan" 'Tools **0.25**'
-assert_file_contains "$plan" 'Nginx **0.6**'
-assert_file_contains "$plan" 'LLM-FastFlow **0.01.2**'
-assert_file_contains "$plan" 'LLM-Ollama **0.05**'
-assert_file_contains "$plan" 'current graph has **18** services'
-assert_file_contains "$plan" 'current graph has **22** named volumes'
-assert_file_contains "$plan" 'mutually exclusive'
-assert_file_contains "$plan" 'llm:11434'
-for stale in \
-  '# Final implementation simplification — single LLM service' \
-  '- automatic GPU detection;' \
-  'When AI is enabled, `llm-ollama` persists models'; do
-  if grep -Fq "$stale" "$plan"; then
-    fail "implementation plan contains superseded AI wording: $stale"
-  fi
-done
-pass "implementation plan matches the final provider architecture and current published baselines"
+assert_file_contains "$plan" 'lds cli'
+assert_file_contains "$plan" 'lds core'
+assert_file_contains "$plan" 'shared container execution substrate'
+assert_file_contains "$plan" 'preserve argv'
+assert_file_contains "$plan" 'adaptive `docker exec` flags'
+assert_file_contains "$plan" 'Windows/Git Bash'
+assert_file_contains "$plan" 'remove this plan when every item is complete'
+[[ ! -d "$ROOT/docs/plans/docker-ecosystem" ]] ||
+  fail "completed docker-ecosystem planning directory still exists"
+pass "active Core/CLI hardening plan is canonical and completed ecosystem plans are retired"

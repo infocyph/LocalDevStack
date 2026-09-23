@@ -6,6 +6,7 @@ on:
       - main
       - "plan/**"
       - "feature/**"
+      - "graphify/**"
   pull_request:
   schedule:
     # Related moving latest images refresh weekly; re-run the full compatibility
@@ -69,6 +70,65 @@ jobs:
 
       - name: Documentation contract
         run: bash tests/docs-contract.sh
+
+
+  graphify-package:
+    name: Graphify package compatibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Validate minimum supported Graphify
+        run: |
+          python -m pip install "graphifyy[openai]==0.9.65"
+          graphify --version
+          python - <<'PY'
+          import inspect
+          import graphify.llm as llm
+
+          source = inspect.getsource(llm)
+          assert hasattr(llm, "_load_custom_providers")
+          assert hasattr(llm, "_mark_hollow")
+          for token in (
+              "GRAPHIFY_ALLOW_LOCAL_PROVIDERS",
+              "GRAPHIFY_MAX_RETRIES",
+              "GRAPHIFY_MAX_RETRY_DEPTH",
+          ):
+              assert token in source, token
+          PY
+
+      - name: Smoke direct provider on minimum Graphify
+        run: bash tests/graphify-direct-provider-contract.sh
+
+      - name: Validate latest Graphify contract
+        run: |
+          python -m pip install --upgrade "graphifyy[openai]"
+          graphify --version
+          python - <<'PY'
+          import inspect
+          import graphify.llm as llm
+
+          source = inspect.getsource(llm)
+          assert hasattr(llm, "_load_custom_providers")
+          assert hasattr(llm, "_mark_hollow")
+          for token in (
+              "GRAPHIFY_ALLOW_LOCAL_PROVIDERS",
+              "GRAPHIFY_MAX_RETRIES",
+              "GRAPHIFY_MAX_RETRY_DEPTH",
+          ):
+              assert token in source, token
+          PY
+
+      - name: Smoke direct provider on latest Graphify
+        run: bash tests/graphify-direct-provider-contract.sh
+
 
   compose:
     name: Compose contract

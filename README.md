@@ -257,7 +257,7 @@ lds llm runtime amd
 lds llm runtime cpu
 ```
 
-Provider defaults are intentionally different: FastFlow/NPU uses `qwen3.5:9b`; Ollama uses `qwen3:14b`. New setup leaves `LDS_AI_MODEL` blank so the selected provider default can apply. An explicit `LDS_AI_MODEL` overrides whichever provider is active.
+Both provider families now default to `qwen3.5:9b`. New setup leaves `LDS_AI_MODEL` blank so the selected provider default can apply. An explicit `LDS_AI_MODEL` overrides whichever provider is active.
 
 Common commands:
 
@@ -278,7 +278,7 @@ lds llm chat ...
 # Host Graphify through the common LocalDevStack /v1 endpoint
 lds graphify
 lds graphify ./your-project --mode deep
-# FastFlow already defaults to --token-budget 4000 --max-concurrency 1;
+# FastFlow already defaults to --token-budget 3000 --max-concurrency 1;
 # pass explicit values only when you want to override them.
 ```
 
@@ -286,7 +286,7 @@ lds graphify ./your-project --mode deep
 
 Nginx owns the loopback-only native route `127.0.0.1:11434 -> nginx:11434 -> llm:11434`. Provider containers do not publish host ports.
 
-`lds graphify` uses `http://llm.localhost:11434/v1` and validates the selected model through `/v1/models`. Backend selection follows the active provider automatically: FastFlow uses Graphify's generic `openai` backend, while Ollama uses Graphify's native `ollama` backend. For FastFlow, LocalDevStack also defaults to `--token-budget 4000 --max-concurrency 1` unless explicitly overridden; this keeps Qwen3.5 9B semantic chunks inside a safe local context budget.
+`lds graphify` keeps the host Graphify CLI on `http://llm.localhost:11434/v1`, with no Graphify proxy service or Python adapter. When the Tools image supports `docstruct`, `.md/.rst/.yaml/.yml/.json/.toml/.ini/.cfg` files are extracted mechanically, optionally reviewed in bounded AI chunks, validated as a Graphify fragment, and merged into a reserved document layer; Graphify continues to own code ASTs and unsupported semantic formats. `LDS_GRAPHIFY_DOCSTRUCT=auto|on|off` and `LDS_GRAPHIFY_DOC_REVIEW=auto|on|off` control the handoff. Explicit `--code-only` remains code-only.
 
 The built-in Compose layout keeps both provider definitions in `docker/compose/companion.yaml`, but runtime-generated profile selectors enable exactly one. NVIDIA/ROCm hardware augmentation is generated ephemerally under `docker/.runtime/`; FastFlow's `/dev/accel/accel0` + memlock contract lives in its tracked service definition.
 

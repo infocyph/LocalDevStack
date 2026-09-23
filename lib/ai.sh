@@ -22,10 +22,10 @@ cmd_ai() {
   case "${sub,,}" in
   status | provider) _tools_exec_argv aiops provider "$@" ;;
   ask) _tools_exec_argv askai "$@" ;;
-  explain | troubleshoot | review | repo-review | graphify)
+  explain | troubleshoot | review | document-review | repo-review | graphify)
     _tools_exec_argv aiops "${sub,,}" "$@"
     ;;
-  *) die "ai <status|ask|explain|troubleshoot|review|repo-review|graphify> [args...]" ;;
+  *) die "ai <status|ask|explain|troubleshoot|review|document-review|repo-review|graphify> [args...]" ;;
   esac
 }
 
@@ -99,7 +99,7 @@ _graphify_local_backend_for_provider() {
 }
 
 _graphify_write_local_provider() {
-  local dir="$1" provider="$2" base_url="$3" model="$4" token_budget="$5" think_mode="${6:-off}"
+  local dir="$1" provider="$2" base_url="$3" model="$4" token_budget="$5" think_mode="${6:-off}" output_budget="${7:-8192}"
   local backend num_ctx
   backend="$(_graphify_local_backend_for_provider "$provider")" || return 1
 
@@ -112,11 +112,13 @@ _graphify_write_local_provider() {
         --arg backend "$backend" \
         --arg base_url "$base_url" \
         --arg model "$model" \
+        --argjson output_budget "$output_budget" \
         '{
           ($backend): {
             base_url: $base_url,
             default_model: $model,
             env_key: "LDS_GRAPHIFY_API_KEY",
+            max_tokens: $output_budget,
             extra_body: {think: false}
           }
         }' >"$dir/.graphify/providers.json"
@@ -126,11 +128,13 @@ _graphify_write_local_provider() {
         --arg backend "$backend" \
         --arg base_url "$base_url" \
         --arg model "$model" \
+        --argjson output_budget "$output_budget" \
         '{
           ($backend): {
             base_url: $base_url,
             default_model: $model,
             env_key: "LDS_GRAPHIFY_API_KEY",
+            max_tokens: $output_budget,
             reasoning_effort: "high",
             extra_body: {think: true}
           }
@@ -141,11 +145,13 @@ _graphify_write_local_provider() {
         --arg backend "$backend" \
         --arg base_url "$base_url" \
         --arg model "$model" \
+        --argjson output_budget "$output_budget" \
         '{
           ($backend): {
             base_url: $base_url,
             default_model: $model,
-            env_key: "LDS_GRAPHIFY_API_KEY"
+            env_key: "LDS_GRAPHIFY_API_KEY",
+            max_tokens: $output_budget
           }
         }' >"$dir/.graphify/providers.json"
       ;;
@@ -153,8 +159,8 @@ _graphify_write_local_provider() {
     esac
     ;;
   ollama)
-    num_ctx=$((token_budget + 8192 + 2400))
-    ((num_ctx < 8192)) && num_ctx=8192
+    num_ctx=$((token_budget + output_budget + 4096))
+    ((num_ctx < 16384)) && num_ctx=16384
     ((num_ctx > 131072)) && num_ctx=131072
     num_ctx=$((((num_ctx + 1023) / 1024) * 1024))
     jq -n \
@@ -162,11 +168,13 @@ _graphify_write_local_provider() {
       --arg base_url "$base_url" \
       --arg model "$model" \
       --argjson num_ctx "$num_ctx" \
+      --argjson output_budget "$output_budget" \
       '{
         ($backend): {
           base_url: $base_url,
           default_model: $model,
           env_key: "LDS_GRAPHIFY_API_KEY",
+          max_tokens: $output_budget,
           reasoning_effort: "none",
           extra_body: {
             options: {num_ctx: $num_ctx},
@@ -181,36 +189,234 @@ _graphify_write_local_provider() {
   printf '%s' "$backend"
 }
 
-_graphify_python_bin() {
-  local graphify_bin="${1:-}" first_line="" candidate=""
+_graphify_version_preflight() {
+  local graphify_bin="${1:-graphify}" version min_version="${LDS_GRAPHIFY_MIN_VERSION:-0.9.65}"
+  local v_major v_minor v_patch m_major m_minor m_patch
 
-  for candidate in python3 python; do
-    if type -P -- "$candidate" >/dev/null 2>&1; then
-      type -P -- "$candidate"
-      return 0
-    fi
-  done
+  [[ "$min_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
+    die "LDS_GRAPHIFY_MIN_VERSION must use MAJOR.MINOR.PATCH format."
 
-  if [[ -n "$graphify_bin" && -f "$graphify_bin" ]]; then
-    IFS= read -r first_line <"$graphify_bin" || true
-    if [[ "$first_line" == '#!'* ]]; then
-      candidate="${first_line#\#!}"
-      candidate="${candidate%% *}"
-      if [[ -x "$candidate" && "${candidate##*/}" == python* ]]; then
-        printf '%s' "$candidate"
-        return 0
-      fi
-    fi
+  version="$("$graphify_bin" --version 2>/dev/null | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || true)"
+  [[ -n "$version" ]] ||
+    die "Unable to determine Graphify version. LocalDevStack requires graphifyy >= $min_version."
+
+  IFS=. read -r v_major v_minor v_patch <<<"$version"
+  IFS=. read -r m_major m_minor m_patch <<<"$min_version"
+  if ((v_major < m_major)) ||
+    ((v_major == m_major && v_minor < m_minor)) ||
+    ((v_major == m_major && v_minor == m_minor && v_patch < m_patch)); then
+    die "Graphify $version is too old. LocalDevStack requires graphifyy >= $min_version."
   fi
-  return 1
 }
 
-_graphify_diagnostics_enabled() {
-  case "${LDS_GRAPHIFY_DIAGNOSTICS:-0}" in
-  1 | true | TRUE | yes | YES | on | ON) return 0 ;;
-  0 | false | FALSE | no | NO | off | OFF) return 1 ;;
-  *) die "LDS_GRAPHIFY_DIAGNOSTICS must be true/false" ;;
+_graphify_has_graph() {
+  local target="${1:-.}"
+  [[ -d "$target" && -f "$target/graphify-out/graph.json" ]]
+}
+
+_graphify_has_incremental_state() {
+  local target="${1:-.}"
+  [[ -d "$target" && -f "$target/graphify-out/graph.json" && -f "$target/graphify-out/manifest.json" ]]
+}
+
+_graphify_docstruct_mode() {
+  case "${LDS_GRAPHIFY_DOCSTRUCT:-auto}" in
+  auto | on | off) printf '%s' "${LDS_GRAPHIFY_DOCSTRUCT:-auto}" ;;
+  *) die "LDS_GRAPHIFY_DOCSTRUCT must be auto, on, or off" ;;
   esac
+}
+
+_graphify_doc_review_mode() {
+  case "${LDS_GRAPHIFY_DOC_REVIEW:-auto}" in
+  auto | on | off) printf '%s' "${LDS_GRAPHIFY_DOC_REVIEW:-auto}" ;;
+  *) die "LDS_GRAPHIFY_DOC_REVIEW must be auto, on, or off" ;;
+  esac
+}
+
+_graphify_docstruct_available() {
+  local ctr output
+  ctr="$(_project_tools_container_running || true)"
+  if [[ -n "$ctr" ]]; then
+    output="$(docker exec -i "$ctr" docstruct graphify-merge --help 2>/dev/null)" || return 1
+  else
+    output="$(docker_compose run --rm --no-deps -T server-tools docstruct graphify-merge --help 2>/dev/null)" ||
+      return 1
+  fi
+  grep -Fq 'Usage: docstruct graphify-merge' <<<"$output"
+}
+
+_graphify_tools_app_target() {
+  local ctr="$1" target_abs="$2" app_source app_abs rel
+  app_source="$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/app"}}{{.Source}}{{end}}{{end}}' "$ctr" 2>/dev/null || true)"
+  [[ -n "$app_source" && -e "$app_source" ]] || return 1
+  app_abs="$(_realpath "$app_source")"
+
+  if [[ "$target_abs" == "$app_abs" ]]; then
+    printf '%s' /app
+    return 0
+  fi
+  [[ "$target_abs" == "$app_abs/"* ]] || return 1
+  rel="${target_abs#"$app_abs"}"
+  printf '/app%s' "$rel"
+}
+
+_GRAPHIFY_TOOLS_CTR=''
+_GRAPHIFY_TOOLS_TARGET=''
+_GRAPHIFY_TOOLS_TMP=''
+_GRAPHIFY_TOOLS_EPHEMERAL=0
+
+_graphify_tools_session_start() {
+  local target_abs="$1" ctr container_target created
+  _GRAPHIFY_TOOLS_CTR=''
+  _GRAPHIFY_TOOLS_TARGET=''
+  _GRAPHIFY_TOOLS_TMP=''
+  _GRAPHIFY_TOOLS_EPHEMERAL=0
+
+  ctr="$(_project_tools_container_running || true)"
+  if [[ -n "$ctr" ]]; then
+    container_target="$(_graphify_tools_app_target "$ctr" "$target_abs" || true)"
+    if [[ -n "$container_target" ]]; then
+      _GRAPHIFY_TOOLS_CTR="$ctr"
+      _GRAPHIFY_TOOLS_TARGET="$container_target"
+    fi
+  fi
+
+  if [[ -z "$_GRAPHIFY_TOOLS_CTR" ]]; then
+    printf '%s\n' "[lds graphify] documents: target is outside SERVER_TOOLS /app; starting one temporary Tools container" >&2
+    created="$(docker_compose run -d --no-deps \
+      -v "$target_abs:/workspace:ro" \
+      server-tools tail -f /dev/null 2>/dev/null | tail -n1 | tr -d '\r')" ||
+      die "Unable to start temporary Tools container for document extraction"
+    [[ -n "$created" ]] || die "Temporary Tools container did not return a container id"
+    _GRAPHIFY_TOOLS_CTR="$created"
+    _GRAPHIFY_TOOLS_TARGET=/workspace
+    _GRAPHIFY_TOOLS_EPHEMERAL=1
+  else
+    printf '%s\n' "[lds graphify] documents: reusing existing SERVER_TOOLS container" >&2
+  fi
+
+  _GRAPHIFY_TOOLS_TMP="$(docker exec -i "$_GRAPHIFY_TOOLS_CTR" \
+    mktemp -d /tmp/lds-graphify-docstruct.XXXXXX 2>/dev/null)" ||
+    die "Unable to create document workspace inside Tools container"
+  [[ -n "$_GRAPHIFY_TOOLS_TMP" ]] || die "Tools container returned an empty document workspace"
+}
+
+_graphify_tools_session_cleanup() {
+  local ctr="$_GRAPHIFY_TOOLS_CTR" tmp="$_GRAPHIFY_TOOLS_TMP"
+  if [[ -n "$ctr" && -n "$tmp" ]]; then
+    docker exec -i "$ctr" rm -rf -- "$tmp" >/dev/null 2>&1 || true
+  fi
+  if ((_GRAPHIFY_TOOLS_EPHEMERAL)) && [[ -n "$ctr" ]]; then
+    docker rm -f "$ctr" >/dev/null 2>&1 || true
+  fi
+  _GRAPHIFY_TOOLS_CTR=''
+  _GRAPHIFY_TOOLS_TARGET=''
+  _GRAPHIFY_TOOLS_TMP=''
+  _GRAPHIFY_TOOLS_EPHEMERAL=0
+}
+
+_graphify_tools_put() {
+  local host_file="$1" container_file="$2"
+  docker cp "$host_file" "$_GRAPHIFY_TOOLS_CTR:$container_file" >/dev/null
+}
+
+_graphify_docstruct_enrich() {
+  local graphify_bin="$1" target_abs="$2" review_mode="$3"
+  shift 3
+  local workdir review_file='' rc=0
+  local graph_path publish_tmp container_graph
+  local -a review_args=()
+
+  workdir="$(mktemp -d "${TMPDIR:-/tmp}/lds-graphify-docstruct.XXXXXX")" ||
+    die "Unable to create temporary document-extraction directory"
+  chmod 700 "$workdir" 2>/dev/null || true
+
+  _graphify_tools_session_start "$target_abs"
+  container_graph="$_GRAPHIFY_TOOLS_TARGET/graphify-out/graph.json"
+
+  printf '%s\n' "[lds graphify] documents: extracting Markdown/RST/config structure deterministically" >&2
+  if ! docker exec -i "$_GRAPHIFY_TOOLS_CTR" \
+    docstruct "$_GRAPHIFY_TOOLS_TARGET" --compact "$@" >"$workdir/docstruct.json"; then
+    _graphify_tools_session_cleanup
+    rm -rf "$workdir"
+    die "Deterministic document extraction failed"
+  fi
+  if ! _graphify_tools_put "$workdir/docstruct.json" "$_GRAPHIFY_TOOLS_TMP/docstruct.json"; then
+    _graphify_tools_session_cleanup
+    rm -rf "$workdir"
+    die "Unable to stage deterministic document structure inside Tools container"
+  fi
+
+  if [[ "$review_mode" != off ]]; then
+    printf '%s\n' "[lds graphify] documents: reviewing bounded semantic chunks with the active local model" >&2
+    if docker exec -i \
+      -e "DOCSTRUCT_REVIEW_ROOT=$_GRAPHIFY_TOOLS_TARGET" \
+      "$_GRAPHIFY_TOOLS_CTR" aiops document-review \
+      --file "$_GRAPHIFY_TOOLS_TMP/docstruct.json" >"$workdir/review.json"; then
+      if _graphify_tools_put "$workdir/review.json" "$_GRAPHIFY_TOOLS_TMP/review.json"; then
+        review_file="$_GRAPHIFY_TOOLS_TMP/review.json"
+        review_args=(--review "$review_file")
+      else
+        _graphify_tools_session_cleanup
+        rm -rf "$workdir"
+        die "Unable to stage document semantic review inside Tools container"
+      fi
+    elif [[ "$review_mode" == on ]]; then
+      _graphify_tools_session_cleanup
+      rm -rf "$workdir"
+      die "Document semantic review failed while LDS_GRAPHIFY_DOC_REVIEW=on"
+    else
+      warn "Document semantic review failed; continuing with deterministic structure only."
+      rm -f "$workdir/review.json"
+    fi
+  fi
+
+  if ! docker exec -i "$_GRAPHIFY_TOOLS_CTR" \
+    docstruct graphify "$_GRAPHIFY_TOOLS_TMP/docstruct.json" \
+      --source-root "$target_abs" "${review_args[@]}" --compact >"$workdir/fragment.json"; then
+    _graphify_tools_session_cleanup
+    rm -rf "$workdir"
+    die "Unable to convert deterministic document structure to a Graphify fragment"
+  fi
+
+  if ! "$graphify_bin" merge-chunks "$workdir/fragment.json" --out "$workdir/validated.json" >/dev/null; then
+    _graphify_tools_session_cleanup
+    rm -rf "$workdir"
+    die "Graphify rejected the deterministic document fragment"
+  fi
+  if ! _graphify_tools_put "$workdir/fragment.json" "$_GRAPHIFY_TOOLS_TMP/fragment.json"; then
+    _graphify_tools_session_cleanup
+    rm -rf "$workdir"
+    die "Unable to stage validated Graphify fragment inside Tools container"
+  fi
+
+  printf '%s\n' "[lds graphify] documents: replacing the supported non-code semantic layer" >&2
+  graph_path="$target_abs/graphify-out/graph.json"
+  publish_tmp="$(mktemp "$target_abs/graphify-out/.graph.json.docstruct.XXXXXX")" || {
+    _graphify_tools_session_cleanup
+    rm -rf "$workdir"
+    die "Unable to create temporary Graphify output for document merge"
+  }
+
+  if ! docker exec -i "$_GRAPHIFY_TOOLS_CTR" \
+    docstruct graphify-merge "$container_graph" "$_GRAPHIFY_TOOLS_TMP/fragment.json" >"$publish_tmp"; then
+    rc=$?
+    rm -f "$publish_tmp"
+    _graphify_tools_session_cleanup
+    rm -rf "$workdir"
+    return "$rc"
+  fi
+
+  chmod 0644 "$publish_tmp" 2>/dev/null || true
+  if ! mv -f "$publish_tmp" "$graph_path"; then
+    rm -f "$publish_tmp"
+    _graphify_tools_session_cleanup
+    rm -rf "$workdir"
+    die "Unable to publish merged Graphify output"
+  fi
+
+  _graphify_tools_session_cleanup
+  rm -rf "$workdir"
 }
 
 cmd_graphify() {
@@ -221,13 +427,20 @@ cmd_graphify() {
   [[ -e "$target" ]] || die "Graphify target does not exist: $target"
 
   local runtime provider backend base_url timeout model api_key graphify_bin arg provider_dir target_abs graphify_target
-  local graphify_python="" diagnostic_root="" diagnostic_log="" diagnostic_preview="4096" graphify_think="off"
-  local diagnostic_mode="off" structured_timeout="" graphify_sdk_retries="" graphify_retry_depth=""
-  local local_provider=0 force_rebuild=0
-  local next_is_model=0 next_is_timeout=0 next_is_token_budget=0 next_is_max_concurrency=0
+  local graphify_think="off"
+  local structured_output_tokens="" graphify_sdk_retries="" graphify_retry_depth=""
+  local local_provider=0 force_rebuild=0 explicit_code_only=0 bootstrap_code_first=0 docstruct_enabled=0
+  local next_is_model=0 next_is_timeout=0 next_is_token_budget=0 next_is_max_concurrency=0 next_is_exclude=0
   local has_token_budget=0 has_max_concurrency=0
-  local token_budget_value="" max_concurrency_value=""
-  local -a graphify_defaults=()
+  local token_budget_value="" max_concurrency_value="" docstruct_mode="" doc_review_mode=""
+  local -a graphify_defaults=() graphify_cluster_defaults=() docstruct_scan_args=()
+  local -a docstruct_graphify_excludes=(
+    --exclude '*.md' --exclude '*.markdown' --exclude '*.rst'
+    --exclude '*.yaml' --exclude '*.yml' --exclude '*.json'
+    --exclude '*.toml' --exclude '*.ini' --exclude '*.cfg'
+    --exclude 'requirements*.txt' --exclude 'constraints*.txt'
+    --exclude 'requirements/*.txt' --exclude '**/requirements/*.txt'
+  )
 
   runtime="$(_active_llm_runtime)"
   provider="$(_active_llm_provider)"
@@ -259,15 +472,15 @@ cmd_graphify() {
 
   timeout="${GRAPHIFY_API_TIMEOUT:-$(compose_control_value LDS_AI_TIMEOUT 1800)}"
 
-  structured_timeout="${LDS_GRAPHIFY_STRUCTURED_TIMEOUT:-120}"
-  [[ "$structured_timeout" =~ ^[0-9]+$ ]] && ((structured_timeout >= 1)) ||
-    die "LDS_GRAPHIFY_STRUCTURED_TIMEOUT must be a positive integer"
+  structured_output_tokens="${GRAPHIFY_MAX_OUTPUT_TOKENS:-${LDS_GRAPHIFY_OUTPUT_TOKENS:-8192}}"
+  [[ "$structured_output_tokens" =~ ^[0-9]+$ ]] && ((structured_output_tokens >= 512)) ||
+    die "LDS_GRAPHIFY_OUTPUT_TOKENS must be an integer >= 512"
 
   graphify_sdk_retries="${GRAPHIFY_MAX_RETRIES:-${LDS_GRAPHIFY_SDK_RETRIES:-0}}"
   [[ "$graphify_sdk_retries" =~ ^[0-9]+$ ]] ||
     die "GRAPHIFY_MAX_RETRIES/LDS_GRAPHIFY_SDK_RETRIES must be a non-negative integer"
 
-  graphify_retry_depth="${GRAPHIFY_MAX_RETRY_DEPTH:-${LDS_GRAPHIFY_MAX_RETRY_DEPTH:-1}}"
+  graphify_retry_depth="${GRAPHIFY_MAX_RETRY_DEPTH:-${LDS_GRAPHIFY_MAX_RETRY_DEPTH:-2}}"
   [[ "$graphify_retry_depth" =~ ^[0-9]+$ ]] ||
     die "GRAPHIFY_MAX_RETRY_DEPTH/LDS_GRAPHIFY_MAX_RETRY_DEPTH must be a non-negative integer"
 
@@ -301,6 +514,11 @@ cmd_graphify() {
       next_is_max_concurrency=0
       continue
     fi
+    if ((next_is_exclude)); then
+      docstruct_scan_args+=(--exclude "$arg")
+      next_is_exclude=0
+      continue
+    fi
 
     case "$arg" in
     --model) next_is_model=1 ;;
@@ -323,8 +541,20 @@ cmd_graphify() {
       has_max_concurrency=1
       max_concurrency_value="${arg#--max-concurrency=}"
       ;;
+    --exclude)
+      next_is_exclude=1
+      ;;
+    --exclude=*)
+      docstruct_scan_args+=(--exclude "${arg#--exclude=}")
+      ;;
+    --no-gitignore)
+      docstruct_scan_args+=(--no-gitignore)
+      ;;
     --force)
       force_rebuild=1
+      ;;
+    --code-only)
+      explicit_code_only=1
       ;;
     --backend | --backend=*)
       die "lds graphify selects the Graphify backend from the active LLM provider; do not pass --backend"
@@ -339,6 +569,7 @@ cmd_graphify() {
   ((next_is_timeout == 0)) || die "--api-timeout requires a value"
   ((next_is_token_budget == 0)) || die "--token-budget requires a value"
   ((next_is_max_concurrency == 0)) || die "--max-concurrency requires a value"
+  ((next_is_exclude == 0)) || die "--exclude requires a value"
 
   [[ -n "$model" ]] || die "Graphify model cannot be empty"
   [[ "$timeout" =~ ^[0-9]+$ ]] && ((timeout >= 1)) ||
@@ -357,7 +588,7 @@ cmd_graphify() {
   # serialized requests. Callers can still override both limits explicitly.
   if [[ "$provider" == fastflow ]] || ((local_provider)); then
     if ((has_token_budget == 0)); then
-      token_budget_value="${LDS_GRAPHIFY_TOKEN_BUDGET:-4000}"
+      token_budget_value="${LDS_GRAPHIFY_TOKEN_BUDGET:-3000}"
       [[ "$token_budget_value" =~ ^[0-9]+$ ]] && ((token_budget_value >= 1)) ||
         die "LDS_GRAPHIFY_TOKEN_BUDGET must be a positive integer"
       graphify_defaults+=(--token-budget "$token_budget_value")
@@ -370,52 +601,61 @@ cmd_graphify() {
     fi
   fi
 
+  if [[ -n "$max_concurrency_value" ]]; then
+    graphify_cluster_defaults+=(--max-concurrency "$max_concurrency_value")
+  fi
+
   ((local_provider == 0)) || _graphify_local_model_preflight "$model"
 
   graphify_bin="$(bin_path graphify)"
+  _graphify_version_preflight "$graphify_bin"
   target_abs="$(_realpath "$target")"
   graphify_target="$target"
   provider_dir=""
 
-  if [[ -d "$target_abs" && -f "$target_abs/graphify-out/graph.json" ]]; then
+  docstruct_mode="$(_graphify_docstruct_mode)"
+  doc_review_mode="$(_graphify_doc_review_mode)"
+  if ((explicit_code_only == 0)) && [[ "$docstruct_mode" != off ]]; then
+    if _graphify_docstruct_available; then
+      docstruct_enabled=1
+    elif [[ "$docstruct_mode" == on ]]; then
+      die "LDS_GRAPHIFY_DOCSTRUCT=on requires a docker-tools image with docstruct Graphify merge support"
+    else
+      warn "docker-tools docstruct integration is unavailable; falling back to Graphify semantic extraction."
+    fi
+  fi
+
+  if ((docstruct_enabled)) && ((local_provider == 0)); then
+    if [[ "$doc_review_mode" == on ]]; then
+      die "LDS_GRAPHIFY_DOC_REVIEW=on requires the built-in LocalDevStack AI provider route"
+    fi
+    [[ "$doc_review_mode" == auto ]] && doc_review_mode=off
+  fi
+
+  if _graphify_has_incremental_state "$target_abs"; then
     if ((force_rebuild)); then
       printf '%s\n' "[lds graphify] existing graph detected; --force requested, performing a full rebuild" >&2
     else
       printf '%s\n' "[lds graphify] existing graph detected; using Graphify incremental update (changed files only)" >&2
     fi
+  elif _graphify_has_graph "$target_abs"; then
+    printf '%s\n' "[lds graphify] existing graph detected without complete manifest; letting Graphify recover from the graph baseline" >&2
+  elif ((explicit_code_only)); then
+    printf '%s\n' "[lds graphify] no graph detected; performing requested code-only build" >&2
+  elif ((force_rebuild)); then
+    printf '%s\n' "[lds graphify] no graph detected; --force requested, performing a full build" >&2
   else
-    printf '%s\n' "[lds graphify] no existing graph detected; performing initial full build" >&2
+    bootstrap_code_first=1
+    printf '%s\n' "[lds graphify] no graph detected; bootstrapping code-first before semantic enrichment" >&2
   fi
 
   if ((local_provider)); then
     graphify_target="$target_abs"
     provider_dir="$(mktemp -d)" || die "Unable to create temporary Graphify provider directory"
-
-    graphify_python="$(_graphify_python_bin "$graphify_bin")" ||
-      die "Unable to find the Python interpreter required for LocalDevStack Graphify structured output"
-
-    if [[ -d "$target_abs" ]]; then
-      diagnostic_root="$target_abs"
-    else
-      diagnostic_root="$(dirname "$target_abs")"
-    fi
-    diagnostic_log="${LDS_GRAPHIFY_DIAGNOSTIC_LOG:-$diagnostic_root/graphify-out/lds-graphify-diagnostics.jsonl}"
-    diagnostic_preview="${LDS_GRAPHIFY_DIAGNOSTIC_PREVIEW:-4096}"
-    [[ "$diagnostic_preview" =~ ^[0-9]+$ ]] && ((diagnostic_preview >= 256)) ||
-      die "LDS_GRAPHIFY_DIAGNOSTIC_PREVIEW must be an integer >= 256"
-
-    if _graphify_diagnostics_enabled; then
-      diagnostic_mode=on
-    fi
   fi
 
   (
-    proxy_pid=""
     cleanup_graphify_local() {
-      if [[ -n "${proxy_pid:-}" ]]; then
-        kill "$proxy_pid" >/dev/null 2>&1 || true
-        wait "$proxy_pid" >/dev/null 2>&1 || true
-      fi
       [[ -z "$provider_dir" ]] || rm -rf "$provider_dir"
     }
     [[ -z "$provider_dir" ]] || trap cleanup_graphify_local EXIT
@@ -424,46 +664,9 @@ cmd_graphify() {
     if ((local_provider)); then
       export GRAPHIFY_MAX_RETRIES="$graphify_sdk_retries"
       export GRAPHIFY_MAX_RETRY_DEPTH="$graphify_retry_depth"
-      local_provider_base_url="$base_url"
+      export GRAPHIFY_MAX_OUTPUT_TOKENS="$structured_output_tokens"
 
-      if [[ -n "$graphify_python" ]]; then
-        ready_file="$provider_dir/graphify-proxy.port"
-        if [[ "$diagnostic_mode" == on ]]; then
-          mkdir -p "$(dirname "$diagnostic_log")"
-          : >"$diagnostic_log"
-        fi
-
-        "$graphify_python" "$DIR/scripts/graphify-diagnostic-proxy.py" \
-          --upstream "${base_url%/v1}" \
-          --provider "$provider" \
-          --diagnostics "$diagnostic_mode" \
-          --timeout "$timeout" \
-          --structured-timeout "$structured_timeout" \
-          --ready-file "$ready_file" \
-          --log-file "$diagnostic_log" \
-          --preview-chars "$diagnostic_preview" &
-        proxy_pid=$!
-
-        proxy_port=""
-        for _ in {1..100}; do
-          if [[ -s "$ready_file" ]]; then
-            proxy_port="$(cat "$ready_file")"
-            break
-          fi
-          kill -0 "$proxy_pid" >/dev/null 2>&1 ||
-            die "Local Graphify structured-output proxy exited before becoming ready"
-          sleep 0.05
-        done
-        [[ "$proxy_port" =~ ^[0-9]+$ ]] ||
-          die "Local Graphify structured-output proxy did not become ready"
-
-        local_provider_base_url="http://127.0.0.1:${proxy_port}/v1"
-        if [[ "$diagnostic_mode" == on ]]; then
-          printf '%s\n' "[lds graphify] suspect-response diagnostics enabled: $diagnostic_log" >&2
-        fi
-      fi
-
-      backend="$(_graphify_write_local_provider "$provider_dir" "$provider" "$local_provider_base_url" "$model" "$token_budget_value" "$graphify_think")" ||
+      backend="$(_graphify_write_local_provider "$provider_dir" "$provider" "$base_url" "$model" "$token_budget_value" "$graphify_think" "$structured_output_tokens")" ||
         die "Unable to build LocalDevStack Graphify provider configuration"
 
       unset OPENAI_BASE_URL OPENAI_API_KEY OPENAI_MODEL OLLAMA_BASE_URL OLLAMA_API_KEY OLLAMA_MODEL
@@ -487,8 +690,32 @@ cmd_graphify() {
       esac
     fi
 
-    "$graphify_bin" extract "$graphify_target" --backend "$backend" --no-cluster "${graphify_defaults[@]}" "$@" &&
-      "$graphify_bin" cluster-only "$graphify_target" --backend "$backend"
+    if ((docstruct_enabled)); then
+      if ((bootstrap_code_first)); then
+        printf '%s\n' "[lds graphify] phase 1/3: extracting code structure first" >&2
+        "$graphify_bin" extract "$graphify_target" --backend "$backend" --no-cluster --code-only "${graphify_defaults[@]}" "$@" &&
+          printf '%s\n' "[lds graphify] phase 2/3: extracting only semantic formats not owned by docstruct" >&2 &&
+          "$graphify_bin" extract "$graphify_target" --backend "$backend" --no-cluster "${graphify_defaults[@]}" "${docstruct_graphify_excludes[@]}" "$@" &&
+          printf '%s\n' "[lds graphify] phase 3/3: merging deterministic document structure and relabeling" >&2 &&
+          _graphify_docstruct_enrich "$graphify_bin" "$target_abs" "$doc_review_mode" "${docstruct_scan_args[@]}" &&
+          "$graphify_bin" label "$graphify_target" --backend "$backend" "${graphify_cluster_defaults[@]}"
+      else
+        printf '%s\n' "[lds graphify] extracting changed code/unsupported semantic inputs; supported docs use docstruct" >&2
+        "$graphify_bin" extract "$graphify_target" --backend "$backend" --no-cluster "${graphify_defaults[@]}" "${docstruct_graphify_excludes[@]}" "$@" &&
+          _graphify_docstruct_enrich "$graphify_bin" "$target_abs" "$doc_review_mode" "${docstruct_scan_args[@]}" &&
+          "$graphify_bin" label "$graphify_target" --backend "$backend" "${graphify_cluster_defaults[@]}"
+      fi
+    elif ((bootstrap_code_first)); then
+      printf '%s\n' "[lds graphify] phase 1/2: extracting code structure and clustering the structural graph" >&2
+      "$graphify_bin" extract "$graphify_target" --backend "$backend" --no-cluster --code-only "${graphify_defaults[@]}" "$@" &&
+        "$graphify_bin" cluster-only "$graphify_target" --backend "$backend" "${graphify_cluster_defaults[@]}" &&
+        printf '%s\n' "[lds graphify] phase 2/2: enriching the existing graph with semantic files" >&2 &&
+        "$graphify_bin" extract "$graphify_target" --backend "$backend" --no-cluster "${graphify_defaults[@]}" "$@" &&
+        "$graphify_bin" label "$graphify_target" --backend "$backend" "${graphify_cluster_defaults[@]}"
+    else
+      "$graphify_bin" extract "$graphify_target" --backend "$backend" --no-cluster "${graphify_defaults[@]}" "$@" &&
+        "$graphify_bin" cluster-only "$graphify_target" --backend "$backend" "${graphify_cluster_defaults[@]}"
+    fi
   )
 }
 

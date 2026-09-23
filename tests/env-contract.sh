@@ -124,7 +124,7 @@ pass "CLI project identity follows the Compose project contract"
   [[ "$(ai_service_for_runtime npu)" == "llm-fastflow" ]] || fail "NPU service drift"
   [[ "$(ai_service_for_runtime cpu)" == "llm-ollama" ]] || fail "Ollama service drift"
   [[ "$(ai_model_default_for_runtime npu)" == "qwen3.5:9b" ]] || fail "FastFlow model default drift"
-  [[ "$(ai_model_default_for_runtime cpu)" == "qwen3:14b" ]] || fail "Ollama model default drift"
+  [[ "$(ai_model_default_for_runtime cpu)" == "qwen3.5:9b" ]] || fail "Ollama model default drift"
   host_cpu_is_amd() { return 0; }
   [[ "$(ai_igpu_default_for_runtime amd)" == "1" ]] || fail "AMD CPU + AMD runtime must enable iGPU"
   [[ "$(ai_igpu_default_for_runtime cpu)" == "0" ]] || fail "CPU runtime must not enable iGPU"

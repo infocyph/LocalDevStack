@@ -149,13 +149,15 @@ assert set(s["networks"]) == {"frontend","backend"}
 assert {v["target"] for v in s["volumes"]} == {"/root/.ollama"}
 assert d["volumes"]["lds_llm"]["name"] == "LLMModels"
 env=s["environment"]
-assert env["LLM_OLLAMA_MODEL"] == "qwen3:14b"
+assert env["LLM_OLLAMA_MODEL"] == "qwen3.5:9b"
 assert env["OLLAMA_NO_CLOUD"] == "1"
 tools=services["server-tools"]["environment"]
 assert tools["LDS_AI_ENABLED"] == "auto"
-assert tools["LDS_AI_PROVIDER"] == "llm"
-assert tools["LDS_AI_URL"] == "http://llm:11434"
-assert tools["LDS_AI_MODEL"] == "qwen3:14b"
+assert tools["LDS_AI_RUNTIME"] == "cpu"
+assert tools["LDS_AI_MODEL"] == "qwen3.5:9b"
+assert tools["DOCSTRUCT_REVIEW_ROOT"] == "/app"
+assert tools["DOCSTRUCT_REVIEW_FILE_BYTES"] == "16384"
+assert tools["DOCSTRUCT_REVIEW_TOTAL_BYTES"] == "262144"
 nginx=services["nginx"]
 assert nginx["environment"]["LLM_PROXY_TIMEOUT_SECONDS"] == "1800"
 native=[p for p in nginx.get("ports", []) if int(p["target"]) == 11434]
@@ -163,7 +165,7 @@ assert len(native) == 1
 assert native[0]["host_ip"] == "127.0.0.1"
 assert int(native[0]["published"]) == 11434
 ' <<<"$ai_json"
-pass "bare Compose AI profile keeps Ollama compatibility fallback behind common llm identity"
+pass "bare Compose AI profile passes cpu runtime selection into Tools"
 
 printf '%s\n' 'LDS_AI_MODEL=qwen2.5:1.5b' 'LLM_OLLAMA_PDF_MAX_PAGES=12' 'LLM_OLLAMA_SYSTEM=Answer briefly.' 'LDS_AI_TIMEOUT=2400' 'LDS_AI_IGPU_ENABLE=1' >>"$user_env"
 ai_override_json="$("${compose[@]}" --profile ai config --format json)"
@@ -176,13 +178,12 @@ assert llm["LLM_OLLAMA_PDF_MAX_PAGES"] == "12"
 assert llm["LLM_OLLAMA_SYSTEM"] == "Answer briefly."
 assert llm["OLLAMA_IGPU_ENABLE"] == "1"
 tools=d["services"]["server-tools"]["environment"]
-assert tools["LDS_AI_PROVIDER"] == "llm"
-assert tools["LDS_AI_URL"] == "http://llm:11434"
+assert tools["LDS_AI_RUNTIME"] == "cpu"
 assert tools["LDS_AI_TIMEOUT"] == "2400"
 nginx=d["services"]["nginx"]["environment"]
 assert nginx["LLM_PROXY_TIMEOUT_SECONDS"] == "2400"
 ' <<<"$ai_override_json"
-pass "LocalDevStack forwards common Tools routing and Ollama-specific generation options"
+pass "LocalDevStack forwards Tools runtime selection and Ollama-specific generation options"
 
 grep -v '^LDS_AI_MODEL=' "$user_env" >"$user_env.tmp"
 mv "$user_env.tmp" "$user_env"
@@ -210,8 +211,7 @@ assert s["ulimits"]["memlock"]["hard"] == -1
 assert {v["target"] for v in s["volumes"]} == {"/models"}
 assert d["volumes"]["lds_llm_fastflow"]["name"] == "LLMFastFlowModels"
 tools=services["server-tools"]["environment"]
-assert tools["LDS_AI_PROVIDER"] == "llm"
-assert tools["LDS_AI_URL"] == "http://llm:11434"
+assert tools["LDS_AI_RUNTIME"] == "npu"
 assert tools["LDS_AI_MODEL"] == "qwen3.5:9b"
 ' <<<"$npu_json"
 pass "NPU runtime selects only FastFlow with its provider default model"
@@ -227,7 +227,7 @@ s=services["llm-ollama"]
 assert s["image"] == "infocyph/llm-ollama:amd-latest"
 devices=" ".join(str(x) for x in s.get("devices", []))
 assert "/dev/kfd" in devices and "/dev/dri" in devices
-assert s["environment"]["LLM_OLLAMA_MODEL"] == "qwen3:14b"
+assert s["environment"]["LLM_OLLAMA_MODEL"] == "qwen3.5:9b"
 ' <<<"$amd_json"
 pass "AMD runtime selects only Ollama with generated ROCm devices"
 
@@ -241,7 +241,7 @@ assert "llm-fastflow" not in services
 s=services["llm-ollama"]
 assert s["image"] == "infocyph/llm-ollama:latest"
 assert s.get("gpus")
-assert s["environment"]["LLM_OLLAMA_MODEL"] == "qwen3:14b"
+assert s["environment"]["LLM_OLLAMA_MODEL"] == "qwen3.5:9b"
 ' <<<"$nvidia_json"
 pass "NVIDIA runtime selects only Ollama with GPU augmentation"
 
@@ -252,7 +252,7 @@ d=json.load(sys.stdin)
 services=d["services"]
 assert "llm-ollama" in services
 assert "llm-fastflow" not in services
-assert services["llm-ollama"]["environment"]["LLM_OLLAMA_MODEL"] == "qwen3:14b"
+assert services["llm-ollama"]["environment"]["LLM_OLLAMA_MODEL"] == "qwen3.5:9b"
 ' <<<"$cpu_json"
 pass "CPU runtime selects only Ollama"
 

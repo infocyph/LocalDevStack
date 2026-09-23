@@ -100,8 +100,7 @@ docker_compose() {
 
   local rc=0
   HOST_OS="$host_os" \
-    LDS_AI_PROVIDER=llm \
-    LDS_AI_URL=http://llm:11434 \
+    LDS_AI_RUNTIME="$ai_runtime" \
     LDS_AI_MODEL="$ai_model" \
     LDS_AI_OLLAMA_PROFILE="$ollama_profile" \
     LDS_AI_FASTFLOW_PROFILE="$fastflow_profile" \
