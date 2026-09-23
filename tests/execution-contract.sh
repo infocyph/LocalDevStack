@@ -210,6 +210,14 @@ set -e
 assert_file_contains "$log" 'err:Service resolves to multiple containers: multi'
 pass "batch 2: lds cli rejects ambiguous service targets"
 
+set +e
+run_case cmd_cli >/dev/null 2>&1
+rc=$?
+set -e
+[[ "$rc" -eq 64 ]] || fail "lds cli missing target returned $rc instead of 64"
+assert_file_contains "$log" 'err:Usage: lds cli <service|container> [--] [command...]'
+pass "batch 5: lds cli uses standardized usage exit"
+
 case_core_node_domain() {
   cmd_core app.local
 }
@@ -303,6 +311,21 @@ run_case case_stack_exec_shell
 assert_file_contains "$log" 'docker: <exec> <-it> <cid-php84> <bash> <--login>'
 pass "batch 4: lds stack exec uses the shared interactive shell helper"
 
+set +e
+run_case cmd_exec >/dev/null 2>&1
+rc=$?
+set -e
+[[ "$rc" -eq 64 ]] || fail "lds stack exec missing service returned $rc instead of 64"
+assert_file_contains "$log" 'err:Usage: lds stack exec <service> [--] [command...]'
+
+set +e
+run_case cmd_exec missing-service >/dev/null 2>&1
+rc=$?
+set -e
+[[ "$rc" -eq 66 ]] || fail "lds stack exec unknown service returned $rc instead of 66"
+assert_file_contains "$log" 'err:Current-project service not found: missing-service'
+pass "batch 5: lds stack exec uses standardized usage/not-found exits"
+
 case_tools_exec() {
   _container_stdin_is_tty() { return 1; }
   _container_stdout_is_tty() { return 1; }
@@ -322,6 +345,25 @@ case_tools_shell() {
 run_case case_tools_shell
 assert_file_contains "$log" 'docker: <exec> <-it> <SERVER_TOOLS> <bash> <--login>'
 pass "batch 4: lds tools sh uses the shared interactive shell helper"
+
+set +e
+run_case cmd_tools exec >/dev/null 2>&1
+rc=$?
+set -e
+[[ "$rc" -eq 64 ]] || fail "lds tools exec missing command returned $rc instead of 64"
+assert_file_contains "$log" 'err:Usage: lds tools exec [--] <command> [args...]'
+
+case_tools_unavailable() {
+  _project_tools_container_running() { return 1; }
+  cmd_tools sh
+}
+set +e
+run_case case_tools_unavailable >/dev/null 2>&1
+rc=$?
+set -e
+[[ "$rc" -eq 69 ]] || fail "lds tools unavailable container returned $rc instead of 69"
+assert_file_contains "$log" 'err:server-tools container is not running for project: testproject'
+pass "batch 5: lds tools uses standardized usage/unavailable exits"
 
 case_tools_file() {
   _container_stdin_is_tty() { return 1; }
