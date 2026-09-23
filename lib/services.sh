@@ -863,94 +863,163 @@ cmd_cli() {
   fi
 }
 
-cmd_core() {
-  # Usage:
-  #   lds core <domain>     -> open correct container for that domain (PHP/Node)
-  #   lds core <container>  -> open a shell in that container
-  #   lds core              -> list domains and let user pick
+_CORE_DOMAIN=''
+_CORE_APP=''
+_CORE_CONTAINER_ID=''
+_CORE_CONTAINER_NAME=''
+_CORE_WORKDIR=''
 
+_core_is_domain() {
   local target="${1:-}"
-
-  # domain regex (same as domain-which/mkhost family)
   local re='^([a-zA-Z0-9]([-a-zA-Z0-9]{0,61}[a-zA-Z0-9])?\.)+(localhost|local|test|loc|[a-zA-Z]{2,})$'
+  [[ "$target" =~ $re ]]
+}
 
-  # If no target -> prompt from domain-which list
-  if [[ -z "$target" ]]; then
-    local tools_ctr
-    tools_ctr="$(_project_tools_container_running || true)"
-    [[ -n "$tools_ctr" ]] || die "server-tools container is not running for project: $(lds_project)"
+_core_domain_list() {
+  local tools_ctr
+  tools_ctr="$(_project_tools_container_running || true)"
+  [[ -n "$tools_ctr" ]] || {
+    err "server-tools container is not running for project: $(lds_project)"
+    return 69
+  }
 
-    local -a domains=()
-    mapfile -t domains < <(docker exec "$tools_ctr" domain-which --list-domains 2>/dev/null | sed '/^[[:space:]]*$/d' || true)
+  docker exec "$tools_ctr" domain-which --list-domains 2>/dev/null |
+    sed '/^[[:space:]]*$/d' |
+    LC_ALL=C sort -u
+}
 
-    ((${#domains[@]} > 0)) || die "No domains found"
+_core_choose_domain() {
+  local -a domains=()
+  mapfile -t domains < <(_core_domain_list) || return $?
+  (("${#domains[@]}" > 0)) || {
+    err "No domains found"
+    return 66
+  }
 
-    # stable ordering
-    IFS=$'\n' domains=($(printf '%s\n' "${domains[@]}" | LC_ALL=C sort -u))
-
-    if ((${#domains[@]} == 1)); then
-      target="${domains[0]}"
-    else
-      if [[ ! -t 0 ]]; then
-        printf "%b[core]%b No domain provided. Available domains:\n" "$YELLOW" "$NC" >&2
-        local i=1
-        local d
-        for d in "${domains[@]}"; do
-          printf "  %2d) %s\n" "$i" "$d" >&2
-          ((i++))
-        done
-        die "No TTY to prompt. Use: lds core <domain>"
-      fi
-
-      printf "%bSelect domain:%b\n" "$CYAN" "$NC" >&2
-      local i=1 d
-      for d in "${domains[@]}"; do
-        printf "  %b%2d)%b %s\n" "$CYAN" "$i" "$NC" "$d" >&2
-        ((i++))
-      done
-
-      local ans=""
-      while true; do
-        read -r -p "Enter number (1-${#domains[@]}): " ans
-        ans="$(echo "$ans" | xargs)"
-        [[ "$ans" =~ ^[0-9]+$ ]] || {
-          printf "%bInvalid input.%b\n" "$YELLOW" "$NC" >&2
-          continue
-        }
-        ((ans >= 1 && ans <= ${#domains[@]})) || {
-          printf "%bOut of range.%b\n" "$YELLOW" "$NC" >&2
-          continue
-        }
-        target="${domains[$((ans - 1))]}"
-        break
-      done
-    fi
-  fi
-
-  # If target looks like a domain -> resolve via domain-which then shell in
-  if [[ "$target" =~ $re ]]; then
-    local tools_ctr
-    tools_ctr="$(_project_tools_container_running || true)"
-    [[ -n "$tools_ctr" ]] || die "server-tools container is not running for project: $(lds_project)"
-
-    local app container wd
-    app="$(docker exec "$tools_ctr" domain-which --app --quiet "$target" 2>/dev/null)" || die "Unknown domain: $target"
-    container="$(docker exec "$tools_ctr" domain-which --container --quiet "$target" 2>/dev/null)" || die "No container resolved for: $target"
-    wd="$(docker exec "$tools_ctr" domain-which --docroot --quiet "$target" 2>/dev/null)" || true
-    [[ -n "${container:-}" ]] || die "No container resolved for: $target"
-
-    # Node apps should always land at /app. Others follow resolved docroot.
-    if [[ "${app:-}" == "node" ]]; then
-      wd="/app"
-    fi
-    [[ -n "${wd:-}" ]] || wd="/app"
-
-    docker exec -it "$container" bash -lc "cd \"$wd\" 2>/dev/null || cd /app 2>/dev/null || cd /; exec bash"
+  if (("${#domains[@]}" == 1)); then
+    printf '%s' "${domains[0]}"
     return 0
   fi
 
-  # Otherwise treat target as a container name
-  docker exec -it "$(printf '%s' "$target" | tr '[:lower:]' '[:upper:]')" sh -lc 'exec bash -i || exec sh'
+  if [[ ! -t 0 ]]; then
+    printf "%b[core]%b No domain provided. Available domains:\n" "$YELLOW" "$NC" >&2
+    local i=1 domain
+    for domain in "${domains[@]}"; do
+      printf "  %2d) %s\n" "$i" "$domain" >&2
+      ((i++))
+    done
+    err "No TTY to prompt. Use: lds core <domain>"
+    return 64
+  fi
+
+  printf "%bSelect domain:%b\n" "$CYAN" "$NC" >&2
+  local i=1 domain
+  for domain in "${domains[@]}"; do
+    printf "  %b%2d)%b %s\n" "$CYAN" "$i" "$NC" "$domain" >&2
+    ((i++))
+  done
+
+  local answer=''
+  while true; do
+    read -r -p "Enter number (1-${#domains[@]}): " answer
+    answer="${answer#"${answer%%[![:space:]]*}"}"
+    answer="${answer%"${answer##*[![:space:]]}"}"
+    [[ "$answer" =~ ^[0-9]+$ ]] || {
+      printf "%bInvalid input.%b\n" "$YELLOW" "$NC" >&2
+      continue
+    }
+    ((answer >= 1 && answer <= ${#domains[@]})) || {
+      printf "%bOut of range.%b\n" "$YELLOW" "$NC" >&2
+      continue
+    }
+    printf '%s' "${domains[$((answer - 1))]}"
+    return 0
+  done
+}
+
+_core_domain_resolve() {
+  local domain="${1:-}" tools_ctr app target docroot preferred
+
+  _CORE_DOMAIN=''
+  _CORE_APP=''
+  _CORE_CONTAINER_ID=''
+  _CORE_CONTAINER_NAME=''
+  _CORE_WORKDIR=''
+
+  [[ -n "$domain" ]] || {
+    err "Core domain is required"
+    return 64
+  }
+
+  tools_ctr="$(_project_tools_container_running || true)"
+  [[ -n "$tools_ctr" ]] || {
+    err "server-tools container is not running for project: $(lds_project)"
+    return 69
+  }
+
+  app="$(docker exec "$tools_ctr" domain-which --app --quiet "$domain" 2>/dev/null)" || {
+    err "Unknown domain: $domain"
+    return 66
+  }
+  target="$(docker exec "$tools_ctr" domain-which --container --quiet "$domain" 2>/dev/null)" || {
+    err "No container resolved for: $domain"
+    return 66
+  }
+  docroot="$(docker exec "$tools_ctr" domain-which --docroot --quiet "$domain" 2>/dev/null || true)"
+  [[ -n "$target" ]] || {
+    err "No container resolved for: $domain"
+    return 66
+  }
+
+  _container_resolve_target "$target" || return $?
+  _container_require_running "$_CONTAINER_TARGET_ID" || return $?
+
+  if [[ "${app,,}" == node ]]; then
+    preferred=/app
+  else
+    preferred="${docroot:-/app}"
+  fi
+
+  _CORE_DOMAIN="$domain"
+  _CORE_APP="$app"
+  _CORE_CONTAINER_ID="$_CONTAINER_TARGET_ID"
+  _CORE_CONTAINER_NAME="$_CONTAINER_TARGET_NAME"
+  _CORE_WORKDIR="$(_container_first_existing_dir "$_CORE_CONTAINER_ID" "$preferred" /app /)" || return $?
+}
+
+cmd_core() {
+  local target="${1:-}"
+  [[ -n "$target" ]] && shift || true
+
+  if [[ -z "$target" ]]; then
+    target="$(_core_choose_domain)" || return $?
+  fi
+
+  [[ "${1:-}" == -- ]] && shift
+
+  local container workdir=''
+  if _core_is_domain "$target"; then
+    _core_domain_resolve "$target" || return $?
+    container="$_CORE_CONTAINER_ID"
+    workdir="$_CORE_WORKDIR"
+  else
+    _container_resolve_target "$target" || return $?
+    container="$_CONTAINER_TARGET_ID"
+  fi
+
+  if (($# > 0)); then
+    if [[ -n "$workdir" ]]; then
+      _container_exec_argv "$container" --workdir "$workdir" -- "$@"
+    else
+      _container_exec_argv "$container" -- "$@"
+    fi
+  else
+    if [[ -n "$workdir" ]]; then
+      _container_open_shell "$container" --workdir "$workdir"
+    else
+      _container_open_shell "$container"
+    fi
+  fi
 }
 
 cmd_setup() {
