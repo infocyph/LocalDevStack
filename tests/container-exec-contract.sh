@@ -46,7 +46,7 @@ docker() {
         "-f|{{.Id}}|stopped") printf '%s\n' cid-stopped ;;
         "-f|{{.Name}}|cid-stopped") printf '%s\n' /StoppedContainer ;;
         "-f|{{ index .Config.Labels \"com.docker.compose.service\" }}|cid-custom") printf '%s\n' external-service ;;
-        "-f|{{ index .Config.Labels \"com.docker.compose.service\" }}|cid-stopped") printf '%s\n' ;;
+        "-f|{{ index .Config.Labels \"com.docker.compose.service\" }}|cid-stopped") printf '\n' ;;
         "-f|{{.State.Running}}|cid-php84") printf '%s\n' true ;;
         "-f|{{.State.Running}}|cid-nginx") printf '%s\n' true ;;
         "-f|{{.State.Running}}|cid-custom") printf '%s\n' true ;;
