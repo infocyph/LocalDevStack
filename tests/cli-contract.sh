@@ -185,15 +185,14 @@ rm -f "$graphify_log"
         return 0
         ;;
       *"server-tools docstruct graphify-merge "*)
-        local mount doc_host='' graph_host=''
+        local mount graph_host=''
         for mount in "$@"; do
           case "$mount" in
-            *:/docstruct:rw) doc_host="${mount%:/docstruct:rw}" ;;
             *:/graphify:ro) graph_host="${mount%:/graphify:ro}" ;;
           esac
         done
-        [[ -n "$doc_host" && -n "$graph_host" ]] || return 94
-        cp "$graph_host/graph.json" "$doc_host/merged-graph.json"
+        [[ -n "$graph_host" ]] || return 94
+        cat "$graph_host/graph.json"
         return 0
         ;;
     esac
@@ -233,10 +232,15 @@ SH
     fail "docstruct review was not confined to the mounted workspace"
   grep -Fq "server-tools docstruct graphify /docstruct/docstruct.json --source-root $target" "$hybrid_log" ||
     fail "Graphify fragment export did not preserve the host provenance root"
-  grep -Fq 'server-tools docstruct graphify-merge /graphify/graph.json /docstruct/fragment.json --output /docstruct/merged-graph.json' "$hybrid_log" ||
+  grep -Fq 'server-tools docstruct graphify-merge /graphify/graph.json /docstruct/fragment.json' "$hybrid_log" ||
     fail "docstruct Graphify replacement merge was not invoked"
+  if grep -Fq -- '--output /docstruct/merged-graph.json' "$hybrid_log"; then
+    fail "docstruct Graphify replacement merge still publishes through the container bind mount"
+  fi
   grep -Fq ":/graphify:ro" "$hybrid_log" ||
     fail "Graphify output was not mounted read-only into the Tools merge container"
+  grep -Fq ":/docstruct:ro" "$hybrid_log" ||
+    fail "docstruct handoff was not mounted read-only for the merge container"
   [[ -r "$target/graphify-out/graph.json" ]] ||
     fail "host-side Graphify output publication failed"
   grep -Fq 'merge-chunks ' "$graphify_hybrid_log" ||
@@ -262,7 +266,9 @@ assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_DOC_REVIEW:-auto'
 assert_file_contains "$ROOT/lib/ai.sh" "phase 3/3: merging deterministic document structure and relabeling"
 assert_file_contains "$ROOT/lib/ai.sh" "server-tools docstruct graphify-merge"
 assert_file_contains "$ROOT/lib/ai.sh" '/graphify:ro'
-assert_file_contains "$ROOT/lib/ai.sh" '/docstruct/merged-graph.json'
+assert_file_contains "$ROOT/lib/ai.sh" '/docstruct:ro'
+assert_file_contains "$ROOT/lib/ai.sh" 'server-tools docstruct graphify-merge'
+assert_file_contains "$ROOT/lib/ai.sh" '>"$publish_tmp"'
 assert_file_contains "$ROOT/lib/ai.sh" 'mktemp "$target_abs/graphify-out/.graph.json.docstruct.XXXXXX"'
 assert_file_contains "$ROOT/lib/ai.sh" "--exclude 'requirements*.txt'"
 assert_file_contains "$ROOT/lib/ai.sh" "--exclude 'constraints*.txt'"
