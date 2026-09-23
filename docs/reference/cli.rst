@@ -206,7 +206,14 @@ Host Graphify Workflow
    lds graphify ./your-project
    lds graphify ./your-project --mode deep --token-budget 3000 --max-concurrency 1
 
-This command runs the host ``graphify`` CLI against the common LocalDevStack LLM route.
+This command runs the host ``graphify`` CLI against the LocalDevStack LLM route.
+When the docker-tools image supports docstruct, Markdown/RST/config files are extracted
+mechanically and merged into Graphify after fragment validation; they are not sent through
+Graphify's raw semantic LLM extractor. Other semantic formats remain Graphify-owned.
+
+Use ``LDS_GRAPHIFY_DOCSTRUCT=off`` to force the legacy path,
+``LDS_GRAPHIFY_DOCSTRUCT=on`` to require the deterministic path, and
+``LDS_GRAPHIFY_DOC_REVIEW=off|auto|on`` to control bounded semantic review.
 For a brand-new graph it performs a code-only ``extract --no-cluster`` first, clusters
 that structural graph, then performs a normal incremental ``extract --no-cluster`` to
 enrich docs/papers/images and reclusters and force-relabels the combined graph again. Existing graphs use a
