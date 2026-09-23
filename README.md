@@ -343,6 +343,29 @@ lds clean --global --yes
 
 That global mode can remove unrelated stopped containers, unused images/networks, build cache, and optionally volumes. `lds down --volumes --yes` is also destructive and should not be used for normal upgrades.
 
+## Execution and shells
+
+Use the execution surface that matches the target you already know:
+
+```bash
+# Application/domain aware; resolves container + working directory.
+lds core project.localhost
+lds core project.localhost -- php artisan about
+
+# Generic current-project service or exact Docker container.
+lds cli php84
+lds cli php84 -- php -v
+
+# Compose-service only (top-level alias: lds exec).
+lds stack exec redis -- redis-cli ping
+
+# server-tools only.
+lds tools sh
+lds tools exec -- jq --version
+```
+
+Explicit commands preserve argv rather than being flattened into a shell string. Interactive shells receive a TTY; piped/non-interactive commands do not force one. See `docs/reference/cli.rst` for target resolution and exit-code details.
+
 ## Ad-hoc Dockerfile runner
 
 From a directory containing a Dockerfile:
