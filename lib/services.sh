@@ -895,9 +895,17 @@ _CORE_CONTAINER_NAME=''
 _CORE_WORKDIR=''
 
 _core_is_domain() {
-  local target="${1:-}"
-  local re='^([a-zA-Z0-9]([-a-zA-Z0-9]{0,61}[a-zA-Z0-9])?\.)+(localhost|local|test|loc|[a-zA-Z]{2,})$'
-  [[ "$target" =~ $re ]]
+  local target="${1:-}" domain
+  [[ -n "$target" ]] || return 1
+
+  # Domain ownership lives in Tools. Only an exact discovered domain is treated
+  # as a domain here; hostname-shaped service/container names remain valid
+  # execution targets instead of being guessed from their spelling.
+  while IFS= read -r domain; do
+    [[ "$domain" == "$target" ]] && return 0
+  done < <(_core_domain_list 2>/dev/null || true)
+
+  return 1
 }
 
 _core_domain_list() {
