@@ -517,16 +517,22 @@ cmd_ui() {
 # 6f. EXEC / EVENTS / CLEAN / DISK
 # ─────────────────────────────────────────────────────────────────────────────
 cmd_exec() {
-  local svc="${1:-}"
+  local requested="${1:-}"
   shift || true
-  [[ -n "$svc" ]] || die "exec <service> [cmd...]"
-  local s
-  s="$(resolve_service "$svc" || true)"
-  [[ -n "$s" ]] || die "Unknown service: $svc"
-  if [[ $# -gt 0 ]]; then
-    docker_compose exec "$s" "$@"
+  [[ -n "$requested" ]] || die "exec <service> [--] [command...]"
+  [[ "${1:-}" == -- ]] && shift
+
+  local service
+  service="$(resolve_service "$requested" || true)"
+  [[ -n "$service" ]] && compose_service_exists "$service" || die "Unknown service: $requested"
+
+  _container_resolve_target "$service" || return $?
+  local container="$_CONTAINER_TARGET_ID"
+
+  if (($# > 0)); then
+    _container_exec_argv "$container" -- "$@"
   else
-    docker_compose exec "$s" sh -lc 'command -v bash >/dev/null 2>&1 && exec bash || exec sh'
+    _container_open_shell "$container"
   fi
 }
 
@@ -812,39 +818,37 @@ cmd_rebuild() {
 }
 
 
-docker_shell() {
-  local c="${1:-}"
-  [[ -n "$c" ]] || die "container name required"
-  if docker exec "$c" sh -lc 'command -v bash >/dev/null 2>&1' >/dev/null 2>&1; then
-    exec docker exec -it "$c" bash
-  else
-    exec docker exec -it "$c" sh
-  fi
-}
 cmd_tools() {
   local sub="${1:-sh}"
   shift || true
   local ctr
   ctr="$(_project_tools_container_running || true)"
   [[ -n "$ctr" ]] || die "server-tools container is not running for project: $(lds_project)"
+
   case "${sub,,}" in
   sh | shell | "")
-    docker_shell "$ctr"
+    _container_open_shell "$ctr"
     ;;
   exec)
-    [[ $# -gt 0 ]] || die "tools exec <cmd>"
-    docker exec -it "$ctr" sh -lc "$*"
+    [[ "${1:-}" == -- ]] && shift
+    (($# > 0)) || die "tools exec [--] <command> [args...]"
+    _container_exec_argv "$ctr" -- "$@"
     ;;
   file)
-    local p="${1:-}"
-    [[ -n "$p" ]] || die "tools file <path>"
-    docker exec -it "$ctr" sh -lc "ls -la -- \"$p\" 2>/dev/null || true; echo; sed -n '1,200p' -- \"$p\" 2>/dev/null || true"
+    local path="${1:-}"
+    [[ -n "$path" ]] || die "tools file <path>"
+    _container_exec_argv "$ctr" -- sh -lc '
+      ls -la -- "$1" 2>/dev/null || true
+      printf "\n"
+      sed -n "1,200p" -- "$1" 2>/dev/null || true
+    ' sh "$path"
     ;;
   *)
     die "tools <sh|exec|file>"
     ;;
   esac
 }
+
 cmd_http() { [[ ${1:-} == reload ]] && http_reload; }
 cmd_cli() {
   local target="${1:-}"
