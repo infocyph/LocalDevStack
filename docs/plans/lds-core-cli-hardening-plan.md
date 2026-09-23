@@ -393,11 +393,13 @@ Exit criterion: `core` is application-aware but contains no duplicate Docker exe
 
 ## Batch 4 — unify adjacent execution surfaces
 
-- [ ] move `cmd_exec` / `stack exec` onto shared helpers without changing its service-only UX;
-- [ ] move `tools sh` onto shared shell helper;
-- [ ] move `tools exec` away from unsafe command flattening where compatibility allows;
-- [ ] review `cmd_ui`/other direct `docker exec` users for helper reuse where relevant;
-- [ ] keep specialized commands specialized; do not over-abstract unrelated Docker operations.
+Status: **implemented — CI validation pending**
+
+- [x] move `cmd_exec` / `stack exec` onto shared helpers without changing its service-only UX;
+- [x] move `tools sh` onto shared shell helper;
+- [x] move `tools exec` away from unsafe command flattening where compatibility allows;
+- [x] review `cmd_ui`/other direct `docker exec` users for helper reuse where relevant;
+- [x] keep specialized commands specialized; do not over-abstract unrelated Docker operations.
 
 Exit criterion: interactive/command execution semantics are consistent across LDS.
 
