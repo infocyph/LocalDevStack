@@ -806,24 +806,32 @@ Supported patterns:
 - `lds graphify [path] [extract-options...]` -> host Graphify workflow against the
   common loopback-published `llm` endpoint, using the effective active-provider model
   and `LDS_AI_TIMEOUT` by default;
-- FastFlow/NPU -> Graphify `openai` backend with `OPENAI_BASE_URL` /
-  `OPENAI_MODEL` / `OPENAI_API_KEY`;
-- Ollama/CPU/NVIDIA/ROCm -> Graphify `ollama` backend with `OLLAMA_BASE_URL` /
-  `OLLAMA_MODEL` / `OLLAMA_API_KEY`;
+- for the built-in local route, LDS creates an ephemeral Graphify custom-provider file
+  pointing directly to `http://llm.localhost:11434/v1`; there is no local Graphify
+  reverse proxy and no Python compatibility adapter;
+- FastFlow/NPU -> direct OpenAI-compatible provider with `think=false` by default;
+- Ollama/CPU/NVIDIA/ROCm -> direct OpenAI-compatible provider with explicit `num_ctx`
+  headroom and reasoning disabled;
 - explicit external provider URLs remain caller-controlled through the matching
   backend-specific environment variables;
 - Tools `aiops graphify --file <output>` -> analyze an explicitly supplied Graphify output file.
 
 Local Graphify defaults to `--token-budget 3000 --max-concurrency 1` unless the caller
-supplies explicit values. These defaults keep Qwen3.5 9B semantic extraction below the
-practical local context ceiling that can otherwise produce `Max length reached!`.
-`LDS_GRAPHIFY_TOKEN_BUDGET` and `LDS_GRAPHIFY_MAX_CONCURRENCY` override the
-LocalDevStack defaults.
+supplies explicit values. `LDS_GRAPHIFY_TOKEN_BUDGET` and
+`LDS_GRAPHIFY_MAX_CONCURRENCY` override those defaults. Output allowance defaults to
+8192 through `LDS_GRAPHIFY_OUTPUT_TOKENS`, while standard
+`GRAPHIFY_MAX_OUTPUT_TOKENS` takes precedence.
+
+Graphify itself owns response parsing, hollow/truncation classification, adaptive retry,
+semantic caching, and partial-file requeue behavior. LocalDevStack must not duplicate
+those state machines.
 
 For a brand-new graph, `lds graphify` runs code-only `extract --no-cluster`, clusters
 the structural graph, then runs a normal incremental `extract --no-cluster` to enrich
-semantic files and reclusters and force-relabels the combined graph. Existing graphs keep the single
-incremental extract + `cluster-only` flow. Explicit `--code-only` remains single-phase.
+semantic files and finishes with `graphify label` so the combined graph is reclustered
+and freshly named. Existing graphs keep the single incremental extract + `cluster-only`
+flow. Explicit `--code-only` remains single-phase.
+
 Graphify remains a host/external consumer.
 
 ## 8.10 AI admin panel
