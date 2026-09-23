@@ -294,16 +294,34 @@ _graphify_docstruct_enrich() {
   fi
 
   printf '%s\n' "[lds graphify] documents: replacing the supported non-code semantic layer" >&2
-  if docker_compose run --rm --no-deps -T \
-    -v "$target_abs/graphify-out:/graphify:rw" \
-    -v "$workdir:/docstruct:ro" \
+  if ! docker_compose run --rm --no-deps -T \
+    -v "$target_abs/graphify-out:/graphify:ro" \
+    -v "$workdir:/docstruct:rw" \
     server-tools docstruct graphify-merge \
-      /graphify/graph.json /docstruct/fragment.json --output /graphify/graph.json; then
-    :
-  else
+      /graphify/graph.json /docstruct/fragment.json --output /docstruct/merged-graph.json; then
     rc=$?
     rm -rf "$workdir"
     return "$rc"
+  fi
+
+  # Publish from the host so graph.json stays owned by the invoking user. A
+  # root-owned one-shot Tools container must never replace host Graphify output
+  # directly or the subsequent host-side Graphify label step cannot reopen it.
+  local graph_path="$target_abs/graphify-out/graph.json" publish_tmp
+  publish_tmp="$(mktemp "$target_abs/graphify-out/.graph.json.docstruct.XXXXXX")" || {
+    rm -rf "$workdir"
+    die "Unable to create temporary Graphify output for document merge"
+  }
+  if ! cat "$workdir/merged-graph.json" >"$publish_tmp"; then
+    rm -f "$publish_tmp"
+    rm -rf "$workdir"
+    die "Unable to stage merged Graphify output"
+  fi
+  chmod 0644 "$publish_tmp" 2>/dev/null || true
+  if ! mv -f "$publish_tmp" "$graph_path"; then
+    rm -f "$publish_tmp"
+    rm -rf "$workdir"
+    die "Unable to publish merged Graphify output"
   fi
 
   rm -rf "$workdir"
