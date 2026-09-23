@@ -208,7 +208,7 @@ assert s["ulimits"]["memlock"]["hard"] == -1
 assert {v["target"] for v in s["volumes"]} == {"/models"}
 assert d["volumes"]["lds_llm_fastflow"]["name"] == "LLMFastFlowModels"
 tools=services["server-tools"]["environment"]
-assert tools["LDS_AI_RUNTIME"] == "cpu"
+assert tools["LDS_AI_RUNTIME"] == "npu"
 assert tools["LDS_AI_MODEL"] == "qwen3.5:9b"
 ' <<<"$npu_json"
 pass "NPU runtime selects only FastFlow with its provider default model"
