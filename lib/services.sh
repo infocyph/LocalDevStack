@@ -1232,6 +1232,249 @@ _shell_resolve_target() {
   return 66
 }
 
+declare -a _SHELL_MENU_KIND=()
+declare -a _SHELL_MENU_NAME=()
+declare -a _SHELL_MENU_SELECTOR=()
+
+_shell_menu_reset() {
+  _SHELL_MENU_KIND=()
+  _SHELL_MENU_NAME=()
+  _SHELL_MENU_SELECTOR=()
+}
+
+_shell_menu_add() {
+  local kind="${1:-}" name="${2:-}" selector="${3:-}"
+  [[ -n "$kind" && -n "$name" && -n "$selector" ]] || return 1
+  _SHELL_MENU_KIND+=("$kind")
+  _SHELL_MENU_NAME+=("$name")
+  _SHELL_MENU_SELECTOR+=("$selector")
+}
+
+_shell_app_list() {
+  local ctr
+  ctr="$(_project_tools_container_running || true)"
+  [[ -n "$ctr" ]] || return 0
+
+  _container_docker exec "$ctr" sh -c '
+    for path in /app/*; do
+      [ -d "$path" ] || continue
+      basename "$path"
+    done
+  ' 2>/dev/null |
+    sed '/^[[:space:]]*$/d' |
+    LC_ALL=C sort -u
+}
+
+_shell_service_list() {
+  docker_compose config --services 2>/dev/null |
+    sed '/^[[:space:]]*$/d' |
+    LC_ALL=C sort -u
+}
+
+_shell_container_list() {
+  _container_docker ps --format '{{.Names}}' 2>/dev/null |
+    sed '/^[[:space:]]*$/d' |
+    LC_ALL=C sort -u
+}
+
+_shell_menu_build() {
+  _shell_menu_reset
+  local item
+
+  while IFS= read -r item; do
+    [[ -n "$item" ]] && _shell_menu_add domain "$item" "domain:$item"
+  done < <(_core_domain_list 2>/dev/null || true)
+
+  while IFS= read -r item; do
+    [[ -n "$item" ]] && _shell_menu_add app "$item" "app:$item"
+  done < <(_shell_app_list 2>/dev/null || true)
+
+  while IFS= read -r item; do
+    [[ -n "$item" ]] && _shell_menu_add service "$item" "service:$item"
+  done < <(_shell_service_list 2>/dev/null || true)
+
+  while IFS= read -r item; do
+    [[ -n "$item" ]] && _shell_menu_add container "$item" "container:$item"
+  done < <(_shell_container_list 2>/dev/null || true)
+
+  if [[ -n "$(_project_tools_container_running || true)" ]]; then
+    _shell_menu_add utility tools tools
+  fi
+}
+
+_shell_menu_label() {
+  case "${1:-}" in
+  domain) printf '%s' 'Applications / Domains' ;;
+  app) printf '%s' 'Application Directories' ;;
+  service) printf '%s' 'Services' ;;
+  container) printf '%s' 'Containers' ;;
+  utility) printf '%s' 'Utilities' ;;
+  *) printf '%s' 'Other' ;;
+  esac
+}
+
+_shell_menu_print() {
+  local previous='' kind label i
+  for ((i = 0; i < ${#_SHELL_MENU_NAME[@]}; i++)); do
+    kind="${_SHELL_MENU_KIND[$i]}"
+    if [[ "$kind" != "$previous" ]]; then
+      label="$(_shell_menu_label "$kind")"
+      [[ -z "$previous" ]] || printf '\n' >&2
+      printf '%b%s%b\n' "$CYAN" "$label" "$NC" >&2
+      previous="$kind"
+    fi
+    printf '  %2d) %s\n' "$((i + 1))" "${_SHELL_MENU_NAME[$i]}" >&2
+  done
+}
+
+_shell_selector_is_tty() {
+  [[ -t 0 && -t 1 ]]
+}
+
+_shell_menu_match_name() {
+  local answer="${1:-}" i count=0 match=''
+  for ((i = 0; i < ${#_SHELL_MENU_NAME[@]}; i++)); do
+    if [[ "${_SHELL_MENU_NAME[$i]}" == "$answer" ]]; then
+      ((count += 1))
+      match="${_SHELL_MENU_SELECTOR[$i]}"
+    fi
+  done
+
+  if ((count == 1)); then
+    printf '%s' "$match"
+    return 0
+  fi
+  if ((count > 1)); then
+    printf '%bAmbiguous name:%b %s\n' "$YELLOW" "$NC" "$answer" >&2
+    printf 'Use one of:\n' >&2
+    for ((i = 0; i < ${#_SHELL_MENU_NAME[@]}; i++)); do
+      [[ "${_SHELL_MENU_NAME[$i]}" == "$answer" ]] &&
+        printf '  %s\n' "${_SHELL_MENU_SELECTOR[$i]}" >&2
+    done
+    return 65
+  fi
+  return 66
+}
+
+_shell_choose_target() {
+  _shell_menu_build
+  (("${#_SHELL_MENU_NAME[@]}" > 0)) || {
+    err "No shell targets are available"
+    return 66
+  }
+
+  _shell_menu_print
+
+  if ! _shell_selector_is_tty; then
+    err "No TTY to prompt. Use: lds shell <target>"
+    return 64
+  fi
+
+  local answer='' i selector rc
+  while true; do
+    read -r -p "Enter number or name: " answer
+    answer="${answer#"${answer%%[![:space:]]*}"}"
+    answer="${answer%"${answer##*[![:space:]]}"}"
+
+    if [[ "$answer" =~ ^[0-9]+$ ]]; then
+      if ((answer >= 1 && answer <= ${#_SHELL_MENU_SELECTOR[@]})); then
+        printf '%s' "${_SHELL_MENU_SELECTOR[$((answer - 1))]}"
+        return 0
+      fi
+      printf '%bOut of range.%b\n' "$YELLOW" "$NC" >&2
+      continue
+    fi
+
+    for ((i = 0; i < ${#_SHELL_MENU_SELECTOR[@]}; i++)); do
+      if [[ "${_SHELL_MENU_SELECTOR[$i]}" == "$answer" ]]; then
+        printf '%s' "$answer"
+        return 0
+      fi
+    done
+
+    set +e
+    selector="$(_shell_menu_match_name "$answer")"
+    rc=$?
+    set -e
+    if ((rc == 0)); then
+      printf '%s' "$selector"
+      return 0
+    fi
+    ((rc == 65)) && continue
+
+    printf '%bUnknown target.%b %s\n' "$YELLOW" "$NC" "$answer" >&2
+  done
+}
+
+cmd_shell() {
+  local target="${1:-}"
+  if [[ -z "$target" ]]; then
+    target="$(_shell_choose_target)" || return $?
+  else
+    shift || true
+  fi
+
+  _shell_resolve_target "$target" || return $?
+
+  local container="$_SHELL_CONTAINER_ID"
+  local workdir="$_SHELL_WORKDIR"
+
+  if (($# == 0)); then
+    if [[ -n "$workdir" ]]; then
+      _container_open_shell "$container" --workdir "$workdir"
+    else
+      _container_open_shell "$container"
+    fi
+    return $?
+  fi
+
+  case "${1:-}" in
+  --)
+    shift
+    (($# > 0)) || {
+      err "Usage: lds shell <target> -- <command> [args...]"
+      return 64
+    }
+    if [[ -n "$workdir" ]]; then
+      _container_exec_argv "$container" --workdir "$workdir" -- "$@"
+    else
+      _container_exec_argv "$container" -- "$@"
+    fi
+    ;;
+  --shell)
+    shift
+    (($# == 1)) || {
+      err "Usage: lds shell <target> --shell <shell-expression>"
+      return 64
+    }
+    if [[ -n "$workdir" ]]; then
+      _container_exec_argv "$container" --workdir "$workdir" -- sh -lc "$1"
+    else
+      _container_exec_argv "$container" -- sh -lc "$1"
+    fi
+    ;;
+  --interactive | -i)
+    shift
+    (($# > 0)) || {
+      err "Usage: lds shell <target> --interactive <command> [args...]"
+      return 64
+    }
+    if [[ -n "$workdir" ]]; then
+      _container_exec_interactive_argv "$container" --workdir "$workdir" -- "$@"
+    else
+      _container_exec_interactive_argv "$container" -- "$@"
+    fi
+    ;;
+  *)
+    if [[ -n "$workdir" ]]; then
+      _container_exec_argv "$container" --workdir "$workdir" -- "$@"
+    else
+      _container_exec_argv "$container" -- "$@"
+    fi
+    ;;
+  esac
+}
+
 cmd_core() {
   local target="${1:-}"
   [[ -n "$target" ]] && shift || true
