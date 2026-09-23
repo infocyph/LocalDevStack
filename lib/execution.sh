@@ -156,6 +156,21 @@ _container_exec_argv() {
   _container_docker "${args[@]}"
 }
 
+_container_exec_interactive_argv() {
+  local ctr="${1:-}" workdir="${2:-}"
+  shift 2 || true
+  [[ -n "$ctr" ]] || die "container id/name required"
+  (($#)) || die "container command required"
+
+  if ! _container_exec_flags shell; then
+    die "Interactive command requires a TTY"
+  fi
+  local -a args=(exec "${LDS_CONTAINER_EXEC_FLAGS[@]}")
+  [[ -n "$workdir" ]] && args+=(-w "$workdir")
+  args+=("$ctr" "$@")
+  _container_docker "${args[@]}"
+}
+
 _container_shell_path() {
   local ctr="${1:-}" shell
   [[ -n "$ctr" ]] || return 1
