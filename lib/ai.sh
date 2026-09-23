@@ -22,10 +22,10 @@ cmd_ai() {
   case "${sub,,}" in
   status | provider) _tools_exec_argv aiops provider "$@" ;;
   ask) _tools_exec_argv askai "$@" ;;
-  explain | troubleshoot | review | repo-review | graphify)
+  explain | troubleshoot | review | document-review | repo-review | graphify)
     _tools_exec_argv aiops "${sub,,}" "$@"
     ;;
-  *) die "ai <status|ask|explain|troubleshoot|review|repo-review|graphify> [args...]" ;;
+  *) die "ai <status|ask|explain|troubleshoot|review|document-review|repo-review|graphify> [args...]" ;;
   esac
 }
 
@@ -217,6 +217,94 @@ _graphify_has_graph() {
 _graphify_has_incremental_state() {
   local target="${1:-.}"
   [[ -d "$target" && -f "$target/graphify-out/graph.json" && -f "$target/graphify-out/manifest.json" ]]
+}
+
+_graphify_docstruct_mode() {
+  case "${LDS_GRAPHIFY_DOCSTRUCT:-auto}" in
+  auto | on | off) printf '%s' "${LDS_GRAPHIFY_DOCSTRUCT:-auto}" ;;
+  *) die "LDS_GRAPHIFY_DOCSTRUCT must be auto, on, or off" ;;
+  esac
+}
+
+_graphify_doc_review_mode() {
+  case "${LDS_GRAPHIFY_DOC_REVIEW:-auto}" in
+  auto | on | off) printf '%s' "${LDS_GRAPHIFY_DOC_REVIEW:-auto}" ;;
+  *) die "LDS_GRAPHIFY_DOC_REVIEW must be auto, on, or off" ;;
+  esac
+}
+
+_graphify_docstruct_available() {
+  local output
+  output="$(docker_compose run --rm --no-deps -T server-tools docstruct graphify-merge --help 2>/dev/null)" ||
+    return 1
+  grep -Fq 'Usage: docstruct graphify-merge' <<<"$output"
+}
+
+_graphify_docstruct_enrich() {
+  local graphify_bin="$1" target_abs="$2" review_mode="$3"
+  shift 3
+  local workdir review_file="" rc=0
+  local -a review_args=()
+
+  workdir="$(mktemp -d "${TMPDIR:-/tmp}/lds-graphify-docstruct.XXXXXX")" ||
+    die "Unable to create temporary document-extraction directory"
+  chmod 700 "$workdir" 2>/dev/null || true
+
+  printf '%s\n' "[lds graphify] documents: extracting Markdown/RST/config structure deterministically" >&2
+  if ! docker_compose run --rm --no-deps -T \
+    -v "$target_abs:/workspace:ro" \
+    -v "$workdir:/docstruct:rw" \
+    server-tools docstruct /workspace --compact --output /docstruct/docstruct.json "$@"; then
+    rm -rf "$workdir"
+    die "Deterministic document extraction failed"
+  fi
+
+  if [[ "$review_mode" != off ]]; then
+    printf '%s\n' "[lds graphify] documents: reviewing bounded semantic chunks with the active local model" >&2
+    if docker_compose run --rm --no-deps -T \
+      -e DOCSTRUCT_REVIEW_ROOT=/workspace \
+      -v "$target_abs:/workspace:ro" \
+      -v "$workdir:/docstruct:rw" \
+      server-tools aiops document-review --file /docstruct/docstruct.json >"$workdir/review.json"; then
+      review_file="/docstruct/review.json"
+      review_args=(--review "$review_file")
+    elif [[ "$review_mode" == on ]]; then
+      rm -rf "$workdir"
+      die "Document semantic review failed while LDS_GRAPHIFY_DOC_REVIEW=on"
+    else
+      warn "Document semantic review failed; continuing with deterministic structure only."
+      rm -f "$workdir/review.json"
+    fi
+  fi
+
+  if ! docker_compose run --rm --no-deps -T \
+    -v "$workdir:/docstruct:rw" \
+    server-tools docstruct graphify /docstruct/docstruct.json \
+      --source-root "$target_abs" "${review_args[@]}" --compact --output /docstruct/fragment.json; then
+    rm -rf "$workdir"
+    die "Unable to convert deterministic document structure to a Graphify fragment"
+  fi
+
+  # Use Graphify's public validator before mutating graph.json. The validated
+  # output itself is disposable because docstruct ownership metadata is needed
+  # by the deterministic replacement merge below.
+  if ! "$graphify_bin" merge-chunks "$workdir/fragment.json" --out "$workdir/validated.json" >/dev/null; then
+    rm -rf "$workdir"
+    die "Graphify rejected the deterministic document fragment"
+  fi
+
+  printf '%s\n' "[lds graphify] documents: replacing the supported non-code semantic layer" >&2
+  if ! docker_compose run --rm --no-deps -T \
+    -v "$target_abs/graphify-out:/graphify:rw" \
+    -v "$workdir:/docstruct:ro" \
+    server-tools docstruct graphify-merge \
+      /graphify/graph.json /docstruct/fragment.json --output /graphify/graph.json; then
+    rc=$?
+    rm -rf "$workdir"
+    return "$rc"
+  fi
+
+  rm -rf "$workdir"
 }
 
 cmd_graphify() {
