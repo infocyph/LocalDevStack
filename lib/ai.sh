@@ -234,41 +234,135 @@ _graphify_doc_review_mode() {
 }
 
 _graphify_docstruct_available() {
-  local output
-  output="$(docker_compose run --rm --no-deps -T server-tools docstruct graphify-merge --help 2>/dev/null)" ||
-    return 1
+  local ctr output
+  ctr="$(_project_tools_container_running || true)"
+  if [[ -n "$ctr" ]]; then
+    output="$(docker exec -i "$ctr" docstruct graphify-merge --help 2>/dev/null)" || return 1
+  else
+    output="$(docker_compose run --rm --no-deps -T server-tools docstruct graphify-merge --help 2>/dev/null)" ||
+      return 1
+  fi
   grep -Fq 'Usage: docstruct graphify-merge' <<<"$output"
+}
+
+_graphify_tools_app_target() {
+  local ctr="$1" target_abs="$2" app_source app_abs rel
+  app_source="$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/app"}}{{.Source}}{{end}}{{end}}' "$ctr" 2>/dev/null || true)"
+  [[ -n "$app_source" && -e "$app_source" ]] || return 1
+  app_abs="$(_realpath "$app_source")"
+
+  if [[ "$target_abs" == "$app_abs" ]]; then
+    printf '%s' /app
+    return 0
+  fi
+  [[ "$target_abs" == "$app_abs/"* ]] || return 1
+  rel="${target_abs#"$app_abs"}"
+  printf '/app%s' "$rel"
+}
+
+_GRAPHIFY_TOOLS_CTR=''
+_GRAPHIFY_TOOLS_TARGET=''
+_GRAPHIFY_TOOLS_TMP=''
+_GRAPHIFY_TOOLS_EPHEMERAL=0
+
+_graphify_tools_session_start() {
+  local target_abs="$1" ctr container_target created
+  _GRAPHIFY_TOOLS_CTR=''
+  _GRAPHIFY_TOOLS_TARGET=''
+  _GRAPHIFY_TOOLS_TMP=''
+  _GRAPHIFY_TOOLS_EPHEMERAL=0
+
+  ctr="$(_project_tools_container_running || true)"
+  if [[ -n "$ctr" ]]; then
+    container_target="$(_graphify_tools_app_target "$ctr" "$target_abs" || true)"
+    if [[ -n "$container_target" ]]; then
+      _GRAPHIFY_TOOLS_CTR="$ctr"
+      _GRAPHIFY_TOOLS_TARGET="$container_target"
+    fi
+  fi
+
+  if [[ -z "$_GRAPHIFY_TOOLS_CTR" ]]; then
+    printf '%s\n' "[lds graphify] documents: target is outside SERVER_TOOLS /app; starting one temporary Tools container" >&2
+    created="$(docker_compose run -d --no-deps \
+      -v "$target_abs:/workspace:ro" \
+      server-tools tail -f /dev/null 2>/dev/null | tail -n1 | tr -d '\r')" ||
+      die "Unable to start temporary Tools container for document extraction"
+    [[ -n "$created" ]] || die "Temporary Tools container did not return a container id"
+    _GRAPHIFY_TOOLS_CTR="$created"
+    _GRAPHIFY_TOOLS_TARGET=/workspace
+    _GRAPHIFY_TOOLS_EPHEMERAL=1
+  else
+    printf '%s\n' "[lds graphify] documents: reusing existing SERVER_TOOLS container" >&2
+  fi
+
+  _GRAPHIFY_TOOLS_TMP="$(docker exec -i "$_GRAPHIFY_TOOLS_CTR" \
+    mktemp -d /tmp/lds-graphify-docstruct.XXXXXX 2>/dev/null)" ||
+    die "Unable to create document workspace inside Tools container"
+  [[ -n "$_GRAPHIFY_TOOLS_TMP" ]] || die "Tools container returned an empty document workspace"
+}
+
+_graphify_tools_session_cleanup() {
+  local ctr="$_GRAPHIFY_TOOLS_CTR" tmp="$_GRAPHIFY_TOOLS_TMP"
+  if [[ -n "$ctr" && -n "$tmp" ]]; then
+    docker exec -i "$ctr" rm -rf -- "$tmp" >/dev/null 2>&1 || true
+  fi
+  if ((_GRAPHIFY_TOOLS_EPHEMERAL)) && [[ -n "$ctr" ]]; then
+    docker rm -f "$ctr" >/dev/null 2>&1 || true
+  fi
+  _GRAPHIFY_TOOLS_CTR=''
+  _GRAPHIFY_TOOLS_TARGET=''
+  _GRAPHIFY_TOOLS_TMP=''
+  _GRAPHIFY_TOOLS_EPHEMERAL=0
+}
+
+_graphify_tools_put() {
+  local host_file="$1" container_file="$2"
+  docker cp "$host_file" "$_GRAPHIFY_TOOLS_CTR:$container_file" >/dev/null
 }
 
 _graphify_docstruct_enrich() {
   local graphify_bin="$1" target_abs="$2" review_mode="$3"
   shift 3
-  local workdir review_file="" rc=0
+  local workdir review_file='' rc=0
+  local graph_path publish_tmp container_graph
   local -a review_args=()
 
   workdir="$(mktemp -d "${TMPDIR:-/tmp}/lds-graphify-docstruct.XXXXXX")" ||
     die "Unable to create temporary document-extraction directory"
   chmod 700 "$workdir" 2>/dev/null || true
 
+  _graphify_tools_session_start "$target_abs"
+  container_graph="$_GRAPHIFY_TOOLS_TARGET/graphify-out/graph.json"
+
   printf '%s\n' "[lds graphify] documents: extracting Markdown/RST/config structure deterministically" >&2
-  if ! docker_compose run --rm --no-deps -T \
-    -v "$target_abs:/workspace:ro" \
-    -v "$workdir:/docstruct:rw" \
-    server-tools docstruct /workspace --compact --output /docstruct/docstruct.json "$@"; then
+  if ! docker exec -i "$_GRAPHIFY_TOOLS_CTR" \
+    docstruct "$_GRAPHIFY_TOOLS_TARGET" --compact "$@" >"$workdir/docstruct.json"; then
+    _graphify_tools_session_cleanup
     rm -rf "$workdir"
     die "Deterministic document extraction failed"
+  fi
+  if ! _graphify_tools_put "$workdir/docstruct.json" "$_GRAPHIFY_TOOLS_TMP/docstruct.json"; then
+    _graphify_tools_session_cleanup
+    rm -rf "$workdir"
+    die "Unable to stage deterministic document structure inside Tools container"
   fi
 
   if [[ "$review_mode" != off ]]; then
     printf '%s\n' "[lds graphify] documents: reviewing bounded semantic chunks with the active local model" >&2
-    if docker_compose run --rm --no-deps -T \
-      -e DOCSTRUCT_REVIEW_ROOT=/workspace \
-      -v "$target_abs:/workspace:ro" \
-      -v "$workdir:/docstruct:rw" \
-      server-tools aiops document-review --file /docstruct/docstruct.json >"$workdir/review.json"; then
-      review_file="/docstruct/review.json"
-      review_args=(--review "$review_file")
+    if docker exec -i \
+      -e "DOCSTRUCT_REVIEW_ROOT=$_GRAPHIFY_TOOLS_TARGET" \
+      "$_GRAPHIFY_TOOLS_CTR" aiops document-review \
+      --file "$_GRAPHIFY_TOOLS_TMP/docstruct.json" >"$workdir/review.json"; then
+      if _graphify_tools_put "$workdir/review.json" "$_GRAPHIFY_TOOLS_TMP/review.json"; then
+        review_file="$_GRAPHIFY_TOOLS_TMP/review.json"
+        review_args=(--review "$review_file")
+      else
+        _graphify_tools_session_cleanup
+        rm -rf "$workdir"
+        die "Unable to stage document semantic review inside Tools container"
+      fi
     elif [[ "$review_mode" == on ]]; then
+      _graphify_tools_session_cleanup
       rm -rf "$workdir"
       die "Document semantic review failed while LDS_GRAPHIFY_DOC_REVIEW=on"
     else
@@ -277,41 +371,38 @@ _graphify_docstruct_enrich() {
     fi
   fi
 
-  if ! docker_compose run --rm --no-deps -T \
-    -v "$workdir:/docstruct:rw" \
-    server-tools docstruct graphify /docstruct/docstruct.json \
-      --source-root "$target_abs" "${review_args[@]}" --compact --output /docstruct/fragment.json; then
+  if ! docker exec -i "$_GRAPHIFY_TOOLS_CTR" \
+    docstruct graphify "$_GRAPHIFY_TOOLS_TMP/docstruct.json" \
+      --source-root "$target_abs" "${review_args[@]}" --compact >"$workdir/fragment.json"; then
+    _graphify_tools_session_cleanup
     rm -rf "$workdir"
     die "Unable to convert deterministic document structure to a Graphify fragment"
   fi
 
-  # Use Graphify's public validator before mutating graph.json. The validated
-  # output itself is disposable because docstruct ownership metadata is needed
-  # by the deterministic replacement merge below.
   if ! "$graphify_bin" merge-chunks "$workdir/fragment.json" --out "$workdir/validated.json" >/dev/null; then
+    _graphify_tools_session_cleanup
     rm -rf "$workdir"
     die "Graphify rejected the deterministic document fragment"
   fi
+  if ! _graphify_tools_put "$workdir/fragment.json" "$_GRAPHIFY_TOOLS_TMP/fragment.json"; then
+    _graphify_tools_session_cleanup
+    rm -rf "$workdir"
+    die "Unable to stage validated Graphify fragment inside Tools container"
+  fi
 
   printf '%s\n' "[lds graphify] documents: replacing the supported non-code semantic layer" >&2
-
-  # Stream the merged graph to a host-created temporary file. Do not ask the
-  # root-running one-shot Tools container to publish a bind-mounted file: that
-  # can leave a root-owned/restrictive handoff which the host-side Graphify
-  # label step cannot read.
-  local graph_path="$target_abs/graphify-out/graph.json" publish_tmp
+  graph_path="$target_abs/graphify-out/graph.json"
   publish_tmp="$(mktemp "$target_abs/graphify-out/.graph.json.docstruct.XXXXXX")" || {
+    _graphify_tools_session_cleanup
     rm -rf "$workdir"
     die "Unable to create temporary Graphify output for document merge"
   }
 
-  if ! docker_compose run --rm --no-deps -T \
-    -v "$target_abs/graphify-out:/graphify:ro" \
-    -v "$workdir:/docstruct:ro" \
-    server-tools docstruct graphify-merge \
-      /graphify/graph.json /docstruct/fragment.json >"$publish_tmp"; then
+  if ! docker exec -i "$_GRAPHIFY_TOOLS_CTR" \
+    docstruct graphify-merge "$container_graph" "$_GRAPHIFY_TOOLS_TMP/fragment.json" >"$publish_tmp"; then
     rc=$?
     rm -f "$publish_tmp"
+    _graphify_tools_session_cleanup
     rm -rf "$workdir"
     return "$rc"
   fi
@@ -319,10 +410,12 @@ _graphify_docstruct_enrich() {
   chmod 0644 "$publish_tmp" 2>/dev/null || true
   if ! mv -f "$publish_tmp" "$graph_path"; then
     rm -f "$publish_tmp"
+    _graphify_tools_session_cleanup
     rm -rf "$workdir"
     die "Unable to publish merged Graphify output"
   fi
 
+  _graphify_tools_session_cleanup
   rm -rf "$workdir"
 }
 
