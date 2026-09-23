@@ -155,6 +155,9 @@ tools=services["server-tools"]["environment"]
 assert tools["LDS_AI_ENABLED"] == "auto"
 assert tools["LDS_AI_RUNTIME"] == "cpu"
 assert tools["LDS_AI_MODEL"] == "qwen3.5:9b"
+assert tools["DOCSTRUCT_REVIEW_ROOT"] == "/app"
+assert tools["DOCSTRUCT_REVIEW_FILE_BYTES"] == "16384"
+assert tools["DOCSTRUCT_REVIEW_TOTAL_BYTES"] == "262144"
 nginx=services["nginx"]
 assert nginx["environment"]["LLM_PROXY_TIMEOUT_SECONDS"] == "1800"
 native=[p for p in nginx.get("ports", []) if int(p["target"]) == 11434]
