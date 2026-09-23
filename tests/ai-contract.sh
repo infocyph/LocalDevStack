@@ -228,6 +228,15 @@ pass "Graphify backend selection follows active LLM provider"
 )
 pass "Graphify local providers use direct OpenAI-compatible endpoints"
 
+if [[ -e "$ROOT/scripts/graphify-diagnostic-proxy.py" || -e "$ROOT/scripts/graphify-compat-proxy.py" ]]; then
+  fail "Graphify integration must not ship a LocalDevStack Python compatibility proxy"
+fi
+if grep -Fq 'graphify-compat-proxy.py' "$ROOT/lib/ai.sh" ||
+   grep -Fq 'graphify-diagnostic-proxy.py' "$ROOT/lib/ai.sh"; then
+  fail "Graphify wrapper still references a removed compatibility proxy"
+fi
+pass "Graphify integration is proxy-free"
+
 
 (
   set -euo pipefail
