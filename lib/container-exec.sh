@@ -243,6 +243,7 @@ _container_open_shell() {
     return 64
   }
 
+  _container_require_running "$target" || return $?
   _container_exec_flags shell || return $?
   local shell
   shell="$(_container_shell_name "$target")" || return $?
