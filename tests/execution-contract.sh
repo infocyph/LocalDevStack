@@ -88,7 +88,7 @@ run_case() {
           "{{.State.Running}}|worker.local") printf '%s\n' true ;;
           "{{.State.Running}}|stopped-container") printf '%s\n' false ;;
           "{{.State.Running}}|SERVER_TOOLS") printf '%s\n' true ;;
-          "{{.State.Running}}|missing-shell"|"{{.State.Running}}|php:8.4-alpine") return 1 ;;
+          "{{.State.Running}}|billing"|"{{.State.Running}}|missing-shell"|"{{.State.Running}}|php:8.4-alpine") return 1 ;;
           "{{.State.Running}}|"*) printf '%s\n' true ;;
         esac
         return 0
