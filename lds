@@ -892,11 +892,7 @@ EOF
 
 _is_public_lds_command() {
   case "${1:-}" in
-  stack | domain | support | bundle |
-    up | start | down | stop | restart | reboot | status | ps | logs | exec | events | clean |
-    config | http | host | setup | profiles | cert | certificate |
-    doctor | diag | sniff | open | notify | ui | images | urls |
-    tools | cli | core | secrets | rebuild | run)
+  stack|domain|support|bundle|up|start|down|stop|restart|reboot|status|ps|logs|exec|events|clean|config|http|host|setup|profiles|cert|certificate|doctor|diag|sniff|open|notify|ui|images|urls|tools|cli|core|secrets|rebuild|run)
     return 0
     ;;
   esac
