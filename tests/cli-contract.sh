@@ -55,13 +55,17 @@ if grep -Fq 'declare -F "cmd_$cmd"' "$ROOT/lds"; then
   fail "top-level dispatch still exposes arbitrary cmd_* functions dynamically"
 fi
 assert_file_contains "$ROOT/lds" 'stack|domain|support|bundle|up|start'
-assert_file_contains "$ROOT/lds" 'tools|cli|core|graphify|secrets|rebuild|run)'
+assert_file_contains "$ROOT/lds" 'tools|cli|core|shell|graphify|secrets|rebuild|run)'
 pass "top-level LDS command routing is explicit and collision-safe"
 
 if PATH="$tmpbin:$PATH" "$ROOT/lds" graphify --help 2>&1 | grep -Fq 'SERVER_TOOLS is not running'; then
   fail "top-level graphify incorrectly fell through to tool-runner"
 fi
 pass "top-level Graphify remains a host-side command"
+
+assert_contains "$help_output" "shell [target]"
+assert_contains "$markdown_output" "lds shell <target>"
+pass "unified shell is exposed in embedded help"
 
 graphify_log="$(mktemp)"
 cat >"$tmpbin/graphify" <<'SH'
