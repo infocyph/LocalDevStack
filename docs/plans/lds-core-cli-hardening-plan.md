@@ -347,13 +347,15 @@ Exit criterion: current supported behavior is captured by tests.
 
 ## Batch 1 — shared container execution substrate
 
-- [ ] implement current-project service/container resolution;
-- [ ] implement running-container validation;
-- [ ] implement adaptive `docker exec` flags;
-- [ ] implement argv-preserving execution;
-- [ ] implement Bash/sh interactive shell selection;
-- [ ] implement optional working-directory execution;
-- [ ] add unit/contract fixtures for resolver and TTY behavior.
+Status: **implemented — CI validation pending**
+
+- [x] implement current-project service/container resolution;
+- [x] implement running-container validation;
+- [x] implement adaptive `docker exec` flags;
+- [x] implement argv-preserving execution;
+- [x] implement Bash/sh interactive shell selection;
+- [x] implement optional working-directory execution;
+- [x] add unit/contract fixtures for resolver and TTY behavior.
 
 Exit criterion: no user-facing command needs its own Docker shell mechanics.
 
