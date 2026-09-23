@@ -376,16 +376,18 @@ Exit criterion: `cli` is the reliable low-level execution command.
 
 ## Batch 3 — harden `lds core`
 
-- [ ] centralize domain discovery;
-- [ ] centralize domain -> app/container/docroot resolution;
-- [ ] preserve stable interactive domain picker;
-- [ ] preserve useful non-TTY domain listing;
-- [ ] delegate service/container fallback to the common resolver;
-- [ ] remove raw target uppercasing;
-- [ ] add explicit command execution after domain/container target;
-- [ ] preserve Node `/app` behavior;
-- [ ] preserve document-root fallback behavior;
-- [ ] test PHP, Node, service, container and non-TTY flows.
+Status: **implemented — CI validation pending**
+
+- [x] centralize domain discovery;
+- [x] centralize domain -> app/container/docroot resolution;
+- [x] preserve stable interactive domain picker;
+- [x] preserve useful non-TTY domain listing;
+- [x] delegate service/container fallback to the common resolver;
+- [x] remove raw target uppercasing;
+- [x] add explicit command execution after domain/container target;
+- [x] preserve Node `/app` behavior;
+- [x] preserve document-root fallback behavior;
+- [x] test PHP, Node, service, container and non-TTY flows.
 
 Exit criterion: `core` is application-aware but contains no duplicate Docker execution logic.
 
