@@ -345,27 +345,33 @@ That global mode can remove unrelated stopped containers, unused images/networks
 
 ## Execution and shells
 
-Use the execution surface that matches the target you already know:
+`lds shell` is the canonical execution navigator. With no arguments it presents a numbered catalog grouped into domains, application directories, services, containers, and utilities; choose by number, exact name, or a qualified selector.
 
 ```bash
-# Application/domain aware; resolves container + working directory.
-lds core project.localhost
-lds core project.localhost -- php artisan about
+# Interactive grouped selector.
+lds shell
 
-# Generic current-project service or exact Docker container.
-lds cli php84
-lds cli php84 -- php -v
+# Domain/application-aware shell and command.
+lds shell project.localhost
+lds shell project.localhost -- php artisan about
 
-# Compose-service only (top-level alias: lds exec).
-lds stack exec redis -- redis-cli ping
+# Current-project service or exact container.
+lds shell php84 -- php -v
 
-# server-tools only.
-lds tools sh
-lds tools exec -- jq --version
-lds tools shell-exec 'printf "%s\n" "hello world" | cat'
+# Direct server-tools /app child fallback.
+lds shell billing
+
+# Reserved Tools target.
+lds shell tools -- jq --version
+
+# Intentional shell syntax or interactive TUI.
+lds shell tools --shell 'printf "%s\n" "hello world" | cat'
+lds shell tools --interactive lazydocker
 ```
 
-Explicit commands preserve argv rather than being flattened into a shell string. Use `lds tools shell-exec` only for intentional shell syntax. Interactive shells/TUIs require a real TTY; piped/non-interactive commands do not force one. See `docs/reference/cli.rst` for target resolution and exit-code details.
+Explicit unqualified targets resolve in this order: discovered domain, reserved `tools`, exact current-project service, exact container, then an exact direct child under `server-tools:/app`. Qualified `domain:`, `app:`, `service:`, and `container:` selectors bypass collisions. Image names are not implicitly instantiated.
+
+Normal commands preserve argv rather than being flattened into a shell string. Interactive shells/TUIs require a real TTY; piped/non-interactive commands do not force one. `core`, `cli`, `stack exec`, `exec`, and execution-oriented `tools` commands remain compatibility surfaces during migration. See `docs/reference/cli.rst` for target resolution and exit-code details.
 
 ## Ad-hoc Dockerfile runner
 
