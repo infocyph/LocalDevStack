@@ -847,32 +847,20 @@ cmd_tools() {
 }
 cmd_http() { [[ ${1:-} == reload ]] && http_reload; }
 cmd_cli() {
-  local ctr="${1:-}"
+  local target="${1:-}"
   shift || true
 
-  [[ -n "$ctr" ]] || die "Usage: lds cli <container> [cmd...]"
+  [[ -n "$target" ]] || die "cli <service|container> [--] [command...]"
+  [[ "${1:-}" == -- ]] && shift
 
-  docker inspect "$ctr" >/dev/null 2>&1 || die "Container not found: $ctr"
-  docker inspect -f '{{.State.Running}}' "$ctr" 2>/dev/null | grep -qx true || die "Container not running: $ctr"
+  _container_resolve_target "$target" || return $?
+  local container="$_CONTAINER_TARGET_ID"
 
-  # If user provided a command, run it; otherwise open an interactive shell.
-  if [[ "$#" -gt 0 ]]; then
-    local cmd="$*"
-    docker exec -it "$ctr" sh -lc '
-      if command -v bash >/dev/null 2>&1; then
-        exec bash --login -lc "$1"
-      fi
-      exec sh -lc "$1"
-    ' sh "$cmd"
-    return
+  if (($# > 0)); then
+    _container_exec_argv "$container" -- "$@"
+  else
+    _container_open_shell "$container"
   fi
-
-  docker exec -it "$ctr" sh -lc '
-    if command -v bash >/dev/null 2>&1; then
-      exec bash --login
-    fi
-    exec sh
-  '
 }
 
 cmd_core() {
