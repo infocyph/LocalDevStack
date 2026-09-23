@@ -145,10 +145,21 @@ pass "documentation toctree targets exist"
 
 
 help_md="$("$ROOT/lds" help --markdown)"
-for required in   'lds profiles add <profile...>'   'lds support trace <domain>'   'lds support bundle [--redact|--full] [output.zip]'   'lds cli <container> [cmd...]'   'lds run shell|ps|logs|stop|rm|open'   'MongoDB:'   'Elasticsearch:'; do
+for required in   'lds profiles add <profile...>'   'lds support trace <domain>'   'lds support bundle [--redact|--full] [output.zip]'   'lds cli <service|container> [--] [command...]'   'lds core [domain|service|container] [--] [command...]'   'lds stack exec <service> [--] [command...]'   'lds tools exec [--] <command> [args...]'   'lds run shell|ps|logs|stop|rm|open'   'MongoDB:'   'Elasticsearch:'; do
   assert_contains "$help_md" "$required"
 done
 pass "embedded CLI help covers documented command groups"
+
+assert_file_contains "$cli" 'Execution and Shells'
+assert_file_contains "$cli" 'lds core <domain|service|container> [--] <command> [args...]'
+assert_file_contains "$cli" 'lds cli <service|container> [--] <command> [args...]'
+assert_file_contains "$cli" 'lds stack exec <service> [--] <command> [args...]'
+assert_file_contains "$cli" 'lds tools exec [--] <command> [args...]'
+assert_file_contains "$cli" 'preserve argv exactly'
+assert_file_contains "$readme" '## Execution and shells'
+assert_file_contains "$readme" 'lds cli php84 -- php -v'
+assert_file_contains "$readme" 'lds stack exec redis -- redis-cli ping'
+pass "execution-surface docs match the shared Core/CLI contract"
 
 
 for stale in LDS_TOOLS_IMAGE LDS_RUNNER_IMAGE LDS_NGINX_IMAGE LDS_APACHE_IMAGE; do
