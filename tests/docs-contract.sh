@@ -166,7 +166,6 @@ assert_file_contains "$plan" 'preserve argv'
 assert_file_contains "$plan" 'adaptive `docker exec` flags'
 assert_file_contains "$plan" 'Windows/Git Bash'
 assert_file_contains "$plan" 'remove this plan when every item is complete'
-if grep -RqsF 'docs/plans/docker-ecosystem/' "$ROOT" --exclude-dir=.git; then
-  fail "repository still references completed docker-ecosystem planning files"
-fi
+[[ ! -d "$ROOT/docs/plans/docker-ecosystem" ]] ||
+  fail "completed docker-ecosystem planning directory still exists"
 pass "active Core/CLI hardening plan is canonical and completed ecosystem plans are retired"
