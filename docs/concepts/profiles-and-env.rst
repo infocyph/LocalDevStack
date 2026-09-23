@@ -214,14 +214,15 @@ AI Settings
 Important LocalDevStack AI settings include::
 
    LDS_AI_ENABLED=auto
-   LDS_AI_PROVIDER=llm
-   LDS_AI_URL=http://llm:11434
    LDS_AI_MODEL=
    LDS_AI_RUNTIME=<optional explicit cpu|nvidia|amd|npu>
    LDS_AI_IGPU_ENABLE=<auto-derived 0|1>
 
-``LDS_AI_PROVIDER`` and ``LDS_AI_URL`` describe the common consumer contract. They do
-not identify which backend implementation is active.
+``LDS_AI_RUNTIME`` is also the source of truth passed to Tools. Inside Docker, Tools
+maps ``npu`` to ``llm-fastflow:11434`` and ``cpu|nvidia|amd`` to
+``llm-ollama:11434``. The ``llm`` network alias remains the common service identity
+used by Nginx and other stack-level routing, but Tools does not need the old
+``LDS_AI_PROVIDER``/``LDS_AI_URL`` indirection.
 
 When ``LDS_AI_RUNTIME`` is not explicitly set, LocalDevStack detects the preferred
 runtime in this order: supported XDNA2 NPU, NVIDIA, AMD ROCm, CPU.
