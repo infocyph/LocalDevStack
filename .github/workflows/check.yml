@@ -44,6 +44,10 @@ jobs:
       - name: Execution baseline contract
         run: tests/execution-contract.sh
 
+      - name: Container execution substrate contract
+        run: tests/container-exec-contract.sh
+
+
 
       - name: Environment contract
         run: tests/env-contract.sh
