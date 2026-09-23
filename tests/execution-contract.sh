@@ -90,7 +90,7 @@ run_case() {
       if [[ "${1:-}" == exec ]]; then
         case " $* " in
           *" domain-which --list-domains "*)
-            printf '%s\n' app.local php.local
+            printf '%s\n' app.local php.local fallback.local
             ;;
           *" domain-which --app --quiet app.local "*)
             printf '%s\n' node
