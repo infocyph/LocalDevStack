@@ -193,13 +193,16 @@ Server-tools-specific execution::
 
    lds tools sh
    lds tools exec [--] <command> [args...]
+   lds tools shell-exec <shell-expression>
    lds tools file <path>
 
 All explicit command forms preserve argv exactly; normal commands are not joined
 into a shell string. ``--`` may be used to separate LDS arguments from the
-container command. Interactive shells receive a TTY, while piped/non-interactive
-commands do not force one. Bash is preferred for interactive shells with ``sh``
-as the fallback.
+container command. Use ``tools shell-exec`` only when shell syntax such as
+pipelines, redirections, or compound expressions is intentionally required.
+Interactive shells and TUIs require a real TTY; piped/non-interactive commands do
+not force one. Bash is preferred for interactive shells with ``sh`` as the
+fallback.
 
 Secrets
 -------
