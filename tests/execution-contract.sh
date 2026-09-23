@@ -164,7 +164,10 @@ pass "child command exit status propagates"
 _container_stdin_is_tty() { return 1; }
 _container_stdout_is_tty() { return 1; }
 set +e
-_container_open_shell cid-web '' >/dev/null 2>&1
+(
+  die() { exit 97; }
+  _container_open_shell cid-web '' >/dev/null 2>&1
+)
 rc=$?
 set -e
 [[ "$rc" -ne 0 ]] || fail "interactive shell unexpectedly ran without a TTY"
