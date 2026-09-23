@@ -510,23 +510,29 @@ cmd_ui() {
   local ctr
   ctr="$(_project_tools_container_running || true)"
   [[ -n "$ctr" ]] || die "server-tools container is not running for project: $(lds_project)"
-  docker exec -it "$ctr" lazydocker
+  _container_exec_argv "$ctr" "" lazydocker
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 6f. EXEC / EVENTS / CLEAN / DISK
 # ─────────────────────────────────────────────────────────────────────────────
 cmd_exec() {
-  local svc="${1:-}"
+  local requested="${1:-}"
   shift || true
-  [[ -n "$svc" ]] || die "exec <service> [cmd...]"
-  local s
-  s="$(resolve_service "$svc" || true)"
-  [[ -n "$s" ]] || die "Unknown service: $svc"
-  if [[ $# -gt 0 ]]; then
-    docker_compose exec "$s" "$@"
+  [[ -n "$requested" ]] || die "stack exec <service> [--] [command...]"
+
+  local service
+  service="$(_container_service_candidate "$requested" || true)"
+  [[ -n "$service" ]] || die "Unknown service: $requested"
+
+  _container_require_running "$service"
+  local ctr="$LDS_CONTAINER_ID"
+
+  [[ "${1:-}" == -- ]] && shift || true
+  if (($#)); then
+    _container_exec_argv "$ctr" "" "$@"
   else
-    docker_compose exec "$s" sh -lc 'command -v bash >/dev/null 2>&1 && exec bash || exec sh'
+    _container_open_shell "$ctr" ""
   fi
 }
 
@@ -813,118 +819,102 @@ cmd_rebuild() {
 
 
 docker_shell() {
-  local c="${1:-}"
-  [[ -n "$c" ]] || die "container name required"
-  if docker exec "$c" sh -lc 'command -v bash >/dev/null 2>&1' >/dev/null 2>&1; then
-    exec docker exec -it "$c" bash
-  else
-    exec docker exec -it "$c" sh
-  fi
+  local target="${1:-}" workdir="${2:-}"
+  [[ -n "$target" ]] || die "container name required"
+  _container_require_running "$target"
+  _container_open_shell "$LDS_CONTAINER_ID" "$workdir"
 }
+
 cmd_tools() {
   local sub="${1:-sh}"
   shift || true
   local ctr
   ctr="$(_project_tools_container_running || true)"
   [[ -n "$ctr" ]] || die "server-tools container is not running for project: $(lds_project)"
+
   case "${sub,,}" in
   sh | shell | "")
-    docker_shell "$ctr"
+    _container_open_shell "$ctr" ""
     ;;
   exec)
-    [[ $# -gt 0 ]] || die "tools exec <cmd>"
-    docker exec -it "$ctr" sh -lc "$*"
+    [[ $# -gt 0 ]] || die "tools exec <command> [args...]"
+    [[ "${1:-}" == -- ]] && shift || true
+    [[ $# -gt 0 ]] || die "tools exec <command> [args...]"
+    _container_exec_argv "$ctr" "" "$@"
+    ;;
+  shell-exec)
+    [[ $# -eq 1 ]] || die "tools shell-exec '<shell expression>'"
+    _container_exec_argv "$ctr" "" sh -lc "$1"
     ;;
   file)
     local p="${1:-}"
     [[ -n "$p" ]] || die "tools file <path>"
-    docker exec -it "$ctr" sh -lc "ls -la -- \"$p\" 2>/dev/null || true; echo; sed -n '1,200p' -- \"$p\" 2>/dev/null || true"
+    _container_exec_argv "$ctr" "" sh -c '
+      ls -la -- "$1" 2>/dev/null || true
+      echo
+      sed -n "1,200p" -- "$1" 2>/dev/null || true
+    ' sh "$p"
     ;;
   *)
-    die "tools <sh|exec|file>"
+    die "tools <sh|exec|shell-exec|file>"
     ;;
   esac
 }
+
 cmd_http() { [[ ${1:-} == reload ]] && http_reload; }
+
 cmd_cli() {
-  local ctr="${1:-}"
+  local target="${1:-}"
   shift || true
+  [[ -n "$target" ]] || die "Usage: lds cli <service|container> [--] [command...]"
 
-  [[ -n "$ctr" ]] || die "Usage: lds cli <container> [cmd...]"
+  _container_require_running "$target"
+  local ctr="$LDS_CONTAINER_ID"
 
-  docker inspect "$ctr" >/dev/null 2>&1 || die "Container not found: $ctr"
-  docker inspect -f '{{.State.Running}}' "$ctr" 2>/dev/null | grep -qx true || die "Container not running: $ctr"
-
-  # If user provided a command, run it; otherwise open an interactive shell.
-  if [[ "$#" -gt 0 ]]; then
-    local cmd="$*"
-    docker exec -it "$ctr" sh -lc '
-      if command -v bash >/dev/null 2>&1; then
-        exec bash --login -lc "$1"
-      fi
-      exec sh -lc "$1"
-    ' sh "$cmd"
-    return
+  [[ "${1:-}" == -- ]] && shift || true
+  if (($#)); then
+    _container_exec_argv "$ctr" "" "$@"
+  else
+    _container_open_shell "$ctr" ""
   fi
-
-  docker exec -it "$ctr" sh -lc '
-    if command -v bash >/dev/null 2>&1; then
-      exec bash --login
-    fi
-    exec sh
-  '
 }
 
 cmd_core() {
-  # Usage:
-  #   lds core <domain>     -> open correct container for that domain (PHP/Node)
-  #   lds core <container>  -> open a shell in that container
-  #   lds core              -> list domains and let user pick
-
   local target="${1:-}"
-
-  # domain regex (same as domain-which/mkhost family)
   local re='^([a-zA-Z0-9]([-a-zA-Z0-9]{0,61}[a-zA-Z0-9])?\.)+(localhost|local|test|loc|[a-zA-Z]{2,})$'
+  local -a command=()
 
-  # If no target -> prompt from domain-which list
+  if [[ -n "$target" ]]; then
+    shift || true
+    [[ "${1:-}" == -- ]] && shift || true
+    command=("$@")
+  fi
+
   if [[ -z "$target" ]]; then
-    local tools_ctr
-    tools_ctr="$(_project_tools_container_running || true)"
-    [[ -n "$tools_ctr" ]] || die "server-tools container is not running for project: $(lds_project)"
-
     local -a domains=()
-    mapfile -t domains < <(docker exec "$tools_ctr" domain-which --list-domains 2>/dev/null | sed '/^[[:space:]]*$/d' || true)
+    mapfile -t domains < <(_core_domain_list)
+    (("${#domains[@]}" > 0)) || die "No domains found"
 
-    ((${#domains[@]} > 0)) || die "No domains found"
-
-    # stable ordering
-    IFS=$'\n' domains=($(printf '%s\n' "${domains[@]}" | LC_ALL=C sort -u))
-
-    if ((${#domains[@]} == 1)); then
+    if (("${#domains[@]}" == 1)); then
       target="${domains[0]}"
+    elif [[ ! -t 0 || ! -t 1 ]]; then
+      printf "%b[core]%b No domain provided. Available domains:\n" "$YELLOW" "$NC" >&2
+      local i d
+      i=1
+      for d in "${domains[@]}"; do
+        printf "  %2d) %s\n" "$i" "$d" >&2
+        ((i++))
+      done
+      die "No TTY to prompt. Use: lds core <domain> [--] [command...]"
     else
-      if [[ ! -t 0 ]]; then
-        printf "%b[core]%b No domain provided. Available domains:\n" "$YELLOW" "$NC" >&2
-        local i=1
-        local d
-        for d in "${domains[@]}"; do
-          printf "  %2d) %s\n" "$i" "$d" >&2
-          ((i++))
-        done
-        die "No TTY to prompt. Use: lds core <domain>"
-      fi
-
       printf "%bSelect domain:%b\n" "$CYAN" "$NC" >&2
-      local i=1 d
+      local i=1 d ans=''
       for d in "${domains[@]}"; do
         printf "  %b%2d)%b %s\n" "$CYAN" "$i" "$NC" "$d" >&2
         ((i++))
       done
-
-      local ans=""
       while true; do
         read -r -p "Enter number (1-${#domains[@]}): " ans
-        ans="$(echo "$ans" | xargs)"
         [[ "$ans" =~ ^[0-9]+$ ]] || {
           printf "%bInvalid input.%b\n" "$YELLOW" "$NC" >&2
           continue
@@ -939,30 +929,21 @@ cmd_core() {
     fi
   fi
 
-  # If target looks like a domain -> resolve via domain-which then shell in
+  local ctr workdir=''
   if [[ "$target" =~ $re ]]; then
-    local tools_ctr
-    tools_ctr="$(_project_tools_container_running || true)"
-    [[ -n "$tools_ctr" ]] || die "server-tools container is not running for project: $(lds_project)"
-
-    local app container wd
-    app="$(docker exec "$tools_ctr" domain-which --app --quiet "$target" 2>/dev/null)" || die "Unknown domain: $target"
-    container="$(docker exec "$tools_ctr" domain-which --container --quiet "$target" 2>/dev/null)" || die "No container resolved for: $target"
-    wd="$(docker exec "$tools_ctr" domain-which --docroot --quiet "$target" 2>/dev/null)" || true
-    [[ -n "${container:-}" ]] || die "No container resolved for: $target"
-
-    # Node apps should always land at /app. Others follow resolved docroot.
-    if [[ "${app:-}" == "node" ]]; then
-      wd="/app"
-    fi
-    [[ -n "${wd:-}" ]] || wd="/app"
-
-    docker exec -it "$container" bash -lc "cd \"$wd\" 2>/dev/null || cd /app 2>/dev/null || cd /; exec bash"
-    return 0
+    _core_domain_resolve "$target"
+    ctr="$LDS_CORE_CONTAINER"
+    workdir="$LDS_CORE_WORKDIR"
+  else
+    _container_require_running "$target"
+    ctr="$LDS_CONTAINER_ID"
   fi
 
-  # Otherwise treat target as a container name
-  docker exec -it "$(printf '%s' "$target" | tr '[:lower:]' '[:upper:]')" sh -lc 'exec bash -i || exec sh'
+  if (("${#command[@]}" > 0)); then
+    _container_exec_argv "$ctr" "$workdir" "${command[@]}"
+  else
+    _container_open_shell "$ctr" "$workdir"
+  fi
 }
 
 cmd_setup() {
