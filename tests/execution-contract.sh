@@ -147,6 +147,11 @@ run_case() {
   )
 }
 
+force_interactive_tty() {
+  _container_stdin_is_tty() { return 0; }
+  _container_stdout_is_tty() { return 0; }
+}
+
 case_cli_command() {
   _container_stdin_is_tty() { return 1; }
   _container_stdout_is_tty() { return 1; }
@@ -184,11 +189,25 @@ assert_file_contains "$log" 'docker: <exec> <cid-php84> <php> <-v>'
 pass "batch 2: lds cli resolves current-project Compose service names"
 
 case_cli_shell() {
+  force_interactive_tty
   cmd_cli demo-container
 }
 run_case case_cli_shell
 assert_file_contains "$log" 'docker: <exec> <-it> <cid-demo> <bash> <--login>'
 pass "batch 2: lds cli without command opens the shared interactive shell"
+
+case_cli_shell_nontty() {
+  _container_stdin_is_tty() { return 1; }
+  _container_stdout_is_tty() { return 1; }
+  cmd_cli demo-container
+}
+set +e
+run_case case_cli_shell_nontty >/dev/null 2>&1
+rc=$?
+set -e
+[[ "$rc" -eq 64 ]] || fail "lds cli non-TTY shell returned $rc instead of 64"
+assert_file_contains "$log" 'err:Interactive container session requires a TTY'
+pass "batch 6: lds cli rejects interactive shell without a TTY"
 
 set +e
 run_case cmd_cli stopped-container >/dev/null 2>&1
@@ -223,6 +242,7 @@ assert_file_contains "$log" 'err:Usage: lds cli <service|container> [--] [comman
 pass "batch 5: lds cli uses standardized usage exit"
 
 case_core_node_domain() {
+  force_interactive_tty
   cmd_core app.local
 }
 run_case case_core_node_domain
@@ -231,6 +251,7 @@ assert_file_contains "$log" 'docker: <exec> <-it> <--workdir> </app> <cid-node> 
 pass "batch 3: lds core resolves Node domains and opens /app through the shared shell helper"
 
 case_core_php_domain() {
+  force_interactive_tty
   cmd_core php.local
 }
 run_case case_core_php_domain
@@ -238,6 +259,7 @@ assert_file_contains "$log" 'docker: <exec> <-it> <--workdir> </srv/php/public> 
 pass "batch 3: lds core preserves resolved PHP document root"
 
 case_core_docroot_fallback() {
+  force_interactive_tty
   cmd_core fallback.local
 }
 run_case case_core_docroot_fallback
@@ -267,6 +289,7 @@ assert_file_contains "$log" 'docker: <exec> <cid-php84> <php> <-v>'
 pass "batch 3: lds core delegates service targets to the shared resolver"
 
 case_core_container() {
+  force_interactive_tty
   cmd_core mixedCase-container
 }
 run_case case_core_container
@@ -292,6 +315,7 @@ fi
 pass "batch 3: lds core distinguishes discovered domains from hostname-shaped containers"
 
 case_core_single_domain() {
+  force_interactive_tty
   _core_domain_list() { printf '%s\n' app.local; }
   cmd_core
 }
@@ -323,6 +347,7 @@ fi
 pass "batch 4: lds stack exec remains service-only and preserves command argv"
 
 case_stack_exec_shell() {
+  force_interactive_tty
   cmd_exec PHP84
 }
 run_case case_stack_exec_shell
@@ -357,7 +382,18 @@ if grep -Fq '<sh> <-lc> <printf %s %s hello world' "$log"; then
 fi
 pass "batch 4: lds tools exec preserves exact argv through the shared executor"
 
+case_tools_shell_exec() {
+  _container_stdin_is_tty() { return 1; }
+  _container_stdout_is_tty() { return 1; }
+  _container_stdin_has_data() { return 1; }
+  cmd_tools shell-exec 'printf "%s\n" "hello world" | cat'
+}
+run_case case_tools_shell_exec
+assert_file_contains "$log" 'docker: <exec> <SERVER_TOOLS> <sh> <-lc> <printf "%s\n" "hello world" | cat>'
+pass "batch 4: lds tools shell-exec makes intentional shell parsing explicit"
+
 case_tools_shell() {
+  force_interactive_tty
   cmd_tools sh
 }
 run_case case_tools_shell
@@ -394,8 +430,13 @@ assert_file_contains "$log" '<sh> <-lc>'
 assert_file_contains "$log" '<sh> </app/path with spaces.txt>'
 pass "batch 4: lds tools file passes paths as shell positional argv rather than interpolating them"
 
-assert_file_contains "$ROOT/lib/services.sh" 'docker exec -it "$ctr" lazydocker'
-pass "batch 4: support ui remains a specialized interactive TUI path"
+case_ui_interactive() {
+  force_interactive_tty
+  cmd_ui
+}
+run_case case_ui_interactive
+assert_file_contains "$log" 'docker: <exec> <-it> <SERVER_TOOLS> <lazydocker>'
+pass "batch 4: support ui uses the shared interactive execution helper"
 
 assert_file_contains "$ROOT/lds" 'exec) cmd_exec "$@" ;;'
 assert_file_contains "$ROOT/lds" 'if _is_public_lds_command "$cmd"; then'
