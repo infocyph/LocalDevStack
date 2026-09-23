@@ -771,7 +771,13 @@ cmd_help() {
 - `lds urls`
 
 ## Execution / shells
-- `lds core [domain|service|container] [--] [command...]` — application/domain-aware execution with resolved working directory.
+- `lds shell` — grouped interactive selector for domains, application directories, services, containers, and Tools.
+- `lds shell <target>` — open an interactive shell in the resolved context.
+- `lds shell <target> [--] <command> [args...]` — argv-preserving execution.
+- `lds shell <target> --shell <shell-expression>` — intentional shell parsing.
+- `lds shell <target> --interactive <command> [args...]` — interactive/TUI argv execution.
+- Qualified selectors: `domain:`, `app:`, `service:`, `container:`.
+- `lds core [domain|service|container] [--] [command...]` — compatibility application/domain-aware execution with resolved working directory.
 - `lds cli <service|container> [--] [command...]` — generic current-project service or exact-container execution.
 - `lds stack exec <service> [--] [command...]` *(alias: `lds exec`)* — Compose-service-only execution.
 - `lds tools sh` — interactive shell in the project `server-tools` container.
@@ -857,7 +863,10 @@ ${CYAN}Config:${NC}
   urls
 
 ${CYAN}Execution / Shells:${NC}
-  core [domain|service|container] [--] [command...]   Domain/application-aware
+  shell [target] [--] [command...]                    Unified selector/execution
+  shell <target> --shell <expression>                 Intentional shell syntax
+  shell <target> --interactive <command> [args...]    Interactive/TUI command
+  core [domain|service|container] [--] [command...]   Compatibility domain/app entry
   cli <service|container> [--] [command...]          Generic service/container exec
   stack exec <service> [--] [command...]             Compose-service only
   tools sh|exec|shell-exec|file                       server-tools only
@@ -893,7 +902,7 @@ EOF
 
 _is_public_lds_command() {
   case "${1:-}" in
-  stack|domain|support|bundle|up|start|down|stop|restart|reboot|status|ps|logs|exec|events|clean|config|http|host|setup|profiles|cert|certificate|doctor|diag|sniff|open|notify|ui|images|urls|tools|cli|core|graphify|secrets|rebuild|run)
+  stack|domain|support|bundle|up|start|down|stop|restart|reboot|status|ps|logs|exec|events|clean|config|http|host|setup|profiles|cert|certificate|doctor|diag|sniff|open|notify|ui|images|urls|tools|cli|core|shell|graphify|secrets|rebuild|run)
     return 0
     ;;
   esac
