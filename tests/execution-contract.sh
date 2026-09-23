@@ -33,6 +33,9 @@ docker_compose() {
 }
 
 DOCKER_LOG=''
+DOCKER_HAS_BASH=1
+DOCKER_FORCE_RC=0
+DOCKER_MSYS_SEEN=''
 docker() {
   if [[ "${1:-}" == inspect ]]; then
     shift
@@ -52,6 +55,8 @@ docker() {
   fi
 
   if [[ "${1:-}" == exec ]]; then
+    DOCKER_MSYS_SEEN="${MSYS_NO_PATHCONV:-}|${MSYS2_ARG_CONV_EXCL:-}"
+    export DOCKER_MSYS_SEEN
     local serialized='' arg
     for arg in "$@"; do
       printf -v serialized '%s <%s>' "$serialized" "$arg"
@@ -61,7 +66,7 @@ docker() {
     # Shell detection / workdir probes.
     if [[ "$*" == *" sh -c "* ]]; then
       if [[ "$*" == *'command -v bash'* ]]; then
-        printf '%s' bash
+        if ((DOCKER_HAS_BASH)); then printf '%s' bash; else printf '%s' sh; fi
         return 0
       fi
       if [[ "$*" == *'[ -d "$1" ]'* ]]; then
@@ -71,6 +76,7 @@ docker() {
       fi
       if [[ "$*" == *'[ -d /app ]'* ]]; then return 0; fi
     fi
+    ((DOCKER_FORCE_RC == 0)) || return "$DOCKER_FORCE_RC"
     return 0
   fi
   return 0
@@ -133,6 +139,28 @@ _container_exec_argv cid-web /srv/app printf '%s\n' 'hello world' '$(touch /tmp/
   fail "command argv was flattened or reinterpreted: $DOCKER_LOG"
 pass "explicit command argv stays literal"
 
+DOCKER_LOG=''
+_container_exec_argv cid-web '/srv/My App' printf '%s' 'spaced value'
+[[ "$DOCKER_LOG" == *'<-w> </srv/My App> <cid-web> <printf> <%s> <spaced value>'* ]] ||
+  fail "working directory with spaces was not preserved: $DOCKER_LOG"
+
+MSYSTEM=MINGW64
+DOCKER_MSYS_SEEN=''
+_container_exec_argv cid-web '/app' true
+unset MSYSTEM
+[[ "$DOCKER_MSYS_SEEN" == '1|*' ]] ||
+  fail "Git Bash docker path-conversion guard was not applied"
+pass "paths with spaces and Git Bash path conversion are protected"
+
+DOCKER_FORCE_RC=42
+set +e
+_container_exec_argv cid-web '' child-command
+rc=$?
+set -e
+DOCKER_FORCE_RC=0
+[[ "$rc" -eq 42 ]] || fail "child exit status did not propagate"
+pass "child command exit status propagates"
+
 _container_stdin_is_tty() { return 1; }
 _container_stdout_is_tty() { return 1; }
 set +e
@@ -141,6 +169,12 @@ rc=$?
 set -e
 [[ "$rc" -ne 0 ]] || fail "interactive shell unexpectedly ran without a TTY"
 pass "interactive shell rejects non-TTY invocation"
+
+DOCKER_HAS_BASH=0
+[[ "$(_container_shell_path cid-web)" == sh ]] || fail "Bash-unavailable container did not fall back to sh"
+DOCKER_HAS_BASH=1
+[[ "$(_container_shell_path cid-web)" == bash ]] || fail "Bash-capable container did not prefer bash"
+pass "interactive shell resolver prefers Bash and falls back to sh"
 
 [[ "$(_container_existing_workdir cid-web /srv/app)" == /srv/app ]] ||
   fail "existing preferred workdir was not preserved"
