@@ -473,6 +473,12 @@ source "$DIR/lib/profiles.sh"
 source "$DIR/lib/certificates.sh"
 
 ###############################################################################
+# SHARED CONTAINER / DOMAIN EXECUTION
+###############################################################################
+# shellcheck source=lib/execution.sh
+source "$DIR/lib/execution.sh"
+
+###############################################################################
 # SERVICE / STACK OPERATIONS
 ###############################################################################
 # shellcheck source=lib/services.sh
