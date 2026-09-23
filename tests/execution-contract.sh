@@ -398,7 +398,8 @@ assert_file_contains "$ROOT/lib/services.sh" 'docker exec -it "$ctr" lazydocker'
 pass "batch 4: support ui remains a specialized interactive TUI path"
 
 assert_file_contains "$ROOT/lds" 'exec) cmd_exec "$@" ;;'
-assert_file_contains "$ROOT/lds" 'cmd_stack "$@"'
-pass "baseline: grouped stack exec and top-level dispatch remain wired"
+assert_file_contains "$ROOT/lds" 'if _is_public_lds_command "$cmd"; then'
+assert_file_contains "$ROOT/lds" '"cmd_$cmd" "$@"'
+pass "baseline: grouped stack exec and allowlisted top-level dispatch remain wired"
 
 printf 'Execution contract complete.\n'
