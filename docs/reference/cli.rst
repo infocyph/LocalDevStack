@@ -35,7 +35,7 @@ Stack
    lds stack status [status-args...]
    lds stack ps
    lds stack logs [service] [--follow] [--since <duration>] [--grep <pattern>]
-   lds stack exec <service> [command...]
+   lds stack exec <service> [--] [command...]
    lds stack events [since]
    lds stack clean --yes [--volumes] [--global]
    lds stack diff [--config] [--json]
@@ -155,23 +155,51 @@ Shortcuts::
    lds notify ...
    lds ui
 
-Tools Control Plane
--------------------
+Execution and Shells
+--------------------
 
-::
+LocalDevStack has four execution surfaces with intentionally different roles.
+
+Application/domain-aware execution::
+
+   lds core
+   lds core <domain|service|container>
+   lds core <domain|service|container> [--] <command> [args...]
+
+``core`` is the ergonomic application entry point. A domain is resolved through
+Tools to its application container and working directory. Node applications use
+``/app``. Other applications use the resolved document root when available, then
+``/app``, then ``/``. With no target, ``core`` discovers domains and prompts when
+interactive.
+
+Generic service/container execution::
+
+   lds cli <service|container>
+   lds cli <service|container> [--] <command> [args...]
+
+``cli`` prefers an exact service in the current Compose project. If there is no
+matching service, an exact Docker container name or ID is accepted. No implicit
+case conversion is performed.
+
+Compose-service-only execution::
+
+   lds stack exec <service>
+   lds stack exec <service> [--] <command> [args...]
+
+The top-level ``lds exec`` alias has the same contract. This surface intentionally
+accepts services only; use ``cli`` for an arbitrary exact container.
+
+Server-tools-specific execution::
 
    lds tools sh
-   lds tools exec "<command>"
+   lds tools exec [--] <command> [args...]
    lds tools file <path>
 
-Open a generic container shell or run a command::
-
-   lds cli <container>
-   lds cli <container> <command...>
-
-Resolve a domain/container to its application shell::
-
-   lds core [domain|container]
+All explicit command forms preserve argv exactly; normal commands are not joined
+into a shell string. ``--`` may be used to separate LDS arguments from the
+container command. Interactive shells receive a TTY, while piped/non-interactive
+commands do not force one. Bash is preferred for interactive shells with ``sh``
+as the fallback.
 
 Secrets
 -------
