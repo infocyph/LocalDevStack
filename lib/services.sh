@@ -513,7 +513,7 @@ cmd_ui() {
   local ctr
   ctr="$(_project_tools_container_running || true)"
   [[ -n "$ctr" ]] || die "server-tools container is not running for project: $(lds_project)"
-  docker exec -it "$ctr" lazydocker
+  _container_exec_interactive_argv "$ctr" -- lazydocker
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -849,6 +849,13 @@ cmd_tools() {
     }
     _container_exec_argv "$ctr" -- "$@"
     ;;
+  shell-exec)
+    (($# == 1)) || {
+      err "Usage: lds tools shell-exec <shell-expression>"
+      return 64
+    }
+    _container_exec_argv "$ctr" -- sh -lc "$1"
+    ;;
   file)
     local path="${1:-}"
     [[ -n "$path" ]] || {
@@ -862,7 +869,7 @@ cmd_tools() {
     ' sh "$path"
     ;;
   *)
-    die "tools <sh|exec|file>"
+    die "tools <sh|exec|shell-exec|file>"
     ;;
   esac
 }
