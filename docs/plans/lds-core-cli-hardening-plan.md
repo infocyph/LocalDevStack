@@ -418,15 +418,17 @@ Exit criterion: users can predict which execution command to use without knowing
 
 ## Batch 6 — cross-platform and automation hardening
 
-- [ ] Linux interactive shell coverage;
-- [ ] Linux piped stdin/non-TTY coverage;
-- [ ] Windows/Git Bash TTY compatibility;
-- [ ] WSL behavior review;
-- [ ] Docker Desktop behavior review;
-- [ ] paths containing spaces;
-- [ ] commands containing spaces/quotes/shell metacharacters as argv;
-- [ ] SIGINT/exit-code propagation;
-- [ ] no accidental host shell interpolation.
+Status: **implemented — CI validation pending**
+
+- [x] Linux interactive shell coverage;
+- [x] Linux piped stdin/non-TTY coverage;
+- [x] Windows/Git Bash TTY/path-conversion compatibility;
+- [x] WSL behavior review;
+- [x] Docker Desktop/Windows bridge behavior review;
+- [x] paths containing spaces;
+- [x] commands containing spaces/quotes/shell metacharacters as argv;
+- [x] SIGINT/exit-code propagation;
+- [x] no accidental host shell interpolation.
 
 Exit criterion: execution behavior is stable across supported host environments.
 
