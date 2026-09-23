@@ -100,15 +100,13 @@ run_case() {
 
       if [[ "${1:-}" == exec ]]; then
         if [[ "${2:-}" == SERVER_TOOLS && "${3:-}" == sh && "${4:-}" == -c ]]; then
-          if [[ "${5:-}" == *'for path in /app/*'* ]]; then
+          case "${7:-}" in
+            /app/billing) return 0 ;;
+            /app/missing-shell|/app/php:8.4-alpine) return 1 ;;
+          esac
+          if [[ "${5:-}" == *'for path in /app/'* ]]; then
             printf '%s\n' billing node
             return 0
-          fi
-          if [[ "${5:-}" == '[ -d "$1" ]' && "${6:-}" == sh ]]; then
-            case "${7:-}" in
-              /app/billing) return 0 ;;
-              /app/missing-shell|/app/php:8.4-alpine) return 1 ;;
-            esac
           fi
         fi
         case " $* " in
