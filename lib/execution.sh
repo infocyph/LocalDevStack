@@ -121,12 +121,15 @@ _container_require_running() {
   esac
 }
 
+_container_stdin_is_tty() { [[ -t 0 ]]; }
+_container_stdout_is_tty() { [[ -t 1 ]]; }
+
 _container_exec_flags() {
   local mode="${1:-command}"
   LDS_CONTAINER_EXEC_FLAGS=()
 
   if [[ "$mode" == shell ]]; then
-    if [[ ! -t 0 || ! -t 1 ]]; then
+    if ! _container_stdin_is_tty || ! _container_stdout_is_tty; then
       LDS_CONTAINER_ERROR='tty-required'
       return 64
     fi
@@ -134,8 +137,10 @@ _container_exec_flags() {
     return 0
   fi
 
-  [[ -t 0 ]] && LDS_CONTAINER_EXEC_FLAGS+=(-i)
-  [[ -t 0 && -t 1 ]] && LDS_CONTAINER_EXEC_FLAGS+=(-t)
+  _container_stdin_is_tty && LDS_CONTAINER_EXEC_FLAGS+=(-i)
+  if _container_stdin_is_tty && _container_stdout_is_tty; then
+    LDS_CONTAINER_EXEC_FLAGS+=(-t)
+  fi
 }
 
 _container_exec_argv() {
