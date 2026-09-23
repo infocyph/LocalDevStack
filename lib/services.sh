@@ -510,7 +510,7 @@ cmd_ui() {
   local ctr
   ctr="$(_project_tools_container_running || true)"
   [[ -n "$ctr" ]] || die "server-tools container is not running for project: $(lds_project)"
-  _container_exec_argv "$ctr" "" lazydocker
+  _container_exec_interactive_argv "$ctr" "" lazydocker
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -840,6 +840,9 @@ cmd_tools() {
     [[ $# -gt 0 ]] || die "tools exec <command> [args...]"
     [[ "${1:-}" == -- ]] && shift || true
     [[ $# -gt 0 ]] || die "tools exec <command> [args...]"
+    if [[ $# -eq 1 && "$1" == *[[:space:]]* ]]; then
+      die "tools exec preserves argv; use: lds tools shell-exec '<shell expression>'"
+    fi
     _container_exec_argv "$ctr" "" "$@"
     ;;
   shell-exec)
