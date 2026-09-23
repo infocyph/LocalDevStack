@@ -203,8 +203,8 @@ then ``/app`` and ``/``. Application-directory fallback opens
 Normal command forms preserve argv exactly. ``--shell`` is the explicit escape
 hatch for pipelines, redirections, and compound shell syntax.
 ``--interactive`` routes argv through the shared real-TTY execution helper.
-Interactive shells and TUIs require real stdin/stdout TTYs; piped commands keep
-stdin without forcing a TTY.
+Interactive shells and TUIs require a real TTY on both stdin and stdout; piped
+commands keep stdin without forcing a TTY.
 
 The older execution surfaces remain compatible during migration::
 
