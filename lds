@@ -772,10 +772,11 @@ cmd_help() {
 
 ## Tools / shells / secrets
 - `lds tools sh`
-- `lds tools exec "<cmd>"`
+- `lds tools exec <command> [args...]`
+- `lds tools shell-exec '<shell expression>'`
 - `lds tools file <path>`
-- `lds cli <container> [cmd...]`
-- `lds core [domain|container]`
+- `lds cli <service|container> [--] [command...]`
+- `lds core [domain|service|container] [--] [command...]`
 - `lds secrets <senv-args...>`
 
 ## AI consumer
@@ -824,11 +825,11 @@ ${CYAN}Stack:${NC}
   up|start|down|stop|restart|reboot|status|ps|logs|exec|events
   clean --yes [--volumes] [--global]   (LocalDevStack-scoped unless --global)
 
-${CYAN}Domains:${NC}
+${CYAN}Domains / Execution:${NC}
   domain add|rm|ls
   host add|rm|list                     Legacy aliases
-  core [domain|container]
-  cli <container> [cmd...]
+  core [domain|service|container] [--] [command...]
+  cli <service|container> [--] [command...]
 
 ${CYAN}Setup / Profiles:${NC}
   setup init|permissions|domain|profile|profiles
@@ -855,7 +856,10 @@ ${CYAN}Config:${NC}
   urls
 
 ${CYAN}Tools / Secrets:${NC}
-  tools sh|exec|file
+  tools sh
+  tools exec <command> [args...]
+  tools shell-exec '<shell expression>'
+  tools file <path>
   secrets <senv-args...>
 
 ${CYAN}AI:${NC}
