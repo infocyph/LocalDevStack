@@ -1,6 +1,6 @@
 # LDS Unified Shell Command Plan
 
-Status: **active — Batches 0–4 implemented; CI validation pending before compatibility consolidation**
+Status: **complete — all batches validated; plan retirement pending in this commit sequence**
 
 ## Objective
 
@@ -212,36 +212,36 @@ Old commands must not retain independent Docker execution implementations after 
 
 ### Batch 5 — Compatibility consolidation
 
-- [ ] route `core` through unified context behavior where contracts match;
-- [ ] route `cli` through unified context behavior where contracts match;
-- [ ] preserve service-only `stack exec` compatibility;
-- [ ] map `tools sh/exec/shell-exec` to the same execution primitives;
-- [ ] ensure no duplicate generic execution implementation remains;
-- [ ] decide deprecation-warning policy without breaking automation.
+- [x] route `core` through unified context behavior where contracts match;
+- [x] route `cli` through unified context behavior where contracts match;
+- [x] preserve service-only `stack exec` compatibility;
+- [x] map `tools sh/exec/shell-exec` to the same execution primitives;
+- [x] ensure no duplicate generic execution implementation remains;
+- [x] decide deprecation-warning policy without breaking automation — docs-only compatibility labeling; no runtime warning noise in this release.
 
 ### Batch 6 — Cross-platform and ambiguity hardening
 
-- [ ] Linux/WSL behavior;
-- [ ] Git Bash/MSYS path conversion;
-- [ ] mixed-case exact containers;
-- [ ] domain-like container names;
-- [ ] service/domain/app name collisions;
-- [ ] stopped/missing/ambiguous target precedence;
-- [ ] shell/TUI non-TTY rejection;
-- [ ] Ctrl-C / child exit propagation.
+- [x] Linux/WSL behavior;
+- [x] Git Bash/MSYS path conversion;
+- [x] mixed-case exact containers;
+- [x] domain-like container names;
+- [x] service/domain/app name collisions;
+- [x] stopped/missing/ambiguous target precedence;
+- [x] shell/TUI non-TTY rejection;
+- [x] Ctrl-C / child exit propagation.
 
 ### Batch 7 — Full regression and release cleanup
 
-- [ ] ShellCheck/static;
-- [ ] CLI/execution/container substrate contracts;
-- [ ] environment/catalog/runtime contracts;
-- [ ] networking/wrapper/service/QoL/permissions contracts;
-- [ ] Windows bridge;
-- [ ] Compose;
-- [ ] Graphify minimum/latest;
-- [ ] common LLM contract;
-- [ ] published image baseline;
-- [ ] final full CLI surface review;
+- [x] ShellCheck/static;
+- [x] CLI/execution/container substrate contracts;
+- [x] environment/catalog/runtime contracts;
+- [x] networking/wrapper/service/QoL/permissions contracts;
+- [x] Windows bridge;
+- [x] Compose;
+- [x] Graphify minimum/latest;
+- [x] common LLM contract;
+- [x] published image baseline;
+- [x] final full CLI surface review;
 - [ ] remove this plan only when every item is complete.
 
 ## Completion definition
