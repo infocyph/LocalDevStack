@@ -20,9 +20,8 @@ runner="$ROOT/docs/guides/ad-hoc-runner.rst"
 notify="$ROOT/docs/guides/notifications.rst"
 secrets="$ROOT/docs/guides/secrets-sops-age.rst"
 cli="$ROOT/docs/reference/cli.rst"
-plan="$ROOT/docs/plans/lds-shell-unification-plan.md"
 
-for file in "$index" "$readme" "$quick" "$arch" "$profiles" "$storage" "$domain" "$tls" "$ai" "$databases" "$ops" "$runner" "$notify" "$secrets" "$cli" "$plan"; do
+for file in "$index" "$readme" "$quick" "$arch" "$profiles" "$storage" "$domain" "$tls" "$ai" "$databases" "$ops" "$runner" "$notify" "$secrets" "$cli"; do
   assert_file "$file"
 done
 
@@ -178,12 +177,7 @@ done
 assert_file_contains "$ai" 'Both provider definitions live in ``docker/compose/companion.yaml``'
 pass "docs reflect fixed infrastructure images and ephemeral AI overrides"
 
-assert_file_contains "$plan" 'LDS Unified Shell Command Plan'
-assert_file_contains "$plan" 'Applications / Domains'
-assert_file_contains "$plan" 'Application Directories'
-assert_file_contains "$plan" 'exact discovered domain'
-assert_file_contains "$plan" '/app/<target>'
-assert_file_contains "$plan" 'remove this plan only when every item is complete'
-plan_count="$(find "$ROOT/docs/plans" -type f | wc -l | tr -d '[:space:]')"
-[[ "$plan_count" == 1 ]] || fail "expected exactly one active LocalDevStack plan, found $plan_count"
-pass "LDS shell unification plan is the single active planning artifact"
+if [[ -d "$ROOT/docs/plans" ]] && find "$ROOT/docs/plans" -type f -print -quit | grep -q .; then
+  fail "completed planning artifact remains under docs/plans"
+fi
+pass "completed LocalDevStack planning artifacts are retired"
