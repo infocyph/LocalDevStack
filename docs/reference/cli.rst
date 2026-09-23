@@ -158,51 +158,58 @@ Shortcuts::
 Execution and Shells
 --------------------
 
-LocalDevStack has four execution surfaces with intentionally different roles.
+``lds shell`` is the canonical execution/navigation surface.
 
-Application/domain-aware execution::
+With no arguments it builds a stable grouped catalog of discovered domains,
+direct ``server-tools:/app`` child directories, current-project Compose
+services, running Docker containers, and the ``tools`` utility target::
 
-   lds core
-   lds core <domain|service|container>
-   lds core <domain|service|container> [--] <command> [args...]
+   lds shell
 
-``core`` is the ergonomic application entry point. A domain is resolved through
-Tools to its application container and working directory. Node applications use
-``/app``. Other applications use the resolved document root when available, then
-``/app``, then ``/``. With no target, ``core`` discovers domains and prompts when
-interactive.
+The selector accepts the displayed global number or an exact name. If the same
+name exists in multiple categories, use a qualified selector::
 
-Generic service/container execution::
+   domain:project.localhost
+   app:project
+   service:php84
+   container:localdevstack-php84-1
 
-   lds cli <service|container>
-   lds cli <service|container> [--] <command> [args...]
+Explicit targets use deterministic precedence: exact discovered domain, reserved
+``tools`` target, exact current-project service, exact Docker container, then an
+exact direct child ``/app/<target>`` inside the current project's server-tools
+container. No fuzzy matching or implicit case conversion is performed. Image
+names are not implicitly instantiated.
 
-``cli`` prefers an exact service in the current Compose project. If there is no
-matching service, an exact Docker container name or ID is accepted. No implicit
-case conversion is performed.
+Canonical forms::
 
-Compose-service-only execution::
+   lds shell <target>
+   lds shell <target> [--] <command> [args...]
+   lds shell <target> --shell <shell-expression>
+   lds shell <target> --interactive <command> [args...]
 
-   lds stack exec <service>
-   lds stack exec <service> [--] <command> [args...]
+Domain targets retain application-aware working-directory behavior: Node uses
+``/app``; other applications use the resolved document root when available,
+then ``/app`` and ``/``. Application-directory fallback opens
+``server-tools`` at ``/app/<target>``.
 
-The top-level ``lds exec`` alias has the same contract. This surface intentionally
-accepts services only; use ``cli`` for an arbitrary exact container.
+Normal command forms preserve argv exactly. ``--shell`` is the explicit escape
+hatch for pipelines, redirections, and compound shell syntax.
+``--interactive`` routes argv through the shared real-TTY execution helper.
+Interactive shells and TUIs require real stdin/stdout TTYs; piped commands keep
+stdin without forcing a TTY.
 
-Server-tools-specific execution::
+The older execution surfaces remain compatible during migration::
 
+   lds core [domain|service|container] [--] [command...]
+   lds cli <service|container> [--] [command...]
+   lds stack exec <service> [--] [command...]
    lds tools sh
    lds tools exec [--] <command> [args...]
    lds tools shell-exec <shell-expression>
    lds tools file <path>
 
-All explicit command forms preserve argv exactly; normal commands are not joined
-into a shell string. ``--`` may be used to separate LDS arguments from the
-container command. Use ``tools shell-exec`` only when shell syntax such as
-pipelines, redirections, or compound expressions is intentionally required.
-Interactive shells and TUIs require a real TTY; piped/non-interactive commands do
-not force one. Bash is preferred for interactive shells with ``sh`` as the
-fallback.
+``stack exec`` remains service-only. ``tools file`` remains inspection
+functionality rather than generic shell navigation.
 
 Secrets
 -------
