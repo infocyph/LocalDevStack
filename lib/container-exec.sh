@@ -8,6 +8,22 @@ _CONTAINER_TARGET_ID=''
 _CONTAINER_TARGET_NAME=''
 declare -a _CONTAINER_EXEC_FLAGS=()
 
+_container_is_msys() {
+  [[ -n "${MSYSTEM:-}${CYGWIN:-}" ]] && return 0
+  case "${OSTYPE:-}" in
+    msys* | cygwin*) return 0 ;;
+  esac
+  return 1
+}
+
+_container_docker() {
+  if _container_is_msys; then
+    MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' docker "$@"
+  else
+    docker "$@"
+  fi
+}
+
 _container_target_reset() {
   _CONTAINER_TARGET_KIND=''
   _CONTAINER_TARGET_REQUESTED=''
@@ -28,7 +44,7 @@ _container_project_service_exists() {
 _container_name_from_id() {
   local id="${1:-}" name
   [[ -n "$id" ]] || return 1
-  name="$(docker inspect -f '{{.Name}}' "$id" 2>/dev/null || true)"
+  name="$(_container_docker inspect -f '{{.Name}}' "$id" 2>/dev/null || true)"
   name="${name#/}"
   [[ -n "$name" ]] || return 1
   printf '%s' "$name"
@@ -69,7 +85,7 @@ _container_resolve_target() {
   fi
 
   # Otherwise preserve exact Docker container names/IDs as an explicit escape.
-  id="$(docker inspect -f '{{.Id}}' "$target" 2>/dev/null || true)"
+  id="$(_container_docker inspect -f '{{.Id}}' "$target" 2>/dev/null || true)"
   [[ -n "$id" ]] || {
     err "Container or current-project service not found: $target"
     return 66
@@ -77,7 +93,7 @@ _container_resolve_target() {
 
   name="$(_container_name_from_id "$id" || true)"
   [[ -n "$name" ]] || name="$target"
-  service="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.service" }}' "$id" 2>/dev/null || true)"
+  service="$(_container_docker inspect -f '{{ index .Config.Labels "com.docker.compose.service" }}' "$id" 2>/dev/null || true)"
 
   _CONTAINER_TARGET_KIND=container
   _CONTAINER_TARGET_SERVICE="$service"
@@ -92,7 +108,7 @@ _container_require_running() {
     return 64
   }
 
-  running="$(docker inspect -f '{{.State.Running}}' "$target" 2>/dev/null || true)"
+  running="$(_container_docker inspect -f '{{.State.Running}}' "$target" 2>/dev/null || true)"
   [[ "$running" == true ]] || {
     err "Container is not running: $target"
     return 69
@@ -146,10 +162,10 @@ _container_exec_argv() {
   _container_require_running "$target" || return $?
   _container_exec_flags command || return $?
 
-  local -a args=(docker exec "${_CONTAINER_EXEC_FLAGS[@]}")
+  local -a args=(exec "${_CONTAINER_EXEC_FLAGS[@]}")
   [[ -n "$workdir" ]] && args+=(--workdir "$workdir")
   args+=("$target" "$@")
-  "${args[@]}"
+  _container_docker "${args[@]}"
 }
 
 _container_first_existing_dir() {
@@ -160,7 +176,7 @@ _container_first_existing_dir() {
   local path
   for path in "$@"; do
     [[ -n "$path" ]] || continue
-    if docker exec "$target" test -d "$path" >/dev/null 2>&1; then
+    if _container_docker exec "$target" test -d "$path" >/dev/null 2>&1; then
       printf '%s' "$path"
       return 0
     fi
@@ -172,7 +188,7 @@ _container_first_existing_dir() {
 _container_shell_name() {
   local target="${1:-}"
   _container_require_running "$target" || return $?
-  if docker exec "$target" sh -lc 'command -v bash >/dev/null 2>&1' >/dev/null 2>&1; then
+  if _container_docker exec "$target" sh -lc 'command -v bash >/dev/null 2>&1' >/dev/null 2>&1; then
     printf '%s' bash
   else
     printf '%s' sh
@@ -200,7 +216,7 @@ _container_open_shell() {
   shell="$(_container_shell_name "$target")" || return $?
   _container_exec_flags shell || return $?
 
-  local -a args=(docker exec "${_CONTAINER_EXEC_FLAGS[@]}")
+  local -a args=(exec "${_CONTAINER_EXEC_FLAGS[@]}")
   [[ -n "$workdir" ]] && args+=(--workdir "$workdir")
   args+=("$target")
   if [[ "$shell" == bash ]]; then
@@ -208,5 +224,5 @@ _container_open_shell() {
   else
     args+=(sh)
   fi
-  "${args[@]}"
+  _container_docker "${args[@]}"
 }
