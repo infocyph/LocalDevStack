@@ -1397,13 +1397,11 @@ _shell_choose_target() {
       fi
     done
 
-    set +e
-    selector="$(_shell_menu_match_name "$answer")"
-    rc=$?
-    set -e
-    if ((rc == 0)); then
+    if selector="$(_shell_menu_match_name "$answer")"; then
       printf '%s' "$selector"
       return 0
+    else
+      rc=$?
     fi
     ((rc == 65)) && continue
 
