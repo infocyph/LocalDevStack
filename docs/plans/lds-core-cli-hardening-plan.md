@@ -442,8 +442,8 @@ Status: **in progress**
 - [x] update docs contracts;
 - [ ] run ShellCheck/static/contracts;
 - [ ] run Compose/network/permission contracts;
-- [ ] run Windows bridge contract;
-- [ ] final full CLI surface review;
+- [x] run Windows bridge contract;
+- [x] final full CLI surface review;
 - [ ] remove this plan when every item is complete.
 
 Exit criterion: all checks green and no completed planning artifact remains.
