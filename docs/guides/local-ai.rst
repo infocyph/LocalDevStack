@@ -288,6 +288,7 @@ When the active docker-tools image exposes the docstruct Graphify handoff,
    .. code-block:: text
 
       .md .markdown .rst .yaml .yml .json .toml .ini .cfg
+      requirements*.txt constraints*.txt requirements/*.txt
 
 4. docker-tools mechanically extracts those files with Pandoc plus the narrow
    RST/Sphinx/config parsers;
@@ -297,8 +298,11 @@ When the active docker-tools image exposes the docstruct Graphify handoff,
 8. docker-tools atomically replaces only the reserved ``docstruct_`` semantic layer;
 9. ``graphify label`` reclusters and relabels the final combined graph.
 
-This removes Markdown/RST/config parsing from the fragile raw LLM extraction path while
-preserving Graphify's existing support for other semantic formats such as papers/images.
+This removes Markdown/RST/config parsing and recognized Python pip requirement manifests
+from the fragile raw LLM extraction path while preserving Graphify's existing support for
+other semantic formats such as papers/images. Arbitrary ``.txt`` prose is not claimed by
+docstruct; only requirements/constraints naming patterns are treated as dependency
+manifests.
 
 The document merge never parses or replaces code nodes. It owns only its reserved
 document namespace and also replaces legacy semantic nodes sourced from the supported
