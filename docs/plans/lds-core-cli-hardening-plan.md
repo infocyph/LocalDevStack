@@ -2,11 +2,11 @@
 
 ## Status
 
-Planning branch: `graphify/integration-hardening`
+Planning branch: `lds-core-cli/hardening`
 
 Repository: `infocyph/LocalDevStack`
 
-Status: **active plan — current-state review complete; implementation not started**
+Status: **active plan — synchronized with `main`; implementation not started**
 
 This file is the single active LocalDevStack development plan after completion of the
 Docker ecosystem/integration program. The previous `docs/plans/docker-ecosystem/*`
