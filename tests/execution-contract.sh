@@ -78,6 +78,12 @@ run_case() {
           "{{.State.Running}}|cid-node") printf '%s\n' true ;;
           "{{.State.Running}}|cid-php84") printf '%s\n' true ;;
           "{{.State.Running}}|cid-stopped") printf '%s\n' false ;;
+          "{{.State.Running}}|demo-container") printf '%s\n' true ;;
+          "{{.State.Running}}|mixedCase-container") printf '%s\n' true ;;
+          "{{.State.Running}}|worker.local") printf '%s\n' true ;;
+          "{{.State.Running}}|stopped-container") printf '%s\n' false ;;
+          "{{.State.Running}}|SERVER_TOOLS") printf '%s\n' true ;;
+          "{{.State.Running}}|missing-shell"|"{{.State.Running}}|php:8.4-alpine") return 1 ;;
           "{{.State.Running}}|"*) printf '%s\n' true ;;
         esac
         return 0
@@ -131,6 +137,12 @@ run_case() {
           *" cid-php84 test -d /app "*)
             return 0
             ;;
+          *" SERVER_TOOLS sh -c [ -d \"\$1\" ] sh /app/billing "*)
+            return 0
+            ;;
+          *" SERVER_TOOLS sh -c [ -d \"\$1\" ] sh /app/missing-shell "*|*" SERVER_TOOLS sh -c [ -d \"\$1\" ] sh /app/php:8.4-alpine "*)
+            return 1
+            ;;
           *" cid-demo sh -lc command -v bash >/dev/null 2>&1 "*|*" cid-mixed sh -lc command -v bash >/dev/null 2>&1 "*|*" cid-node sh -lc command -v bash >/dev/null 2>&1 "*|*" cid-php84 sh -lc command -v bash >/dev/null 2>&1 "*)
             return 0
             ;;
@@ -151,6 +163,88 @@ force_interactive_tty() {
   _container_stdin_is_tty() { return 0; }
   _container_stdout_is_tty() { return 0; }
 }
+
+case_shell_resolve_domain() {
+  _shell_resolve_target app.local
+  printf 'shell-context:%s|%s|%s|%s|%s\n' "$_SHELL_TARGET_KIND" "$_SHELL_DOMAIN" "$_SHELL_APP" "$_SHELL_CONTAINER_ID" "$_SHELL_WORKDIR" >>"$EXECUTION_TEST_LOG"
+}
+run_case case_shell_resolve_domain
+assert_file_contains "$log" 'shell-context:domain|app.local|node|cid-node|/app'
+pass "shell batch 1: exact discovered domain resolves application container and cwd"
+
+case_shell_resolve_tools() {
+  _shell_resolve_target tools
+  printf 'shell-context:%s|%s|%s|%s\n' "$_SHELL_TARGET_KIND" "$_SHELL_SERVICE" "$_SHELL_CONTAINER_ID" "$_SHELL_WORKDIR" >>"$EXECUTION_TEST_LOG"
+}
+run_case case_shell_resolve_tools
+assert_file_contains "$log" 'shell-context:tools|server-tools|SERVER_TOOLS|'
+pass "shell batch 1: reserved tools target resolves server-tools"
+
+case_shell_resolve_service() {
+  _shell_resolve_target php84
+  printf 'shell-context:%s|%s|%s\n' "$_SHELL_TARGET_KIND" "$_SHELL_SERVICE" "$_SHELL_CONTAINER_ID" >>"$EXECUTION_TEST_LOG"
+}
+run_case case_shell_resolve_service
+assert_file_contains "$log" 'shell-context:service|php84|cid-php84'
+pass "shell batch 1: exact current-project service resolves before container fallback"
+
+case_shell_resolve_container() {
+  _shell_resolve_target demo-container
+  printf 'shell-context:%s|%s|%s\n' "$_SHELL_TARGET_KIND" "$_SHELL_CONTAINER_ID" "$_SHELL_CONTAINER_NAME" >>"$EXECUTION_TEST_LOG"
+}
+run_case case_shell_resolve_container
+assert_file_contains "$log" 'shell-context:container|cid-demo|demo-container'
+pass "shell batch 1: exact container resolves without case rewriting"
+
+case_shell_resolve_app() {
+  _shell_resolve_target billing
+  printf 'shell-context:%s|%s|%s\n' "$_SHELL_TARGET_KIND" "$_SHELL_CONTAINER_ID" "$_SHELL_WORKDIR" >>"$EXECUTION_TEST_LOG"
+}
+run_case case_shell_resolve_app
+assert_file_contains "$log" 'shell-context:app|SERVER_TOOLS|/app/billing'
+pass "shell batch 1: unresolved target falls back to direct server-tools /app child"
+
+case_shell_qualified_targets() {
+  _shell_resolve_target domain:php.local
+  printf 'qualified:%s|%s\n' "$_SHELL_TARGET_KIND" "$_SHELL_DOMAIN" >>"$EXECUTION_TEST_LOG"
+  _shell_resolve_target service:node
+  printf 'qualified:%s|%s\n' "$_SHELL_TARGET_KIND" "$_SHELL_SERVICE" >>"$EXECUTION_TEST_LOG"
+  _shell_resolve_target container:mixedCase-container
+  printf 'qualified:%s|%s\n' "$_SHELL_TARGET_KIND" "$_SHELL_CONTAINER_NAME" >>"$EXECUTION_TEST_LOG"
+  _shell_resolve_target app:billing
+  printf 'qualified:%s|%s\n' "$_SHELL_TARGET_KIND" "$_SHELL_WORKDIR" >>"$EXECUTION_TEST_LOG"
+}
+run_case case_shell_qualified_targets
+assert_file_contains "$log" 'qualified:domain|php.local'
+assert_file_contains "$log" 'qualified:service|node'
+assert_file_contains "$log" 'qualified:container|mixedCase-container'
+assert_file_contains "$log" 'qualified:app|/app/billing'
+pass "shell batch 1: qualified selectors bypass normal precedence"
+
+set +e
+run_case _shell_resolve_target app:../escape >/dev/null 2>&1
+rc=$?
+set -e
+[[ "$rc" -eq 64 ]] || fail "shell app traversal returned $rc instead of 64"
+pass "shell batch 1: /app fallback rejects path traversal"
+
+set +e
+run_case _shell_resolve_target missing-shell >/dev/null 2>&1
+rc=$?
+set -e
+[[ "$rc" -eq 66 ]] || fail "missing shell target returned $rc instead of 66"
+assert_file_contains "$log" 'err:Shell target not found: missing-shell'
+pass "shell batch 1: unresolved targets return one final actionable not-found error"
+
+set +e
+run_case _shell_resolve_target php:8.4-alpine >/dev/null 2>&1
+rc=$?
+set -e
+[[ "$rc" -eq 66 ]] || fail "image-like shell target returned $rc instead of 66"
+if grep -Fq '<run>' "$log"; then
+  fail "lds shell resolver attempted to instantiate an image"
+fi
+pass "shell batch 1: image-like targets are not implicitly instantiated"
 
 case_cli_command() {
   _container_stdin_is_tty() { return 1; }
