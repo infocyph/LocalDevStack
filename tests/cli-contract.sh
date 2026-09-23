@@ -132,12 +132,122 @@ grep -Fq 'args=extract . --backend openai --no-cluster --token-budget 3000 --max
   fail "Explicit Graphify --code-only must cluster exactly once"
 
 rm -f "$graphify_log"
+
+# The deterministic document handoff is tested independently from the legacy
+# fallback above so current published Tools images can remain compatible until
+# the new docstruct-capable image is released.
+(
+  set -euo pipefail
+  # shellcheck source=lib/ai.sh
+  source "$ROOT/lib/ai.sh"
+
+  hybrid_root="$(mktemp -d)"
+  hybrid_log="$hybrid_root/docker.log"
+  graphify_hybrid_log="$hybrid_root/graphify.log"
+  target="$hybrid_root/project"
+  mkdir -p "$target/graphify-out"
+  printf '%s\n' '{"nodes":[],"edges":[],"hyperedges":[]}' >"$target/graphify-out/graph.json"
+
+  warn() { printf 'warn:%s\n' "$*" >>"$hybrid_log"; }
+  die() { printf 'die:%s\n' "$*" >>"$hybrid_log"; return 1; }
+
+  docker_compose() {
+    printf '%s\n' "$*" >>"$hybrid_log"
+    case "$*" in
+      *"server-tools docstruct graphify-merge --help"*)
+        printf '%s\n' 'Usage: docstruct graphify-merge <graph.json> <fragment.json>'
+        return 0
+        ;;
+      *"server-tools docstruct /workspace "*)
+        local mount host=''
+        for mount in "$@"; do
+          case "$mount" in
+            *:/docstruct:rw) host="${mount%:/docstruct:rw}" ;;
+          esac
+        done
+        [[ -n "$host" ]] || return 91
+        printf '%s\n' '{"schema":"docker-tools.docstruct/v1","root":"/workspace","files":[],"nodes":[],"edges":[],"unresolved_references":[],"warnings":[],"stats":{"files":0,"nodes":0,"edges":0,"unresolved_references":0}}' >"$host/docstruct.json"
+        return 0
+        ;;
+      *"server-tools aiops document-review "*)
+        printf '%s\n' '{"schema":"docker-tools.docstruct-review/v1","base_schema":"docker-tools.docstruct/v1","base_sha256":"fixture","review_chunks":0,"patch":{"add_nodes":[],"add_edges":[],"corrections":[],"unresolved":[]}}'
+        return 0
+        ;;
+      *"server-tools docstruct graphify "*)
+        local mount host=''
+        for mount in "$@"; do
+          case "$mount" in
+            *:/docstruct:rw) host="${mount%:/docstruct:rw}" ;;
+          esac
+        done
+        [[ -n "$host" ]] || return 92
+        printf '%s\n' '{"nodes":[],"edges":[],"hyperedges":[],"input_tokens":0,"output_tokens":0}' >"$host/fragment.json"
+        return 0
+        ;;
+      *"server-tools docstruct graphify-merge "*)
+        return 0
+        ;;
+    esac
+    return 93
+  }
+
+  graphify_hybrid="$hybrid_root/graphify"
+  cat >"$graphify_hybrid" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >>"$GRAPHIFY_HYBRID_LOG"
+if [[ "${1:-}" == merge-chunks ]]; then
+  input="$2"
+  shift 2
+  out=''
+  while (($#)); do
+    case "$1" in
+      --out) out="$2"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  cp "$input" "$out"
+fi
+SH
+  chmod +x "$graphify_hybrid"
+
+  GRAPHIFY_HYBRID_LOG="$graphify_hybrid_log" \
+    _graphify_docstruct_available ||
+    fail "docstruct capability probe rejected a compatible Tools command"
+
+  GRAPHIFY_HYBRID_LOG="$graphify_hybrid_log" \
+    _graphify_docstruct_enrich "$graphify_hybrid" "$target" auto --exclude ignored.md --no-gitignore
+
+  grep -Fq 'server-tools docstruct /workspace --compact --output /docstruct/docstruct.json --exclude ignored.md --no-gitignore' "$hybrid_log" ||
+    fail "docstruct scan did not receive Graphify user exclusions"
+  grep -Fq 'DOCSTRUCT_REVIEW_ROOT=/workspace' "$hybrid_log" ||
+    fail "docstruct review was not confined to the mounted workspace"
+  grep -Fq "server-tools docstruct graphify /docstruct/docstruct.json --source-root $target" "$hybrid_log" ||
+    fail "Graphify fragment export did not preserve the host provenance root"
+  grep -Fq 'server-tools docstruct graphify-merge /graphify/graph.json /docstruct/fragment.json --output /graphify/graph.json' "$hybrid_log" ||
+    fail "docstruct Graphify replacement merge was not invoked"
+  grep -Fq 'merge-chunks ' "$graphify_hybrid_log" ||
+    fail "Graphify public fragment validation was not invoked"
+
+  [[ "$(_graphify_docstruct_mode)" == auto ]] ||
+    fail "Graphify docstruct default mode drifted"
+  [[ "$(_graphify_doc_review_mode)" == auto ]] ||
+    fail "Graphify document review default mode drifted"
+
+  rm -rf "$hybrid_root"
+)
+pass "Graphify deterministic document handoff"
+
 assert_file_contains "$ROOT/lib/ai.sh" "http://llm.localhost:11434/v1"
 assert_file_contains "$ROOT/lib/ai.sh" 'fastflow) printf '\''%s'\'' openai'
 assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_TOKEN_BUDGET:-3000'
 assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_MAX_CONCURRENCY:-1'
 assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_MIN_VERSION:-0.9.65'
 assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_OUTPUT_TOKENS:-8192'
+assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_DOCSTRUCT:-auto'
+assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_DOC_REVIEW:-auto'
+assert_file_contains "$ROOT/lib/ai.sh" "phase 3/3: merging deterministic document structure and relabeling"
+assert_file_contains "$ROOT/lib/ai.sh" "server-tools docstruct graphify-merge"
 pass "Graphify provider-aware host workflow wrapper"
 
 assert_file_contains "$ROOT/lds" 'exec "$DIR/bin/tool-runner" "$cmd" "$@"'
