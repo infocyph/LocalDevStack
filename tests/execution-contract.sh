@@ -284,35 +284,58 @@ assert_file_contains "$log" 'err:No TTY to prompt. Use: lds core <domain>'
 pass "batch 3: lds core lists domains and fails actionably without a TTY"
 
 case_stack_exec_command() {
-  resolve_service() { printf '%s' php84; }
-  cmd_exec PHP84 php -r 'echo "ok";'
+  _container_stdin_is_tty() { return 1; }
+  _container_stdout_is_tty() { return 1; }
+  _container_stdin_has_data() { return 1; }
+  cmd_exec PHP84 -- php -r 'echo "ok";'
 }
 run_case case_stack_exec_command
-assert_file_contains "$log" 'compose: <exec> <php84> <php> <-r> <echo "ok";>'
-pass "baseline: lds stack exec/cmd_exec preserves explicit command argv through Compose"
+assert_file_contains "$log" 'docker: <exec> <cid-php84> <php> <-r> <echo "ok";>'
+if grep -Fq 'compose: <exec>' "$log"; then
+  fail "lds stack exec still bypasses the shared container executor"
+fi
+pass "batch 4: lds stack exec remains service-only and preserves command argv"
 
 case_stack_exec_shell() {
-  resolve_service() { printf '%s' php84; }
   cmd_exec PHP84
 }
 run_case case_stack_exec_shell
-assert_file_contains "$log" 'compose: <exec> <php84> <sh> <-lc> <command -v bash >/dev/null 2>&1 && exec bash || exec sh>'
-pass "baseline: lds stack exec/cmd_exec opens Bash-or-sh when no command is provided"
+assert_file_contains "$log" 'docker: <exec> <-it> <cid-php84> <bash> <--login>'
+pass "batch 4: lds stack exec uses the shared interactive shell helper"
 
 case_tools_exec() {
-  cmd_tools exec printf '%s %s' 'hello world' tail
+  _container_stdin_is_tty() { return 1; }
+  _container_stdout_is_tty() { return 1; }
+  _container_stdin_has_data() { return 1; }
+  cmd_tools exec -- printf '%s %s' 'hello world' '$(danger)'
 }
 run_case case_tools_exec
-assert_file_contains "$log" 'docker: <exec> <-it> <SERVER_TOOLS> <sh> <-lc> <printf %s %s hello world tail>'
-pass "baseline: lds tools exec forces TTY and flattens command argv"
+assert_file_contains "$log" 'docker: <exec> <SERVER_TOOLS> <printf> <%s %s> <hello world> <$(danger)>'
+if grep -Fq '<sh> <-lc> <printf %s %s hello world' "$log"; then
+  fail "lds tools exec still flattens argv through a shell"
+fi
+pass "batch 4: lds tools exec preserves exact argv through the shared executor"
 
 case_tools_shell() {
-  docker_shell() { printf 'docker-shell:%s\n' "$1" >>"$EXECUTION_TEST_LOG"; }
   cmd_tools sh
 }
 run_case case_tools_shell
-assert_file_contains "$log" 'docker-shell:SERVER_TOOLS'
-pass "baseline: lds tools sh delegates to the common docker_shell helper"
+assert_file_contains "$log" 'docker: <exec> <-it> <SERVER_TOOLS> <bash> <--login>'
+pass "batch 4: lds tools sh uses the shared interactive shell helper"
+
+case_tools_file() {
+  _container_stdin_is_tty() { return 1; }
+  _container_stdout_is_tty() { return 1; }
+  _container_stdin_has_data() { return 1; }
+  cmd_tools file '/app/path with spaces.txt'
+}
+run_case case_tools_file
+assert_file_contains "$log" '<sh> <-lc>'
+assert_file_contains "$log" '<sh> </app/path with spaces.txt>'
+pass "batch 4: lds tools file passes paths as shell positional argv rather than interpolating them"
+
+assert_file_contains "$ROOT/lib/services.sh" 'docker exec -it "$ctr" lazydocker'
+pass "batch 4: support ui remains a specialized interactive TUI path"
 
 assert_file_contains "$ROOT/lds" 'exec) cmd_exec "$@" ;;'
 assert_file_contains "$ROOT/lds" 'cmd_stack "$@"'
