@@ -20,9 +20,8 @@ runner="$ROOT/docs/guides/ad-hoc-runner.rst"
 notify="$ROOT/docs/guides/notifications.rst"
 secrets="$ROOT/docs/guides/secrets-sops-age.rst"
 cli="$ROOT/docs/reference/cli.rst"
-plan="$ROOT/docs/plans/lds-core-cli-hardening-plan.md"
 
-for file in "$index" "$readme" "$quick" "$arch" "$profiles" "$storage" "$domain" "$tls" "$ai" "$databases" "$ops" "$runner" "$notify" "$secrets" "$cli" "$plan"; do
+for file in "$index" "$readme" "$quick" "$arch" "$profiles" "$storage" "$domain" "$tls" "$ai" "$databases" "$ops" "$runner" "$notify" "$secrets" "$cli"; do
   assert_file "$file"
 done
 
@@ -166,13 +165,7 @@ done
 assert_file_contains "$ai" 'Both provider definitions live in ``docker/compose/companion.yaml``'
 pass "docs reflect fixed infrastructure images and ephemeral AI overrides"
 
-assert_file_contains "$plan" 'lds cli'
-assert_file_contains "$plan" 'lds core'
-assert_file_contains "$plan" 'shared container execution substrate'
-assert_file_contains "$plan" 'preserve argv'
-assert_file_contains "$plan" 'adaptive `docker exec` flags'
-assert_file_contains "$plan" 'Windows/Git Bash'
-assert_file_contains "$plan" 'remove this plan when every item is complete'
-[[ ! -d "$ROOT/docs/plans/docker-ecosystem" ]] ||
-  fail "completed docker-ecosystem planning directory still exists"
-pass "active Core/CLI hardening plan is canonical and completed ecosystem plans are retired"
+if [[ -d "$ROOT/docs/plans" ]] && find "$ROOT/docs/plans" -type f -print -quit | grep -q .; then
+  fail "completed planning artifact remains under docs/plans"
+fi
+pass "completed LocalDevStack planning artifacts are retired"
