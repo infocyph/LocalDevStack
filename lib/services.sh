@@ -468,7 +468,10 @@ cmd_profiles() {
 cmd_secrets() {
   local ctr
   ctr="$(_project_tools_container_running || true)"
-  [[ -n "$ctr" ]] || die "server-tools container is not running for project: $(lds_project)"
+  [[ -n "$ctr" ]] || {
+    err "server-tools container is not running for project: $(lds_project)"
+    return 69
+  }
   docker exec -it "$ctr" senv "$@"
 }
 
@@ -519,12 +522,18 @@ cmd_ui() {
 cmd_exec() {
   local requested="${1:-}"
   shift || true
-  [[ -n "$requested" ]] || die "exec <service> [--] [command...]"
+  [[ -n "$requested" ]] || {
+    err "Usage: lds stack exec <service> [--] [command...]"
+    return 64
+  }
   [[ "${1:-}" == -- ]] && shift
 
   local service
   service="$(resolve_service "$requested" || true)"
-  [[ -n "$service" ]] && compose_service_exists "$service" || die "Unknown service: $requested"
+  if [[ -z "$service" ]] || ! compose_service_exists "$service"; then
+    err "Current-project service not found: $requested"
+    return 66
+  fi
 
   _container_resolve_target "$service" || return $?
   local container="$_CONTAINER_TARGET_ID"
@@ -831,12 +840,18 @@ cmd_tools() {
     ;;
   exec)
     [[ "${1:-}" == -- ]] && shift
-    (($# > 0)) || die "tools exec [--] <command> [args...]"
+    (($# > 0)) || {
+      err "Usage: lds tools exec [--] <command> [args...]"
+      return 64
+    }
     _container_exec_argv "$ctr" -- "$@"
     ;;
   file)
     local path="${1:-}"
-    [[ -n "$path" ]] || die "tools file <path>"
+    [[ -n "$path" ]] || {
+      err "Usage: lds tools file <path>"
+      return 64
+    }
     _container_exec_argv "$ctr" -- sh -lc '
       ls -la -- "$1" 2>/dev/null || true
       printf "\n"
@@ -854,7 +869,10 @@ cmd_cli() {
   local target="${1:-}"
   shift || true
 
-  [[ -n "$target" ]] || die "cli <service|container> [--] [command...]"
+  [[ -n "$target" ]] || {
+    err "Usage: lds cli <service|container> [--] [command...]"
+    return 64
+  }
   [[ "${1:-}" == -- ]] && shift
 
   _container_resolve_target "$target" || return $?
