@@ -54,8 +54,8 @@ assert_file_contains "$ROOT/lds" '_is_public_lds_command()'
 if grep -Fq 'declare -F "cmd_$cmd"' "$ROOT/lds"; then
   fail "top-level dispatch still exposes arbitrary cmd_* functions dynamically"
 fi
-assert_file_contains "$ROOT/lds" 'stack | domain | support | bundle |'
-assert_file_contains "$ROOT/lds" 'tools | cli | core | secrets | rebuild | run)'
+assert_file_contains "$ROOT/lds" 'stack|domain|support|bundle|up|start'
+assert_file_contains "$ROOT/lds" 'tools|cli|core|secrets|rebuild|run)'
 pass "top-level LDS command routing is explicit and collision-safe"
 
 graphify_log="$(mktemp)"
