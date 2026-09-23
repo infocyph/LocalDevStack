@@ -161,6 +161,8 @@ assert_file_contains "$log" 'exec: <exec> <--workdir> </app path> <cid-custom> <
 pass "shared executor preserves argv and working directory without host interpolation"
 
 : >"$log"
+_container_stdin_is_tty() { return 0; }
+_container_stdout_is_tty() { return 0; }
 _container_exec_interactive_argv cid-custom --workdir '/app path' -- lazydocker --debug
 assert_file_contains "$log" 'exec: <exec> <-it> <--workdir> </app path> <cid-custom> <lazydocker> <--debug>'
 pass "shared interactive argv helper requires and preserves TTY execution"
