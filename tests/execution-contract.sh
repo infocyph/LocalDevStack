@@ -55,11 +55,13 @@ run_case() {
         case "${3:-}|${4:-}" in
           "{{.Id}}|demo-container") printf '%s\n' cid-demo ;;
           "{{.Id}}|mixedCase-container") printf '%s\n' cid-mixed ;;
+          "{{.Id}}|worker.local") printf '%s\n' cid-domainlike ;;
           "{{.Id}}|NODE") printf '%s\n' cid-node ;;
           "{{.Id}}|stopped-container") printf '%s\n' cid-stopped ;;
           "{{.Id}}|"*) return 1 ;;
           "{{.Name}}|cid-demo") printf '%s\n' /demo-container ;;
           "{{.Name}}|cid-mixed") printf '%s\n' /mixedCase-container ;;
+          "{{.Name}}|cid-domainlike") printf '%s\n' /worker.local ;;
           "{{.Name}}|cid-node") printf '%s\n' /NODE ;;
           "{{.Name}}|cid-php84") printf '%s\n' /PHP84 ;;
           "{{.Name}}|cid-one") printf '%s\n' /ONE ;;
@@ -67,10 +69,12 @@ run_case() {
           "{{.Name}}|cid-stopped") printf '%s\n' /stopped-container ;;
           "{{ index .Config.Labels \"com.docker.compose.service\" }}|cid-demo") printf '\n' ;;
           "{{ index .Config.Labels \"com.docker.compose.service\" }}|cid-mixed") printf '\n' ;;
+          "{{ index .Config.Labels \"com.docker.compose.service\" }}|cid-domainlike") printf '\n' ;;
           "{{ index .Config.Labels \"com.docker.compose.service\" }}|cid-node") printf '%s\n' node ;;
           "{{ index .Config.Labels \"com.docker.compose.service\" }}|cid-stopped") printf '\n' ;;
           "{{.State.Running}}|cid-demo") printf '%s\n' true ;;
           "{{.State.Running}}|cid-mixed") printf '%s\n' true ;;
+          "{{.State.Running}}|cid-domainlike") printf '%s\n' true ;;
           "{{.State.Running}}|cid-node") printf '%s\n' true ;;
           "{{.State.Running}}|cid-php84") printf '%s\n' true ;;
           "{{.State.Running}}|cid-stopped") printf '%s\n' false ;;
@@ -272,6 +276,20 @@ if grep -Fq 'MIXEDCASE-CONTAINER' "$log"; then
   fail "lds core still uppercases explicit container targets"
 fi
 pass "batch 3: lds core preserves explicit mixed-case container targets"
+
+case_core_domainlike_container() {
+  _container_stdin_is_tty() { return 1; }
+  _container_stdout_is_tty() { return 1; }
+  _container_stdin_has_data() { return 1; }
+  cmd_core worker.local -- echo ok
+}
+run_case case_core_domainlike_container
+assert_file_contains "$log" 'docker: <inspect> <-f> <{{.Id}}> <worker.local>'
+assert_file_contains "$log" 'docker: <exec> <cid-domainlike> <echo> <ok>'
+if grep -Fq 'domain-which --app --quiet worker.local' "$log"; then
+  fail "lds core guessed a hostname-shaped container was a domain"
+fi
+pass "batch 3: lds core distinguishes discovered domains from hostname-shaped containers"
 
 case_core_single_domain() {
   _core_domain_list() { printf '%s\n' app.local; }
