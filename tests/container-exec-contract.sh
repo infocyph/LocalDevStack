@@ -154,6 +154,12 @@ _container_open_shell cid-php84 --workdir /app
 assert_file_contains "$log" 'exec: <exec> <-it> <--workdir> </app> <cid-php84> <bash> <--login>'
 pass "shared shell helper prefers Bash and supports Docker workdir"
 
+
+: >"$log"
+_container_open_shell cid-nginx
+assert_file_contains "$log" 'exec: <exec> <-it> <cid-nginx> <sh>'
+pass "shared shell helper falls back to sh"
+
 : >"$log"
 docker() {
   if [[ "${1:-}" == inspect && "${2:-}" == -f && "${3:-}" == '{{.State.Running}}' ]]; then
@@ -172,10 +178,5 @@ resolved_dir="$(_container_first_existing_dir cid-php84 /missing /app /)"
 [[ "$resolved_dir" == /app ]] || fail "workdir fallback resolved '$resolved_dir' instead of /app"
 pass "shared workdir resolver selects the first existing container directory"
 
-
-: >"$log"
-_container_open_shell cid-nginx
-assert_file_contains "$log" 'exec: <exec> <-it> <cid-nginx> <sh>'
-pass "shared shell helper falls back to sh"
 
 printf 'Container execution substrate contract complete.\n'
