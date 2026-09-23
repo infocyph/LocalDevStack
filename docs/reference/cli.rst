@@ -213,11 +213,12 @@ enrich docs/papers/images and reclusters and force-relabels the combined graph a
 single incremental extract followed by one ``cluster-only`` pass. Explicit ``--code-only``
 remains a single structural build.
 
-Backend selection follows the active provider: FastFlow/NPU uses LocalDevStack's
-OpenAI-compatible adapter and Ollama runtimes use the Ollama adapter. The selected model
-comes from the active provider and ``GRAPHIFY_API_TIMEOUT`` defaults from ``LDS_AI_TIMEOUT``.
-Before extraction, LocalDevStack checks ``/v1/models`` for the built-in local route and
-fails immediately when the selected model is unavailable.
+For the built-in local route, LocalDevStack creates a temporary Graphify provider
+configuration that points directly to ``http://llm.localhost:11434/v1``. No Graphify
+proxy process or Python compatibility script is used. The selected model comes from the
+active provider and ``GRAPHIFY_API_TIMEOUT`` defaults from ``LDS_AI_TIMEOUT``.
+Before extraction, LocalDevStack checks ``/v1/models`` and fails immediately when the
+selected model is unavailable.
 
 LLM Provider
 ------------
