@@ -153,8 +153,7 @@ assert env["LLM_OLLAMA_MODEL"] == "qwen3.5:9b"
 assert env["OLLAMA_NO_CLOUD"] == "1"
 tools=services["server-tools"]["environment"]
 assert tools["LDS_AI_ENABLED"] == "auto"
-assert tools["LDS_AI_PROVIDER"] == "llm"
-assert tools["LDS_AI_URL"] == "http://llm:11434"
+assert tools["LDS_AI_RUNTIME"] == "cpu"
 assert tools["LDS_AI_MODEL"] == "qwen3.5:9b"
 nginx=services["nginx"]
 assert nginx["environment"]["LLM_PROXY_TIMEOUT_SECONDS"] == "1800"
@@ -163,7 +162,7 @@ assert len(native) == 1
 assert native[0]["host_ip"] == "127.0.0.1"
 assert int(native[0]["published"]) == 11434
 ' <<<"$ai_json"
-pass "bare Compose AI profile keeps Ollama compatibility fallback behind common llm identity"
+pass "bare Compose AI profile passes cpu runtime selection into Tools"
 
 printf '%s\n' 'LDS_AI_MODEL=qwen2.5:1.5b' 'LLM_OLLAMA_PDF_MAX_PAGES=12' 'LLM_OLLAMA_SYSTEM=Answer briefly.' 'LDS_AI_TIMEOUT=2400' 'LDS_AI_IGPU_ENABLE=1' >>"$user_env"
 ai_override_json="$("${compose[@]}" --profile ai config --format json)"
@@ -176,13 +175,12 @@ assert llm["LLM_OLLAMA_PDF_MAX_PAGES"] == "12"
 assert llm["LLM_OLLAMA_SYSTEM"] == "Answer briefly."
 assert llm["OLLAMA_IGPU_ENABLE"] == "1"
 tools=d["services"]["server-tools"]["environment"]
-assert tools["LDS_AI_PROVIDER"] == "llm"
-assert tools["LDS_AI_URL"] == "http://llm:11434"
+assert tools["LDS_AI_RUNTIME"] == "cpu"
 assert tools["LDS_AI_TIMEOUT"] == "2400"
 nginx=d["services"]["nginx"]["environment"]
 assert nginx["LLM_PROXY_TIMEOUT_SECONDS"] == "2400"
 ' <<<"$ai_override_json"
-pass "LocalDevStack forwards common Tools routing and Ollama-specific generation options"
+pass "LocalDevStack forwards Tools runtime selection and Ollama-specific generation options"
 
 grep -v '^LDS_AI_MODEL=' "$user_env" >"$user_env.tmp"
 mv "$user_env.tmp" "$user_env"
@@ -210,8 +208,7 @@ assert s["ulimits"]["memlock"]["hard"] == -1
 assert {v["target"] for v in s["volumes"]} == {"/models"}
 assert d["volumes"]["lds_llm_fastflow"]["name"] == "LLMFastFlowModels"
 tools=services["server-tools"]["environment"]
-assert tools["LDS_AI_PROVIDER"] == "llm"
-assert tools["LDS_AI_URL"] == "http://llm:11434"
+assert tools["LDS_AI_RUNTIME"] == "cpu"
 assert tools["LDS_AI_MODEL"] == "qwen3.5:9b"
 ' <<<"$npu_json"
 pass "NPU runtime selects only FastFlow with its provider default model"
