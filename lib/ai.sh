@@ -294,11 +294,13 @@ _graphify_docstruct_enrich() {
   fi
 
   printf '%s\n' "[lds graphify] documents: replacing the supported non-code semantic layer" >&2
-  if ! docker_compose run --rm --no-deps -T \
+  if docker_compose run --rm --no-deps -T \
     -v "$target_abs/graphify-out:/graphify:rw" \
     -v "$workdir:/docstruct:ro" \
     server-tools docstruct graphify-merge \
       /graphify/graph.json /docstruct/fragment.json --output /graphify/graph.json; then
+    :
+  else
     rc=$?
     rm -rf "$workdir"
     return "$rc"
