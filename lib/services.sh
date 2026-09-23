@@ -510,10 +510,9 @@ cmd_host() {
 }
 
 cmd_ui() {
-  local ctr
-  ctr="$(_project_tools_container_running || true)"
-  [[ -n "$ctr" ]] || die "server-tools container is not running for project: $(lds_project)"
-  _container_exec_interactive_argv "$ctr" -- lazydocker
+  _shell_context_reset
+  _shell_resolve_tools || return $?
+  _shell_context_exec_interactive lazydocker
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -535,13 +534,13 @@ cmd_exec() {
     return 66
   fi
 
-  _container_resolve_target "$service" || return $?
-  local container="$_CONTAINER_TARGET_ID"
+  _shell_context_reset
+  _shell_resolve_service "$service" || return $?
 
   if (($# > 0)); then
-    _container_exec_argv "$container" -- "$@"
+    _shell_context_exec_argv "$@"
   else
-    _container_open_shell "$container"
+    _shell_context_open
   fi
 }
 
@@ -830,16 +829,13 @@ cmd_rebuild() {
 cmd_tools() {
   local sub="${1:-sh}"
   shift || true
-  local ctr
-  ctr="$(_project_tools_container_running || true)"
-  [[ -n "$ctr" ]] || {
-    err "server-tools container is not running for project: $(lds_project)"
-    return 69
-  }
+
+  _shell_context_reset
+  _shell_resolve_tools || return $?
 
   case "${sub,,}" in
   sh | shell | "")
-    _container_open_shell "$ctr"
+    _shell_context_open
     ;;
   exec)
     [[ "${1:-}" == -- ]] && shift
@@ -847,14 +843,14 @@ cmd_tools() {
       err "Usage: lds tools exec [--] <command> [args...]"
       return 64
     }
-    _container_exec_argv "$ctr" -- "$@"
+    _shell_context_exec_argv "$@"
     ;;
   shell-exec)
     (($# == 1)) || {
       err "Usage: lds tools shell-exec <shell-expression>"
       return 64
     }
-    _container_exec_argv "$ctr" -- sh -lc "$1"
+    _shell_context_exec_expression "$1"
     ;;
   file)
     local path="${1:-}"
@@ -862,7 +858,7 @@ cmd_tools() {
       err "Usage: lds tools file <path>"
       return 64
     }
-    _container_exec_argv "$ctr" -- sh -lc '
+    _shell_context_exec_argv sh -lc '
       ls -la -- "$1" 2>/dev/null || true
       printf "\n"
       sed -n "1,200p" -- "$1" 2>/dev/null || true
@@ -885,13 +881,12 @@ cmd_cli() {
   }
   [[ "${1:-}" == -- ]] && shift
 
-  _container_resolve_target "$target" || return $?
-  local container="$_CONTAINER_TARGET_ID"
+  _shell_resolve_service_or_container "$target" || return $?
 
   if (($# > 0)); then
-    _container_exec_argv "$container" -- "$@"
+    _shell_context_exec_argv "$@"
   else
-    _container_open_shell "$container"
+    _shell_context_open
   fi
 }
 
