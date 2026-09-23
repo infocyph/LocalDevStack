@@ -145,13 +145,17 @@ pass "documentation toctree targets exist"
 
 
 help_md="$("$ROOT/lds" help --markdown)"
-for required in   'lds profiles add <profile...>'   'lds support trace <domain>'   'lds support bundle [--redact|--full] [output.zip]'   'lds cli <service|container> [--] [command...]'   'lds core [domain|service|container] [--] [command...]'   'lds stack exec <service> [--] [command...]'   'lds tools exec [--] <command> [args...]'   'lds tools shell-exec <shell-expression>'   'lds run shell|ps|logs|stop|rm|open'   'MongoDB:'   'Elasticsearch:'; do
+for required in   'lds profiles add <profile...>'   'lds support trace <domain>'   'lds support bundle [--redact|--full] [output.zip]'   'lds shell <target> [--] <command> [args...]'   'lds shell <target> --shell <shell-expression>'   'lds cli <service|container> [--] [command...]'   'lds core [domain|service|container] [--] [command...]'   'lds stack exec <service> [--] [command...]'   'lds tools exec [--] <command> [args...]'   'lds tools shell-exec <shell-expression>'   'lds run shell|ps|logs|stop|rm|open'   'MongoDB:'   'Elasticsearch:'; do
   assert_contains "$help_md" "$required"
 done
 pass "embedded CLI help covers documented command groups"
 
 assert_file_contains "$cli" 'Execution and Shells'
-assert_file_contains "$cli" 'lds core <domain|service|container> [--] <command> [args...]'
+assert_file_contains "$cli" 'lds shell <target> [--] <command> [args...]'
+assert_file_contains "$cli" 'Applications'
+assert_file_contains "$cli" 'domain:project.localhost'
+assert_file_contains "$cli" 'Image'
+assert_file_contains "$cli" 'lds core [domain|service|container] [--] [command...]'
 assert_file_contains "$cli" 'lds cli <service|container> [--] <command> [args...]'
 assert_file_contains "$cli" 'lds stack exec <service> [--] <command> [args...]'
 assert_file_contains "$cli" 'lds tools exec [--] <command> [args...]'
@@ -159,9 +163,10 @@ assert_file_contains "$cli" 'lds tools shell-exec <shell-expression>'
 assert_file_contains "$cli" 'preserve argv exactly'
 assert_file_contains "$cli" 'require a real TTY'
 assert_file_contains "$readme" '## Execution and shells'
-assert_file_contains "$readme" 'lds cli php84 -- php -v'
-assert_file_contains "$readme" 'lds stack exec redis -- redis-cli ping'
-assert_file_contains "$readme" "lds tools shell-exec"
+assert_file_contains "$readme" 'lds shell'
+assert_file_contains "$readme" 'lds shell project.localhost -- php artisan about'
+assert_file_contains "$readme" 'lds shell php84 -- php -v'
+assert_file_contains "$readme" 'lds shell tools --interactive lazydocker'
 pass "execution-surface docs match the shared Core/CLI contract"
 
 
