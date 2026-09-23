@@ -160,9 +160,17 @@ Execution and Shells
 
 ``lds shell`` is the canonical execution/navigation surface.
 
-With no arguments it builds a stable grouped catalog of discovered domains,
-direct ``server-tools:/app`` child directories, current-project Compose
-services, running Docker containers, and the ``tools`` utility target::
+With no arguments it builds a stable grouped catalog::
+
+   Applications / Domains
+   Application Directories
+   Services
+   Containers
+   Utilities
+
+The groups contain discovered domains, direct ``server-tools:/app`` child
+directories, current-project Compose services, running Docker containers, and
+the ``tools`` utility target::
 
    lds shell
 
