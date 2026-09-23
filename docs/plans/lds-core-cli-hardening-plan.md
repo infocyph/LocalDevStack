@@ -6,7 +6,7 @@ Planning branch: `lds-core-cli/hardening`
 
 Repository: `infocyph/LocalDevStack`
 
-Status: **active plan — synchronized with `main`; implementation not started**
+Status: **active plan — Batches 0–6 implemented; Batch 7 release validation in progress**
 
 This file is the single active LocalDevStack development plan after completion of the
 Docker ecosystem/integration program. The previous `docs/plans/docker-ecosystem/*`
