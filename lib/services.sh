@@ -1303,7 +1303,7 @@ _shell_menu_build() {
   done < <(_shell_container_list 2>/dev/null || true)
 
   if [[ -n "$(_project_tools_container_running || true)" ]]; then
-    _shell_menu_add utility tools tools
+    _shell_menu_add utility tools utility:tools
   fi
 }
 
@@ -1333,7 +1333,7 @@ _shell_menu_print() {
 }
 
 _shell_selector_is_tty() {
-  [[ -t 0 && -t 1 ]]
+  [[ -t 0 ]]
 }
 
 _shell_menu_match_name() {
