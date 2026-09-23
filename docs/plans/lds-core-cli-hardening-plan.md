@@ -361,14 +361,16 @@ Exit criterion: no user-facing command needs its own Docker shell mechanics.
 
 ## Batch 2 — harden `lds cli`
 
-- [ ] move `cmd_cli` onto the shared execution substrate;
-- [ ] support current-project Compose service names;
-- [ ] preserve explicit container names/IDs;
-- [ ] remove forced uppercase/case assumptions;
-- [ ] preserve argv exactly for explicit commands;
-- [ ] support piped/non-TTY commands without `-t`;
-- [ ] keep no-command interactive shell behavior;
-- [ ] add missing/stopped/ambiguous target tests.
+Status: **implemented — CI validation pending**
+
+- [x] move `cmd_cli` onto the shared execution substrate;
+- [x] support current-project Compose service names;
+- [x] preserve explicit container names/IDs;
+- [x] remove forced uppercase/case assumptions;
+- [x] preserve argv exactly for explicit commands;
+- [x] support piped/non-TTY commands without `-t`;
+- [x] keep no-command interactive shell behavior;
+- [x] add missing/stopped/ambiguous target tests.
 
 Exit criterion: `cli` is the reliable low-level execution command.
 
