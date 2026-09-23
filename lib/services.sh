@@ -832,7 +832,10 @@ cmd_tools() {
   shift || true
   local ctr
   ctr="$(_project_tools_container_running || true)"
-  [[ -n "$ctr" ]] || die "server-tools container is not running for project: $(lds_project)"
+  [[ -n "$ctr" ]] || {
+    err "server-tools container is not running for project: $(lds_project)"
+    return 69
+  }
 
   case "${sub,,}" in
   sh | shell | "")
