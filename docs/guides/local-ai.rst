@@ -174,15 +174,18 @@ LocalDevStack refuses those commands when the other provider is active.
 Tools Consumer
 --------------
 
-``server-tools`` uses only the common provider-neutral contract:
+``server-tools`` receives ``LDS_AI_RUNTIME`` as the routing source of truth.
+It resolves the active provider directly on the Docker network:
 
 .. code-block:: text
 
-   LDS_AI_PROVIDER=llm
-   LDS_AI_URL=http://llm:11434
-   LDS_AI_MODEL=<effective provider model>
+   npu             -> http://llm-fastflow:11434/v1
+   cpu|nvidia|amd  -> http://llm-ollama:11434/v1
 
-Therefore ``lds ai`` commands do not need to know which provider owns ``llm``:
+``LDS_AI_MODEL`` remains the optional model override. Tools does not route through the
+user-facing ``llm.localhost`` hostname.
+
+Therefore ``lds ai`` commands remain provider-neutral at the command surface:
 
 .. code-block:: bash
 
@@ -324,9 +327,20 @@ does not invoke docstruct.
 Provider/runtime details
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-FastFlow uses Graphify's generic OpenAI-compatible provider and defaults to thinking off.
+FastFlow uses Graphify's generic OpenAI-compatible provider and defaults to thinking off:
+
+.. code-block:: text
+
+   backend=lds-fastflow
+   extra_body={"think": false}
+
 Ollama uses the custom local provider with explicit context headroom and reasoning
-disabled. ``GRAPHIFY_MAX_OUTPUT_TOKENS`` wins when set; otherwise
+disabled:
+
+.. code-block:: text
+
+   backend=lds-ollama
+   reasoning_effort=none ``GRAPHIFY_MAX_OUTPUT_TOKENS`` wins when set; otherwise
 ``LDS_GRAPHIFY_OUTPUT_TOKENS`` defaults to 8192.
 
 Local semantic requests that remain on Graphify default to
