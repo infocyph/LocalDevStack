@@ -64,14 +64,12 @@ assert_file_contains "$ROOT/docker/compose/companion.yaml" 'LLM_FASTFLOW_MODEL=$
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'LLM_THINK=${LDS_AI_THINK:-}'
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'LDS_AI_THINK=${LDS_AI_THINK:-}'
 assert_file_contains "$ROOT/docker/compose/companion.yaml" 'FLM_SERVE_PORT=11434'
-assert_file_contains "$ROOT/docker/compose/companion.yaml" 'LDS_AI_PROVIDER=${LDS_AI_PROVIDER:-llm}'
-assert_file_contains "$ROOT/docker/compose/companion.yaml" 'LDS_AI_URL=${LDS_AI_URL:-http://llm:11434}'
+assert_file_contains "$ROOT/docker/compose/companion.yaml" 'LDS_AI_RUNTIME=${LDS_AI_RUNTIME:-cpu}'
 assert_file_contains "$ROOT/docker/compose/http.yaml" 'LLM_PROXY_TIMEOUT_SECONDS=${LDS_AI_TIMEOUT:-1800}'
 assert_file_contains "$ROOT/docker/compose/http.yaml" '"127.0.0.1:11434:11434"'
 pass "companion defines mutually exclusive provider services behind common llm alias"
 
-assert_file_contains "$ROOT/lib/compose.sh" 'LDS_AI_PROVIDER=llm'
-assert_file_contains "$ROOT/lib/compose.sh" 'LDS_AI_URL=http://llm:11434'
+assert_file_contains "$ROOT/lib/compose.sh" 'LDS_AI_RUNTIME="$ai_runtime"'
 assert_file_contains "$ROOT/lib/compose.sh" 'ollama_profile=__lds-ai-disabled-ollama'
 assert_file_contains "$ROOT/lib/compose.sh" 'fastflow_profile=ai'
 assert_file_contains "$ROOT/lib/compose.sh" 'ollama_profile=ai'
