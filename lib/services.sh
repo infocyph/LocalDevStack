@@ -1193,7 +1193,7 @@ _shell_resolve_target() {
     _shell_resolve_app "$target"
     return $?
     ;;
-  tools | utility:tools)
+  utility:tools)
     _shell_resolve_tools
     return $?
     ;;
@@ -1201,6 +1201,11 @@ _shell_resolve_target() {
 
   if _core_is_domain "$requested"; then
     _shell_resolve_domain "$requested"
+    return $?
+  fi
+
+  if [[ "$requested" == tools ]]; then
+    _shell_resolve_tools
     return $?
   fi
 
