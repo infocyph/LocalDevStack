@@ -317,11 +317,16 @@ cmd_graphify() {
   local runtime provider backend base_url timeout model api_key graphify_bin arg provider_dir target_abs graphify_target
   local graphify_think="off"
   local structured_output_tokens="" graphify_sdk_retries="" graphify_retry_depth=""
-  local local_provider=0 force_rebuild=0 explicit_code_only=0 bootstrap_code_first=0
-  local next_is_model=0 next_is_timeout=0 next_is_token_budget=0 next_is_max_concurrency=0
+  local local_provider=0 force_rebuild=0 explicit_code_only=0 bootstrap_code_first=0 docstruct_enabled=0
+  local next_is_model=0 next_is_timeout=0 next_is_token_budget=0 next_is_max_concurrency=0 next_is_exclude=0
   local has_token_budget=0 has_max_concurrency=0
-  local token_budget_value="" max_concurrency_value=""
-  local -a graphify_defaults=() graphify_cluster_defaults=()
+  local token_budget_value="" max_concurrency_value="" docstruct_mode="" doc_review_mode=""
+  local -a graphify_defaults=() graphify_cluster_defaults=() docstruct_scan_args=()
+  local -a docstruct_graphify_excludes=(
+    --exclude '*.md' --exclude '*.markdown' --exclude '*.rst'
+    --exclude '*.yaml' --exclude '*.yml' --exclude '*.json'
+    --exclude '*.toml' --exclude '*.ini' --exclude '*.cfg'
+  )
 
   runtime="$(_active_llm_runtime)"
   provider="$(_active_llm_provider)"
@@ -395,6 +400,11 @@ cmd_graphify() {
       next_is_max_concurrency=0
       continue
     fi
+    if ((next_is_exclude)); then
+      docstruct_scan_args+=(--exclude "$arg")
+      next_is_exclude=0
+      continue
+    fi
 
     case "$arg" in
     --model) next_is_model=1 ;;
@@ -417,6 +427,15 @@ cmd_graphify() {
       has_max_concurrency=1
       max_concurrency_value="${arg#--max-concurrency=}"
       ;;
+    --exclude)
+      next_is_exclude=1
+      ;;
+    --exclude=*)
+      docstruct_scan_args+=(--exclude "${arg#--exclude=}")
+      ;;
+    --no-gitignore)
+      docstruct_scan_args+=(--no-gitignore)
+      ;;
     --force)
       force_rebuild=1
       ;;
@@ -436,6 +455,7 @@ cmd_graphify() {
   ((next_is_timeout == 0)) || die "--api-timeout requires a value"
   ((next_is_token_budget == 0)) || die "--token-budget requires a value"
   ((next_is_max_concurrency == 0)) || die "--max-concurrency requires a value"
+  ((next_is_exclude == 0)) || die "--exclude requires a value"
 
   [[ -n "$model" ]] || die "Graphify model cannot be empty"
   [[ "$timeout" =~ ^[0-9]+$ ]] && ((timeout >= 1)) ||
@@ -478,6 +498,25 @@ cmd_graphify() {
   target_abs="$(_realpath "$target")"
   graphify_target="$target"
   provider_dir=""
+
+  docstruct_mode="$(_graphify_docstruct_mode)"
+  doc_review_mode="$(_graphify_doc_review_mode)"
+  if ((explicit_code_only == 0)) && [[ "$docstruct_mode" != off ]]; then
+    if _graphify_docstruct_available; then
+      docstruct_enabled=1
+    elif [[ "$docstruct_mode" == on ]]; then
+      die "LDS_GRAPHIFY_DOCSTRUCT=on requires a docker-tools image with docstruct Graphify merge support"
+    else
+      warn "docker-tools docstruct integration is unavailable; falling back to Graphify semantic extraction."
+    fi
+  fi
+
+  if ((docstruct_enabled)) && ((local_provider == 0)); then
+    if [[ "$doc_review_mode" == on ]]; then
+      die "LDS_GRAPHIFY_DOC_REVIEW=on requires the built-in LocalDevStack AI provider route"
+    fi
+    [[ "$doc_review_mode" == auto ]] && doc_review_mode=off
+  fi
 
   if _graphify_has_incremental_state "$target_abs"; then
     if ((force_rebuild)); then
@@ -537,7 +576,22 @@ cmd_graphify() {
       esac
     fi
 
-    if ((bootstrap_code_first)); then
+    if ((docstruct_enabled)); then
+      if ((bootstrap_code_first)); then
+        printf '%s\n' "[lds graphify] phase 1/3: extracting code structure first" >&2
+        "$graphify_bin" extract "$graphify_target" --backend "$backend" --no-cluster --code-only "${graphify_defaults[@]}" "$@" &&
+          printf '%s\n' "[lds graphify] phase 2/3: extracting only semantic formats not owned by docstruct" >&2 &&
+          "$graphify_bin" extract "$graphify_target" --backend "$backend" --no-cluster "${graphify_defaults[@]}" "${docstruct_graphify_excludes[@]}" "$@" &&
+          printf '%s\n' "[lds graphify] phase 3/3: merging deterministic document structure and relabeling" >&2 &&
+          _graphify_docstruct_enrich "$graphify_bin" "$target_abs" "$doc_review_mode" "${docstruct_scan_args[@]}" &&
+          "$graphify_bin" label "$graphify_target" --backend "$backend" "${graphify_cluster_defaults[@]}"
+      else
+        printf '%s\n' "[lds graphify] extracting changed code/unsupported semantic inputs; supported docs use docstruct" >&2
+        "$graphify_bin" extract "$graphify_target" --backend "$backend" --no-cluster "${graphify_defaults[@]}" "${docstruct_graphify_excludes[@]}" "$@" &&
+          _graphify_docstruct_enrich "$graphify_bin" "$target_abs" "$doc_review_mode" "${docstruct_scan_args[@]}" &&
+          "$graphify_bin" label "$graphify_target" --backend "$backend" "${graphify_cluster_defaults[@]}"
+      fi
+    elif ((bootstrap_code_first)); then
       printf '%s\n' "[lds graphify] phase 1/2: extracting code structure and clustering the structural graph" >&2
       "$graphify_bin" extract "$graphify_target" --backend "$backend" --no-cluster --code-only "${graphify_defaults[@]}" "$@" &&
         "$graphify_bin" cluster-only "$graphify_target" --backend "$backend" "${graphify_cluster_defaults[@]}" &&
