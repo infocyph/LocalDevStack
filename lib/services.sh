@@ -1237,6 +1237,60 @@ _shell_resolve_target() {
   return 66
 }
 
+_shell_resolve_service_or_container() {
+  local target="${1:-}"
+  _shell_context_reset
+  _container_resolve_target "$target" || return $?
+  _shell_context_from_resolved_container "$_CONTAINER_TARGET_KIND" "$target"
+}
+
+_shell_context_open() {
+  local container="$_SHELL_CONTAINER_ID" workdir="$_SHELL_WORKDIR"
+  [[ -n "$container" ]] || {
+    err "Shell context has no container"
+    return 64
+  }
+  if [[ -n "$workdir" ]]; then
+    _container_open_shell "$container" --workdir "$workdir"
+  else
+    _container_open_shell "$container"
+  fi
+}
+
+_shell_context_exec_argv() {
+  local container="$_SHELL_CONTAINER_ID" workdir="$_SHELL_WORKDIR"
+  (($# > 0)) || {
+    err "Shell context command is required"
+    return 64
+  }
+  if [[ -n "$workdir" ]]; then
+    _container_exec_argv "$container" --workdir "$workdir" -- "$@"
+  else
+    _container_exec_argv "$container" -- "$@"
+  fi
+}
+
+_shell_context_exec_expression() {
+  (($# == 1)) || {
+    err "Shell expression is required"
+    return 64
+  }
+  _shell_context_exec_argv sh -lc "$1"
+}
+
+_shell_context_exec_interactive() {
+  local container="$_SHELL_CONTAINER_ID" workdir="$_SHELL_WORKDIR"
+  (($# > 0)) || {
+    err "Interactive shell context command is required"
+    return 64
+  }
+  if [[ -n "$workdir" ]]; then
+    _container_exec_interactive_argv "$container" --workdir "$workdir" -- "$@"
+  else
+    _container_exec_interactive_argv "$container" -- "$@"
+  fi
+}
+
 declare -a _SHELL_MENU_KIND=()
 declare -a _SHELL_MENU_NAME=()
 declare -a _SHELL_MENU_SELECTOR=()
@@ -1419,15 +1473,8 @@ cmd_shell() {
 
   _shell_resolve_target "$target" || return $?
 
-  local container="$_SHELL_CONTAINER_ID"
-  local workdir="$_SHELL_WORKDIR"
-
   if (($# == 0)); then
-    if [[ -n "$workdir" ]]; then
-      _container_open_shell "$container" --workdir "$workdir"
-    else
-      _container_open_shell "$container"
-    fi
+    _shell_context_open
     return $?
   fi
 
@@ -1438,11 +1485,7 @@ cmd_shell() {
       err "Usage: lds shell <target> -- <command> [args...]"
       return 64
     }
-    if [[ -n "$workdir" ]]; then
-      _container_exec_argv "$container" --workdir "$workdir" -- "$@"
-    else
-      _container_exec_argv "$container" -- "$@"
-    fi
+    _shell_context_exec_argv "$@"
     ;;
   --shell)
     shift
@@ -1450,11 +1493,7 @@ cmd_shell() {
       err "Usage: lds shell <target> --shell <shell-expression>"
       return 64
     }
-    if [[ -n "$workdir" ]]; then
-      _container_exec_argv "$container" --workdir "$workdir" -- sh -lc "$1"
-    else
-      _container_exec_argv "$container" -- sh -lc "$1"
-    fi
+    _shell_context_exec_expression "$1"
     ;;
   --interactive | -i)
     shift
@@ -1462,18 +1501,10 @@ cmd_shell() {
       err "Usage: lds shell <target> --interactive <command> [args...]"
       return 64
     }
-    if [[ -n "$workdir" ]]; then
-      _container_exec_interactive_argv "$container" --workdir "$workdir" -- "$@"
-    else
-      _container_exec_interactive_argv "$container" -- "$@"
-    fi
+    _shell_context_exec_interactive "$@"
     ;;
   *)
-    if [[ -n "$workdir" ]]; then
-      _container_exec_argv "$container" --workdir "$workdir" -- "$@"
-    else
-      _container_exec_argv "$container" -- "$@"
-    fi
+    _shell_context_exec_argv "$@"
     ;;
   esac
 }
@@ -1488,28 +1519,17 @@ cmd_core() {
 
   [[ "${1:-}" == -- ]] && shift
 
-  local container workdir=''
   if _core_is_domain "$target"; then
-    _core_domain_resolve "$target" || return $?
-    container="$_CORE_CONTAINER_ID"
-    workdir="$_CORE_WORKDIR"
+    _shell_context_reset
+    _shell_resolve_domain "$target" || return $?
   else
-    _container_resolve_target "$target" || return $?
-    container="$_CONTAINER_TARGET_ID"
+    _shell_resolve_service_or_container "$target" || return $?
   fi
 
   if (($# > 0)); then
-    if [[ -n "$workdir" ]]; then
-      _container_exec_argv "$container" --workdir "$workdir" -- "$@"
-    else
-      _container_exec_argv "$container" -- "$@"
-    fi
+    _shell_context_exec_argv "$@"
   else
-    if [[ -n "$workdir" ]]; then
-      _container_open_shell "$container" --workdir "$workdir"
-    else
-      _container_open_shell "$container"
-    fi
+    _shell_context_open
   fi
 }
 
