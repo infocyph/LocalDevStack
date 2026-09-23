@@ -340,7 +340,9 @@ disabled:
 .. code-block:: text
 
    backend=lds-ollama
-   reasoning_effort=none ``GRAPHIFY_MAX_OUTPUT_TOKENS`` wins when set; otherwise
+   reasoning_effort=none
+
+``GRAPHIFY_MAX_OUTPUT_TOKENS`` wins when set; otherwise
 ``LDS_GRAPHIFY_OUTPUT_TOKENS`` defaults to 8192.
 
 Local semantic requests that remain on Graphify default to
