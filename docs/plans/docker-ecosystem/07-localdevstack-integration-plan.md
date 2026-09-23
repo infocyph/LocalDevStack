@@ -799,40 +799,68 @@ Never automatically mount arbitrary host repositories.
 
 ## 8.9 Graphify
 
-Do not install Graphify into either provider image or Tools solely for this integration.
+Keep Graphify installed on the host. Do not embed Graphify into either LLM provider image
+or docker-tools.
 
-Supported patterns:
+Final integration:
 
-- `lds graphify [path] [extract-options...]` -> host Graphify workflow against the
-  common loopback-published `llm` endpoint, using the effective active-provider model
-  and `LDS_AI_TIMEOUT` by default;
-- for the built-in local route, LDS creates an ephemeral Graphify custom-provider file
-  pointing directly to `http://llm.localhost:11434/v1`; there is no local Graphify
-  reverse proxy and no Python compatibility adapter;
-- FastFlow/NPU -> direct OpenAI-compatible provider with `think=false` by default;
-- Ollama/CPU/NVIDIA/ROCm -> direct OpenAI-compatible provider with explicit `num_ctx`
+- `lds graphify [path] [extract-options...]` runs the host Graphify CLI;
+- host Graphify uses `http://llm.localhost:11434/v1` for the built-in provider route;
+- there is no LocalDevStack Graphify reverse proxy or Python compatibility adapter;
+- FastFlow/NPU uses the direct OpenAI-compatible backend with thinking off by default;
+- Ollama/CPU/NVIDIA/ROCm uses the direct OpenAI-compatible backend with explicit context
   headroom and reasoning disabled;
-- explicit external provider URLs remain caller-controlled through the matching
-  backend-specific environment variables;
-- Tools `aiops graphify --file <output>` -> analyze an explicitly supplied Graphify output file.
+- explicit external provider URLs remain caller-controlled;
+- docker-tools owns deterministic non-code extraction, not code AST extraction.
 
-Local Graphify defaults to `--token-budget 3000 --max-concurrency 1` unless the caller
-supplies explicit values. `LDS_GRAPHIFY_TOKEN_BUDGET` and
-`LDS_GRAPHIFY_MAX_CONCURRENCY` override those defaults. Output allowance defaults to
-8192 through `LDS_GRAPHIFY_OUTPUT_TOKENS`, while standard
+When `LDS_GRAPHIFY_DOCSTRUCT=auto` and the Tools image exposes the complete docstruct
+handoff, LocalDevStack uses this hybrid pipeline:
+
+1. for a new graph, Graphify performs `extract --code-only --no-cluster`;
+2. Graphify performs its normal incremental extract while excluding docstruct-owned
+   extensions:
+   `.md .markdown .rst .yaml .yml .json .toml .ini .cfg`;
+3. docker-tools runs `docstruct` over the repository through a read-only workspace mount;
+4. `LDS_GRAPHIFY_DOC_REVIEW=auto|on|off` controls optional bounded/chunked semantic
+   review against the active local model;
+5. docker-tools converts the mechanical structure plus any validated review delta into a
+   Graphify fragment;
+6. host Graphify `merge-chunks` validates that fragment;
+7. docker-tools atomically replaces only its reserved `docstruct_` semantic layer in
+   `graphify-out/graph.json`;
+8. Graphify `label` reclusters and relabels the combined graph.
+
+The replacement merge preserves code nodes and unrelated Graphify data, refuses namespace
+collisions, and replaces legacy semantic nodes for the supported document/config
+extensions. Unsupported semantic formats such as papers/images remain on Graphify's
+existing semantic extraction path.
+
+Compatibility controls:
+
+- `LDS_GRAPHIFY_DOCSTRUCT=auto` (default): use docstruct when the current Tools image
+  supports the full handoff; otherwise warn and use the legacy Graphify semantic path;
+- `LDS_GRAPHIFY_DOCSTRUCT=on`: require docstruct support;
+- `LDS_GRAPHIFY_DOCSTRUCT=off`: force the legacy Graphify semantic path;
+- `LDS_GRAPHIFY_DOC_REVIEW=auto` (default): use bounded review on the built-in local
+  provider, falling back to deterministic structure if review fails;
+- `LDS_GRAPHIFY_DOC_REVIEW=on`: require review success;
+- `LDS_GRAPHIFY_DOC_REVIEW=off`: mechanical document structure only.
+
+Explicit `--code-only` remains a single Graphify structural build and does not invoke
+docstruct.
+
+Local Graphify defaults that still apply to Graphify-owned semantic requests are
+`--token-budget 3000 --max-concurrency 1`, overrideable by the caller or
+`LDS_GRAPHIFY_TOKEN_BUDGET` / `LDS_GRAPHIFY_MAX_CONCURRENCY`. The output allowance
+defaults to 8192 through `LDS_GRAPHIFY_OUTPUT_TOKENS`, while
 `GRAPHIFY_MAX_OUTPUT_TOKENS` takes precedence.
 
-Graphify itself owns response parsing, hollow/truncation classification, adaptive retry,
-semantic caching, and partial-file requeue behavior. LocalDevStack must not duplicate
-those state machines.
+The Graphify floor remains `graphifyy >= 0.9.65`, with CI validating both that floor and
+the latest package.
 
-For a brand-new graph, `lds graphify` runs code-only `extract --no-cluster`, clusters
-the structural graph, then runs a normal incremental `extract --no-cluster` to enrich
-semantic files and finishes with `graphify label` so the combined graph is reclustered
-and freshly named. Existing graphs keep the single incremental extract + `cluster-only`
-flow. Explicit `--code-only` remains single-phase.
+Graphify remains a host/external consumer; docker-tools supplies only deterministic
+non-code artifacts and bounded review.
 
-Graphify remains a host/external consumer.
 
 ## 8.10 AI admin panel
 
