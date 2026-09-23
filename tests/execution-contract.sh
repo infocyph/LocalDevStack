@@ -267,7 +267,7 @@ assert_file_contains "$log" 'menu:domain|app.local|domain:app.local'
 assert_file_contains "$log" 'menu:app|billing|app:billing'
 assert_file_contains "$log" 'menu:service|php84|service:php84'
 assert_file_contains "$log" 'menu:container|demo-container|container:demo-container'
-assert_file_contains "$log" 'menu:utility|tools|tools'
+assert_file_contains "$log" 'menu:utility|tools|utility:tools'
 pass "shell batch 2: grouped catalog includes domains apps services containers and tools"
 
 case_shell_choose_number() {
