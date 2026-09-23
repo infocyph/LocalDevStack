@@ -335,13 +335,13 @@ No dependency on project programming language should be introduced.
 
 ## Batch 0 — baseline and command contract
 
-Status: **complete for planning**
+Status: **complete**
 
 - [x] inventory `core`, `cli`, `stack exec`, `tools`, and top-level dispatch;
 - [x] identify duplicated execution responsibilities;
 - [x] identify argv/TTY/container-resolution gaps;
 - [x] define command roles and compatibility policy;
-- [ ] add explicit baseline tests for current supported invocation forms before refactor.
+- [x] add explicit baseline tests for current supported invocation forms before refactor.
 
 Exit criterion: current supported behavior is captured by tests.
 
