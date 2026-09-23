@@ -51,6 +51,11 @@ run_case() {
       printf ' <%s>' "$@" >>"$EXECUTION_TEST_LOG"
       printf '\n' >>"$EXECUTION_TEST_LOG"
 
+      if [[ "${1:-}" == ps && "${2:-}" == --format ]]; then
+        printf '%s\n' demo-container external-worker worker.local
+        return 0
+      fi
+
       if [[ "${1:-}" == inspect && "${2:-}" == -f ]]; then
         case "${3:-}|${4:-}" in
           "{{.Id}}|demo-container") printf '%s\n' cid-demo ;;
@@ -135,6 +140,10 @@ run_case() {
             return 1
             ;;
           *" cid-php84 test -d /app "*)
+            return 0
+            ;;
+          *" SERVER_TOOLS sh -c "*"for path in /app/*"* )
+            printf '%s\n' billing node
             return 0
             ;;
           *" SERVER_TOOLS sh -c [ -d \"\$1\" ] sh /app/billing "*)
@@ -245,6 +254,112 @@ if grep -Fq '<run>' "$log"; then
   fail "lds shell resolver attempted to instantiate an image"
 fi
 pass "shell batch 1: image-like targets are not implicitly instantiated"
+
+case_shell_menu_build() {
+  _shell_menu_build
+  local i
+  for ((i = 0; i < ${#_SHELL_MENU_NAME[@]}; i++)); do
+    printf 'menu:%s|%s|%s\n' "${_SHELL_MENU_KIND[$i]}" "${_SHELL_MENU_NAME[$i]}" "${_SHELL_MENU_SELECTOR[$i]}" >>"$EXECUTION_TEST_LOG"
+  done
+}
+run_case case_shell_menu_build
+assert_file_contains "$log" 'menu:domain|app.local|domain:app.local'
+assert_file_contains "$log" 'menu:app|billing|app:billing'
+assert_file_contains "$log" 'menu:service|php84|service:php84'
+assert_file_contains "$log" 'menu:container|demo-container|container:demo-container'
+assert_file_contains "$log" 'menu:utility|tools|tools'
+pass "shell batch 2: grouped catalog includes domains apps services containers and tools"
+
+case_shell_choose_number() {
+  _shell_selector_is_tty() { return 0; }
+  local choice
+  choice="$(printf '4\n' | _shell_choose_target)"
+  printf 'choice:%s\n' "$choice" >>"$EXECUTION_TEST_LOG"
+}
+run_case case_shell_choose_number
+assert_file_contains "$log" 'choice:app:billing'
+pass "shell batch 2: global numeric selector resolves across grouped categories"
+
+case_shell_choose_name() {
+  _shell_selector_is_tty() { return 0; }
+  local choice
+  choice="$(printf 'billing\n' | _shell_choose_target)"
+  printf 'choice:%s\n' "$choice" >>"$EXECUTION_TEST_LOG"
+}
+run_case case_shell_choose_name
+assert_file_contains "$log" 'choice:app:billing'
+pass "shell batch 2: exact unique name selector resolves category target"
+
+case_shell_choose_ambiguous_name() {
+  _shell_selector_is_tty() { return 0; }
+  local choice
+  choice="$(printf 'node\nservice:node\n' | _shell_choose_target)"
+  printf 'choice:%s\n' "$choice" >>"$EXECUTION_TEST_LOG"
+}
+run_case case_shell_choose_ambiguous_name
+assert_file_contains "$log" 'choice:service:node'
+pass "shell batch 2: ambiguous names require a qualified selector"
+
+case_shell_menu_nontty() {
+  _shell_selector_is_tty() { return 1; }
+  _shell_choose_target
+}
+set +e
+run_case case_shell_menu_nontty >"$tmp/shell-menu.out" 2>"$tmp/shell-menu.err"
+rc=$?
+set -e
+[[ "$rc" -eq 64 ]] || fail "bare shell non-TTY selector returned $rc instead of 64"
+grep -Fq 'Applications / Domains' "$tmp/shell-menu.err" || fail "bare shell catalog omitted domain heading"
+grep -Fq 'Application Directories' "$tmp/shell-menu.err" || fail "bare shell catalog omitted app heading"
+grep -Fq 'Services' "$tmp/shell-menu.err" || fail "bare shell catalog omitted services heading"
+grep -Fq 'Containers' "$tmp/shell-menu.err" || fail "bare shell catalog omitted containers heading"
+grep -Fq 'Utilities' "$tmp/shell-menu.err" || fail "bare shell catalog omitted utilities heading"
+assert_file_contains "$log" 'err:No TTY to prompt. Use: lds shell <target>'
+pass "shell batch 2: bare shell prints grouped catalog and fails actionably without TTY"
+
+case_shell_domain_shell() {
+  force_interactive_tty
+  cmd_shell app.local
+}
+run_case case_shell_domain_shell
+assert_file_contains "$log" 'docker: <exec> <-it> <--workdir> </app> <cid-node> <bash> <--login>'
+pass "shell batch 3: domain target opens application-aware interactive shell"
+
+case_shell_app_shell() {
+  force_interactive_tty
+  cmd_shell billing
+}
+run_case case_shell_app_shell
+assert_file_contains "$log" 'docker: <exec> <-it> <--workdir> </app/billing> <SERVER_TOOLS> <bash> <--login>'
+pass "shell batch 3: app-directory fallback opens server-tools at matching /app child"
+
+case_shell_service_command() {
+  _container_stdin_is_tty() { return 1; }
+  _container_stdout_is_tty() { return 1; }
+  _container_stdin_has_data() { return 1; }
+  cmd_shell php84 -- php -v
+}
+run_case case_shell_service_command
+assert_file_contains "$log" 'docker: <exec> <cid-php84> <php> <-v>'
+pass "shell batch 3: explicit command preserves argv for service target"
+
+case_shell_expression() {
+  _container_stdin_is_tty() { return 1; }
+  _container_stdout_is_tty() { return 1; }
+  _container_stdin_has_data() { return 1; }
+  cmd_shell billing --shell 'printf "%s\n" "hello world" | cat'
+}
+run_case case_shell_expression
+assert_file_contains "$log" 'docker: <exec> <--workdir> </app/billing> <SERVER_TOOLS> <sh> <-lc> <printf "%s\n" "hello world" | cat>'
+pass "shell batch 3: --shell makes intentional shell parsing explicit"
+
+case_shell_interactive_command() {
+  force_interactive_tty
+  cmd_shell tools --interactive lazydocker
+}
+run_case case_shell_interactive_command
+assert_file_contains "$log" 'docker: <exec> <-it> <SERVER_TOOLS> <lazydocker>'
+pass "shell batch 3: --interactive routes TUI argv through shared interactive helper"
 
 case_cli_command() {
   _container_stdin_is_tty() { return 1; }
