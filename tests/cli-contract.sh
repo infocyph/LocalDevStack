@@ -248,6 +248,10 @@ assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_DOCSTRUCT:-auto'
 assert_file_contains "$ROOT/lib/ai.sh" 'LDS_GRAPHIFY_DOC_REVIEW:-auto'
 assert_file_contains "$ROOT/lib/ai.sh" "phase 3/3: merging deterministic document structure and relabeling"
 assert_file_contains "$ROOT/lib/ai.sh" "server-tools docstruct graphify-merge"
+assert_file_contains "$ROOT/lib/ai.sh" "--exclude 'requirements*.txt'"
+assert_file_contains "$ROOT/lib/ai.sh" "--exclude 'constraints*.txt'"
+assert_file_contains "$ROOT/lib/ai.sh" "--exclude 'requirements/*.txt'"
+assert_file_contains "$ROOT/lib/ai.sh" "--exclude '**/requirements/*.txt'"
 pass "Graphify provider-aware host workflow wrapper"
 
 assert_file_contains "$ROOT/lds" 'exec "$DIR/bin/tool-runner" "$cmd" "$@"'
