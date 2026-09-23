@@ -39,12 +39,14 @@ pass "fake provider exposes common OpenAI API plus Ollama-native compatibility"
 
 docker pull infocyph/tools:latest >/dev/null
 provider_status="$(
-  docker run --rm --network "$network"     --entrypoint askai     -e LDS_AI_ENABLED=1     -e LDS_AI_PROVIDER=llm     -e LDS_AI_URL=http://llm:11434     -e LDS_AI_MODEL=qwen3.5:9b     infocyph/tools:latest --status
+  docker run --rm --network "$network"     --entrypoint askai     -e LDS_AI_ENABLED=1     -e LDS_AI_RUNTIME=cpu     -e LDS_AI_MODEL=qwen3.5:9b     infocyph/tools:latest --status
 )"
-assert_contains "$provider_status" "provider=llm"
+assert_contains "$provider_status" "runtime=cpu"
+assert_contains "$provider_status" "provider=ollama"
+assert_contains "$provider_status" "url=http://llm-ollama:11434"
 assert_contains "$provider_status" "available=1"
 assert_contains "$provider_status" "model=qwen3.5:9b"
-pass "latest Tools reaches the common LocalDevStack llm contract"
+pass "latest Tools resolves the LocalDevStack runtime to direct Ollama container DNS"
 
 [[ ! -e "$ROOT/docker/compose/ai.yaml" ]] || fail "base AI service must remain consolidated into companion.yaml"
 if find "$ROOT/docker/compose" -maxdepth 1 -type f -name 'ai-*.yaml' -print -quit | grep -q .; then
