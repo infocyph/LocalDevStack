@@ -155,6 +155,25 @@ assert_file_contains "$log" 'exec: <exec> <-it> <--workdir> </app> <cid-php84> <
 pass "shared shell helper prefers Bash and supports Docker workdir"
 
 : >"$log"
+docker() {
+  if [[ "${1:-}" == inspect && "${2:-}" == -f && "${3:-}" == '{{.State.Running}}' ]]; then
+    printf '%s\n' true
+    return 0
+  fi
+  if [[ "${1:-}" == exec && "${2:-}" == cid-php84 && "${3:-}" == test && "${4:-}" == -d ]]; then
+    case "${5:-}" in
+      /missing) return 1 ;;
+      /app) return 0 ;;
+    esac
+  fi
+  return 0
+}
+resolved_dir="$(_container_first_existing_dir cid-php84 /missing /app /)"
+[[ "$resolved_dir" == /app ]] || fail "workdir fallback resolved '$resolved_dir' instead of /app"
+pass "shared workdir resolver selects the first existing container directory"
+
+
+: >"$log"
 _container_open_shell cid-nginx
 assert_file_contains "$log" 'exec: <exec> <-it> <cid-nginx> <sh>'
 pass "shared shell helper falls back to sh"
