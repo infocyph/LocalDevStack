@@ -136,9 +136,20 @@ _container_exec_flags command
 [[ "${#_CONTAINER_EXEC_FLAGS[@]}" -eq 0 ]] || fail "non-interactive no-input command received unnecessary flags"
 pass "non-interactive command without stdin gets no TTY flags"
 
+_container_stdin_is_tty() { return 1; }
+_container_stdout_is_tty() { return 1; }
+set +e
+_container_exec_flags shell >/dev/null 2>&1
+rc=$?
+set -e
+[[ "$rc" -eq 64 ]] || fail "non-TTY interactive shell returned $rc instead of 64"
+pass "interactive shell rejects non-TTY invocation"
+
+_container_stdin_is_tty() { return 0; }
+_container_stdout_is_tty() { return 0; }
 _container_exec_flags shell
 [[ "${_CONTAINER_EXEC_FLAGS[*]}" == "-it" ]] || fail "interactive shell flags drifted"
-pass "interactive shell always receives stdin and TTY"
+pass "interactive shell receives stdin and TTY when available"
 
 # Explicit argv must remain separate Docker arguments, including spaces and shell metacharacters.
 : >"$log"
@@ -148,6 +159,11 @@ _container_stdin_has_data() { return 1; }
 _container_exec_argv cid-custom --workdir '/app path' -- printf '%s|%s' 'hello world' '$(danger)'
 assert_file_contains "$log" 'exec: <exec> <--workdir> </app path> <cid-custom> <printf> <%s|%s> <hello world> <$(danger)>'
 pass "shared executor preserves argv and working directory without host interpolation"
+
+: >"$log"
+_container_exec_interactive_argv cid-custom --workdir '/app path' -- lazydocker --debug
+assert_file_contains "$log" 'exec: <exec> <-it> <--workdir> </app path> <cid-custom> <lazydocker> <--debug>'
+pass "shared interactive argv helper requires and preserves TTY execution"
 
 : >"$log"
 _container_open_shell cid-php84 --workdir /app
