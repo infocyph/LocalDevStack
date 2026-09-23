@@ -1111,7 +1111,7 @@ _shell_exact_container_exists() {
 }
 
 _shell_resolve_container() {
-  local target="${1:-}"
+  local target="${1:-}" id name service
   [[ -n "$target" ]] || {
     err "Shell container target is required"
     return 64
@@ -1120,8 +1120,21 @@ _shell_resolve_container() {
     err "Container not found: $target"
     return 66
   }
-  _container_resolve_target "$target" || return $?
-  _shell_context_from_resolved_container container "$target"
+
+  id="$(_container_docker inspect -f '{{.Id}}' "$target" 2>/dev/null || true)"
+  [[ -n "$id" ]] || {
+    err "Container not found: $target"
+    return 66
+  }
+  name="$(_container_name_from_id "$id" || true)"
+  [[ -n "$name" ]] || name="$target"
+  service="$(_container_docker inspect -f '{{ index .Config.Labels "com.docker.compose.service" }}' "$id" 2>/dev/null || true)"
+
+  _SHELL_TARGET_KIND=container
+  _SHELL_TARGET_REQUESTED="$target"
+  _SHELL_SERVICE="$service"
+  _SHELL_CONTAINER_ID="$id"
+  _SHELL_CONTAINER_NAME="$name"
 }
 
 _shell_app_name_valid() {
