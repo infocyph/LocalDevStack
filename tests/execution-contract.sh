@@ -5,10 +5,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=tests/lib/assertions.sh
 source "$ROOT/tests/lib/assertions.sh"
 
-# Capture the pre-refactor execution contract. Some assertions intentionally
-# describe behavior that later batches will replace (forced TTY, argv flattening,
-# and core container uppercasing). Change those assertions only together with the
-# implementation batch that deliberately changes the contract.
+# This contract evolves batch-by-batch. Assertions for a surface are updated
+# only when that surface deliberately migrates onto the shared executor.
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
@@ -20,26 +18,61 @@ run_case() {
     set -euo pipefail
     export EXECUTION_TEST_LOG="$log"
     export CYAN='' YELLOW='' RED='' GREEN='' NC='' QUIET=0 VERBOSE=0
+
     die() { printf 'die:%s\n' "$*" >>"$EXECUTION_TEST_LOG"; return 64; }
+    err() { printf 'err:%s\n' "$*" >>"$EXECUTION_TEST_LOG"; }
     lds_project() { printf '%s' testproject; }
     effective_ai_runtime() { printf '%s' cpu; }
     ai_service_for_runtime() { printf '%s' llm-ollama; }
-    docker_compose() { printf 'compose:' >>"$EXECUTION_TEST_LOG"; printf ' <%s>' "$@" >>"$EXECUTION_TEST_LOG"; printf '\n' >>"$EXECUTION_TEST_LOG"; }
     _project_tools_container_running() { printf '%s' SERVER_TOOLS; }
+
+    docker_compose() {
+      printf 'compose:' >>"$EXECUTION_TEST_LOG"
+      printf ' <%s>' "$@" >>"$EXECUTION_TEST_LOG"
+      printf '\n' >>"$EXECUTION_TEST_LOG"
+
+      if [[ "${1:-}" == config && "${2:-}" == --services ]]; then
+        printf '%s\n' php84 multi
+        return 0
+      fi
+      if [[ "${1:-}" == ps && "${2:-}" == -a && "${3:-}" == -q ]]; then
+        case "${4:-}" in
+          php84) printf '%s\n' cid-php84 ;;
+          multi) printf '%s\n' cid-one cid-two ;;
+        esac
+        return 0
+      fi
+      return 0
+    }
 
     docker() {
       printf 'docker:' >>"$EXECUTION_TEST_LOG"
       printf ' <%s>' "$@" >>"$EXECUTION_TEST_LOG"
       printf '\n' >>"$EXECUTION_TEST_LOG"
 
-      case "${1:-} ${2:-} ${3:-}" in
-        "inspect -f {{.State.Running}}")
-          printf '%s\n' true
-          ;;
-        "inspect  "*)
-          return 0
-          ;;
-      esac
+      if [[ "${1:-}" == inspect && "${2:-}" == -f ]]; then
+        case "${3:-}|${4:-}" in
+          "{{.Id}}|demo-container") printf '%s\n' cid-demo ;;
+          "{{.Id}}|stopped-container") printf '%s\n' cid-stopped ;;
+          "{{.Id}}|"*) return 1 ;;
+          "{{.Name}}|cid-demo") printf '%s\n' /demo-container ;;
+          "{{.Name}}|cid-php84") printf '%s\n' /PHP84 ;;
+          "{{.Name}}|cid-one") printf '%s\n' /ONE ;;
+          "{{.Name}}|cid-two") printf '%s\n' /TWO ;;
+          "{{.Name}}|cid-stopped") printf '%s\n' /stopped-container ;;
+          "{{ index .Config.Labels \"com.docker.compose.service\" }}|cid-demo") printf '%s\n' ;;
+          "{{ index .Config.Labels \"com.docker.compose.service\" }}|cid-stopped") printf '%s\n' ;;
+          "{{.State.Running}}|cid-demo") printf '%s\n' true ;;
+          "{{.State.Running}}|cid-php84") printf '%s\n' true ;;
+          "{{.State.Running}}|cid-stopped") printf '%s\n' false ;;
+          "{{.State.Running}}|"*) printf '%s\n' true ;;
+        esac
+        return 0
+      fi
+
+      if [[ "${1:-}" == inspect && "${2:-}" != -f ]]; then
+        return 0
+      fi
 
       if [[ "${1:-}" == exec ]]; then
         case " $* " in
@@ -56,9 +89,12 @@ run_case() {
             printf '%s\n' /srv/app/public
             ;;
         esac
+        return 0
       fi
     }
 
+    # shellcheck source=lib/container-exec.sh
+    source "$ROOT/lib/container-exec.sh"
     # shellcheck source=lib/services.sh
     source "$ROOT/lib/services.sh"
     "$@"
@@ -66,22 +102,71 @@ run_case() {
 }
 
 case_cli_command() {
-  cmd_cli demo-container printf '%s %s' 'hello world' tail
+  _container_stdin_is_tty() { return 1; }
+  _container_stdout_is_tty() { return 1; }
+  _container_stdin_has_data() { return 1; }
+  cmd_cli demo-container -- printf '%s %s' 'hello world' '$(danger)'
 }
 run_case case_cli_command
-assert_file_contains "$log" 'docker: <inspect> <demo-container>'
-assert_file_contains "$log" 'docker: <inspect> <-f> <{{.State.Running}}> <demo-container>'
-assert_file_contains "$log" 'docker: <exec> <-it> <demo-container> <sh> <-lc>'
-assert_file_contains "$log" '<printf %s %s hello world tail>'
-pass "baseline: lds cli explicit command validates container, forces TTY, and flattens argv"
+assert_file_contains "$log" 'docker: <inspect> <-f> <{{.Id}}> <demo-container>'
+assert_file_contains "$log" 'docker: <exec> <cid-demo> <printf> <%s %s> <hello world> <$(danger)>'
+if grep -Fq '<sh> <-lc>' "$log"; then
+  fail "lds cli explicit command still reparses argv through a shell"
+fi
+pass "batch 2: lds cli preserves explicit command argv without forcing TTY"
+
+case_cli_piped_command() {
+  _container_stdin_is_tty() { return 1; }
+  _container_stdout_is_tty() { return 1; }
+  _container_stdin_has_data() { return 0; }
+  cmd_cli demo-container cat
+}
+run_case case_cli_piped_command
+assert_file_contains "$log" 'docker: <exec> <-i> <cid-demo> <cat>'
+pass "batch 2: lds cli keeps piped stdin without allocating TTY"
+
+case_cli_service() {
+  _container_stdin_is_tty() { return 1; }
+  _container_stdout_is_tty() { return 1; }
+  _container_stdin_has_data() { return 1; }
+  cmd_cli php84 php -v
+}
+run_case case_cli_service
+assert_file_contains "$log" 'compose: <config> <--services>'
+assert_file_contains "$log" 'compose: <ps> <-a> <-q> <php84>'
+assert_file_contains "$log" 'docker: <exec> <cid-php84> <php> <-v>'
+pass "batch 2: lds cli resolves current-project Compose service names"
 
 case_cli_shell() {
   cmd_cli demo-container
 }
 run_case case_cli_shell
-assert_file_contains "$log" 'docker: <exec> <-it> <demo-container> <sh> <-lc>'
-assert_file_contains "$log" 'exec bash --login'
-pass "baseline: lds cli without command opens an interactive login shell"
+assert_file_contains "$log" 'docker: <exec> <-it> <cid-demo> <bash> <--login>'
+pass "batch 2: lds cli without command opens the shared interactive shell"
+
+set +e
+run_case cmd_cli stopped-container >/dev/null 2>&1
+rc=$?
+set -e
+[[ "$rc" -eq 69 ]] || fail "lds cli stopped target returned $rc instead of 69"
+assert_file_contains "$log" 'err:Container is not running: cid-stopped'
+pass "batch 2: lds cli reports stopped targets"
+
+set +e
+run_case cmd_cli missing-container >/dev/null 2>&1
+rc=$?
+set -e
+[[ "$rc" -eq 66 ]] || fail "lds cli missing target returned $rc instead of 66"
+assert_file_contains "$log" 'err:Container or current-project service not found: missing-container'
+pass "batch 2: lds cli reports missing targets"
+
+set +e
+run_case cmd_cli multi >/dev/null 2>&1
+rc=$?
+set -e
+[[ "$rc" -eq 65 ]] || fail "lds cli ambiguous service returned $rc instead of 65"
+assert_file_contains "$log" 'err:Service resolves to multiple containers: multi'
+pass "batch 2: lds cli rejects ambiguous service targets"
 
 case_core_domain() {
   cmd_core app.local
@@ -135,4 +220,4 @@ assert_file_contains "$ROOT/lds" 'exec) cmd_exec "$@" ;;'
 assert_file_contains "$ROOT/lds" 'cmd_stack "$@"'
 pass "baseline: grouped stack exec and top-level dispatch remain wired"
 
-printf 'Execution baseline contract complete.\n'
+printf 'Execution contract complete.\n'
