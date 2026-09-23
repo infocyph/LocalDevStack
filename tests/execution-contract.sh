@@ -65,7 +65,8 @@ docker() {
         return 0
       fi
       if [[ "$*" == *'[ -d "$1" ]'* ]]; then
-        [[ "${@: -1}" == /srv/app ]] && return 0
+        local last_arg="${!#}"
+        [[ "$last_arg" == /srv/app ]] && return 0
         return 1
       fi
       if [[ "$*" == *'[ -d /app ]'* ]]; then return 0; fi
