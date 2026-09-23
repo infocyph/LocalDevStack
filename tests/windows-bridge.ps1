@@ -51,3 +51,30 @@ if (-not $copied.Contains('set "DEVHOME=%~dp0"')) {
 }
 
 Write-Host "PASS: Windows bridge quoting/discovery contract"
+
+$ldsPath = Join-Path $root "lds"
+$execPath = Join-Path $root "lib/container-exec.sh"
+if (-not (Test-Path $execPath)) {
+    throw "shared container execution helper not found"
+}
+$ldsContent = Get-Content -Raw -Path $ldsPath
+$execContent = Get-Content -Raw -Path $execPath
+foreach ($needle in @(
+    'source "$DIR/lib/container-exec.sh"',
+    '_is_public_lds_command()'
+)) {
+    if (-not $ldsContent.Contains($needle)) {
+        throw "lds is missing Core/CLI execution contract: $needle"
+    }
+}
+foreach ($needle in @(
+    'MSYS_NO_PATHCONV=1',
+    "MSYS2_ARG_CONV_EXCL='*'",
+    '_container_exec_argv',
+    '_container_open_shell'
+)) {
+    if (-not $execContent.Contains($needle)) {
+        throw "shared executor is missing Windows/Git Bash contract: $needle"
+    }
+}
+Write-Host "PASS: Windows bridge uses MSYS-safe shared container execution"
