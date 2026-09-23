@@ -10,11 +10,18 @@ assert_contains "$help_output" "LocalDevStack"
 assert_contains "$help_output" "Stack"
 assert_contains "$help_output" "Domain"
 assert_contains "$help_output" "Setup"
+assert_contains "$help_output" "Execution / Shells"
+assert_contains "$help_output" "Generic service/container exec"
+assert_contains "$help_output" "Compose-service only"
+assert_contains "$help_output" "server-tools only"
 pass "lds help"
 
 markdown_output="$("$ROOT/lds" help --markdown)"
 assert_contains "$markdown_output" "# LocalDevStack"
 assert_contains "$markdown_output" "lds stack up"
+assert_contains "$markdown_output" "lds core [domain|service|container]"
+assert_contains "$markdown_output" "lds cli <service|container>"
+assert_contains "$markdown_output" "argv-preserving execution"
 pass "lds markdown help"
 
 global_help="$("$ROOT/lds" --help)"
@@ -41,6 +48,15 @@ pass "grouped stack help routing"
 assert_contains "$help_output" "graphify [path]"
 assert_contains "$markdown_output" "lds graphify"
 pass "Graphify workflow help"
+
+
+assert_file_contains "$ROOT/lds" '_is_public_lds_command()'
+if grep -Fq 'declare -F "cmd_$cmd"' "$ROOT/lds"; then
+  fail "top-level dispatch still exposes arbitrary cmd_* functions dynamically"
+fi
+assert_file_contains "$ROOT/lds" 'stack | domain | support | bundle |'
+assert_file_contains "$ROOT/lds" 'tools | cli | core | secrets | rebuild | run)'
+pass "top-level LDS command routing is explicit and collision-safe"
 
 graphify_log="$(mktemp)"
 cat >"$tmpbin/graphify" <<'SH'
