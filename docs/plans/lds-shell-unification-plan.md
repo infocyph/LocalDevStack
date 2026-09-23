@@ -1,6 +1,6 @@
 # LDS Unified Shell Command Plan
 
-Status: **active — Batch 0 contract finalization and Batch 1 resolver implementation**
+Status: **active — Batches 0–4 implemented; CI validation pending before compatibility consolidation**
 
 ## Objective
 
@@ -170,45 +170,45 @@ Old commands must not retain independent Docker execution implementations after 
 
 ### Batch 1 — Unified shell context and resolver
 
-- [ ] introduce normalized shell context state;
-- [ ] resolve exact discovered domains;
-- [ ] resolve reserved `tools`;
-- [ ] resolve exact current-project services;
-- [ ] resolve exact containers without emitting premature not-found errors;
-- [ ] resolve direct `server-tools:/app/<name>` directories;
-- [ ] support qualified `domain:`, `app:`, `service:`, and `container:` targets;
-- [ ] add resolver regression coverage.
+- [x] introduce normalized shell context state;
+- [x] resolve exact discovered domains;
+- [x] resolve reserved `tools`;
+- [x] resolve exact current-project services;
+- [x] resolve exact containers without emitting premature not-found errors;
+- [x] resolve direct `server-tools:/app/<name>` directories;
+- [x] support qualified `domain:`, `app:`, `service:`, and `container:` targets;
+- [x] add resolver regression coverage.
 
 ### Batch 2 — Grouped interactive selector
 
-- [ ] build stable grouped catalog;
-- [ ] include discovered domains;
-- [ ] include direct `/app` directories;
-- [ ] include current-project services;
-- [ ] include running Docker containers;
-- [ ] include `tools` utility;
-- [ ] accept global number selector;
-- [ ] accept exact name selector;
-- [ ] detect duplicate names and require qualification;
-- [ ] print catalog + actionable failure without TTY;
-- [ ] add selector regression coverage.
+- [x] build stable grouped catalog;
+- [x] include discovered domains;
+- [x] include direct `/app` directories;
+- [x] include current-project services;
+- [x] include running Docker containers;
+- [x] include `tools` utility;
+- [x] accept global number selector;
+- [x] accept exact name selector;
+- [x] detect duplicate names and require qualification;
+- [x] print catalog + actionable failure without TTY;
+- [x] add selector regression coverage.
 
 ### Batch 3 — `cmd_shell` execution modes
 
-- [ ] no command opens shell in resolved context;
-- [ ] `--` executes exact argv;
-- [ ] `--shell` explicitly executes one shell expression;
-- [ ] `--interactive` executes argv through the interactive helper;
-- [ ] preserve domain/app workdir;
-- [ ] add stdin/TTY/exit propagation coverage.
+- [x] no command opens shell in resolved context;
+- [x] `--` executes exact argv;
+- [x] `--shell` explicitly executes one shell expression;
+- [x] `--interactive` executes argv through the interactive helper;
+- [x] preserve domain/app workdir;
+- [x] add stdin/TTY/exit propagation coverage.
 
 ### Batch 4 — Public routing and help
 
-- [ ] make `shell` a first-class public LDS command;
-- [ ] update embedded help;
-- [ ] update README;
-- [ ] update CLI reference;
-- [ ] update documentation contracts.
+- [x] make `shell` a first-class public LDS command;
+- [x] update embedded help;
+- [x] update README;
+- [x] update CLI reference;
+- [x] update documentation contracts.
 
 ### Batch 5 — Compatibility consolidation
 
