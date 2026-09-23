@@ -99,6 +99,18 @@ run_case() {
       fi
 
       if [[ "${1:-}" == exec ]]; then
+        if [[ "${2:-}" == SERVER_TOOLS && "${3:-}" == sh && "${4:-}" == -c ]]; then
+          if [[ "${5:-}" == *'for path in /app/*'* ]]; then
+            printf '%s\n' billing node
+            return 0
+          fi
+          if [[ "${5:-}" == '[ -d "$1" ]' && "${6:-}" == sh ]]; then
+            case "${7:-}" in
+              /app/billing) return 0 ;;
+              /app/missing-shell|/app/php:8.4-alpine) return 1 ;;
+            esac
+          fi
+        fi
         case " $* " in
           *" domain-which --list-domains "*)
             printf '%s\n' app.local php.local fallback.local
@@ -141,16 +153,6 @@ run_case() {
             ;;
           *" cid-php84 test -d /app "*)
             return 0
-            ;;
-          *" SERVER_TOOLS sh -c "*"for path in /app/*"* )
-            printf '%s\n' billing node
-            return 0
-            ;;
-          *" SERVER_TOOLS sh -c [ -d \"\$1\" ] sh /app/billing "*)
-            return 0
-            ;;
-          *" SERVER_TOOLS sh -c [ -d \"\$1\" ] sh /app/missing-shell "*|*" SERVER_TOOLS sh -c [ -d \"\$1\" ] sh /app/php:8.4-alpine "*)
-            return 1
             ;;
           *" cid-demo sh -lc command -v bash >/dev/null 2>&1 "*|*" cid-mixed sh -lc command -v bash >/dev/null 2>&1 "*|*" cid-node sh -lc command -v bash >/dev/null 2>&1 "*|*" cid-php84 sh -lc command -v bash >/dev/null 2>&1 "*)
             return 0
