@@ -776,6 +776,7 @@ cmd_help() {
 - `lds stack exec <service> [--] [command...]` *(alias: `lds exec`)* — Compose-service-only execution.
 - `lds tools sh` — interactive shell in the project `server-tools` container.
 - `lds tools exec [--] <command> [args...]` — argv-preserving execution in `server-tools`.
+- `lds tools shell-exec <shell-expression>` — intentional shell parsing in `server-tools`.
 - `lds tools file <path>` — inspect a file inside `server-tools`.
 
 ## Secrets
@@ -859,7 +860,7 @@ ${CYAN}Execution / Shells:${NC}
   core [domain|service|container] [--] [command...]   Domain/application-aware
   cli <service|container> [--] [command...]          Generic service/container exec
   stack exec <service> [--] [command...]             Compose-service only
-  tools sh|exec|file                                  server-tools only
+  tools sh|exec|shell-exec|file                       server-tools only
 
 ${CYAN}Secrets:${NC}
   secrets <senv-args...>
