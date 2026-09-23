@@ -1027,6 +1027,211 @@ _core_domain_resolve() {
   _CORE_WORKDIR="$(_container_first_existing_dir "$_CORE_CONTAINER_ID" "$preferred" /app /)" || return $?
 }
 
+_SHELL_TARGET_KIND=''
+_SHELL_TARGET_REQUESTED=''
+_SHELL_DOMAIN=''
+_SHELL_APP=''
+_SHELL_SERVICE=''
+_SHELL_CONTAINER_ID=''
+_SHELL_CONTAINER_NAME=''
+_SHELL_WORKDIR=''
+
+_shell_context_reset() {
+  _SHELL_TARGET_KIND=''
+  _SHELL_TARGET_REQUESTED=''
+  _SHELL_DOMAIN=''
+  _SHELL_APP=''
+  _SHELL_SERVICE=''
+  _SHELL_CONTAINER_ID=''
+  _SHELL_CONTAINER_NAME=''
+  _SHELL_WORKDIR=''
+}
+
+_shell_context_from_resolved_container() {
+  local kind="${1:-container}" requested="${2:-}"
+  _SHELL_TARGET_KIND="$kind"
+  _SHELL_TARGET_REQUESTED="$requested"
+  _SHELL_SERVICE="$_CONTAINER_TARGET_SERVICE"
+  _SHELL_CONTAINER_ID="$_CONTAINER_TARGET_ID"
+  _SHELL_CONTAINER_NAME="$_CONTAINER_TARGET_NAME"
+}
+
+_shell_resolve_domain() {
+  local domain="${1:-}"
+  [[ -n "$domain" ]] || {
+    err "Shell domain target is required"
+    return 64
+  }
+  _core_is_domain "$domain" || {
+    err "Domain not found: $domain"
+    return 66
+  }
+  _core_domain_resolve "$domain" || return $?
+
+  _SHELL_TARGET_KIND=domain
+  _SHELL_TARGET_REQUESTED="$domain"
+  _SHELL_DOMAIN="$_CORE_DOMAIN"
+  _SHELL_APP="$_CORE_APP"
+  _SHELL_SERVICE="$_CONTAINER_TARGET_SERVICE"
+  _SHELL_CONTAINER_ID="$_CORE_CONTAINER_ID"
+  _SHELL_CONTAINER_NAME="$_CORE_CONTAINER_NAME"
+  _SHELL_WORKDIR="$_CORE_WORKDIR"
+}
+
+_shell_resolve_tools() {
+  local ctr
+  ctr="$(_project_tools_container_running || true)"
+  [[ -n "$ctr" ]] || {
+    err "server-tools container is not running for project: $(lds_project)"
+    return 69
+  }
+  _container_require_running "$ctr" || return $?
+
+  _SHELL_TARGET_KIND=tools
+  _SHELL_TARGET_REQUESTED=tools
+  _SHELL_SERVICE=server-tools
+  _SHELL_CONTAINER_ID="$ctr"
+  _SHELL_CONTAINER_NAME="$ctr"
+}
+
+_shell_resolve_service() {
+  local service="${1:-}"
+  [[ -n "$service" ]] || {
+    err "Shell service target is required"
+    return 64
+  }
+  _container_project_service_exists "$service" || {
+    err "Current-project service not found: $service"
+    return 66
+  }
+  _container_resolve_target "$service" || return $?
+  _shell_context_from_resolved_container service "$service"
+}
+
+_shell_exact_container_exists() {
+  local target="${1:-}" running
+  [[ -n "$target" ]] || return 1
+  running="$(_container_docker inspect -f '{{.State.Running}}' "$target" 2>/dev/null || true)"
+  [[ "$running" == true || "$running" == false ]]
+}
+
+_shell_resolve_container() {
+  local target="${1:-}"
+  [[ -n "$target" ]] || {
+    err "Shell container target is required"
+    return 64
+  }
+  _shell_exact_container_exists "$target" || {
+    err "Container not found: $target"
+    return 66
+  }
+  _container_resolve_target "$target" || return $?
+  _shell_context_from_resolved_container container "$target"
+}
+
+_shell_app_name_valid() {
+  local name="${1:-}"
+  [[ -n "$name" && "$name" != . && "$name" != .. && "$name" != */* ]]
+}
+
+_shell_resolve_app() {
+  local name="${1:-}" ctr path
+  _shell_app_name_valid "$name" || {
+    err "Application directory must be a direct child name under /app: $name"
+    return 64
+  }
+
+  ctr="$(_project_tools_container_running || true)"
+  [[ -n "$ctr" ]] || {
+    err "server-tools container is not running for project: $(lds_project)"
+    return 69
+  }
+  _container_require_running "$ctr" || return $?
+
+  path="/app/$name"
+  _container_docker exec "$ctr" sh -c '[ -d "$1" ]' sh "$path" >/dev/null 2>&1 || {
+    err "Application directory not found: $path"
+    return 66
+  }
+
+  _SHELL_TARGET_KIND=app
+  _SHELL_TARGET_REQUESTED="$name"
+  _SHELL_APP="$name"
+  _SHELL_SERVICE=server-tools
+  _SHELL_CONTAINER_ID="$ctr"
+  _SHELL_CONTAINER_NAME="$ctr"
+  _SHELL_WORKDIR="$path"
+}
+
+_shell_resolve_target() {
+  local requested="${1:-}" target state
+  _shell_context_reset
+
+  [[ -n "$requested" ]] || {
+    err "Shell target is required"
+    return 64
+  }
+
+  case "$requested" in
+  domain:*)
+    target="${requested#domain:}"
+    _shell_resolve_domain "$target"
+    return $?
+    ;;
+  service:*)
+    target="${requested#service:}"
+    _shell_resolve_service "$target"
+    return $?
+    ;;
+  container:*)
+    target="${requested#container:}"
+    _shell_resolve_container "$target"
+    return $?
+    ;;
+  app:*)
+    target="${requested#app:}"
+    _shell_resolve_app "$target"
+    return $?
+    ;;
+  tools | utility:tools)
+    _shell_resolve_tools
+    return $?
+    ;;
+  esac
+
+  if _core_is_domain "$requested"; then
+    _shell_resolve_domain "$requested"
+    return $?
+  fi
+
+  if _container_project_service_exists "$requested"; then
+    _shell_resolve_service "$requested"
+    return $?
+  fi
+
+  state="$(_container_docker inspect -f '{{.State.Running}}' "$requested" 2>/dev/null || true)"
+  if [[ "$state" == true || "$state" == false ]]; then
+    _shell_resolve_container "$requested"
+    return $?
+  fi
+
+  if _shell_app_name_valid "$requested"; then
+    local tools_ctr
+    tools_ctr="$(_project_tools_container_running || true)"
+    if [[ -z "$tools_ctr" ]]; then
+      err "server-tools container is not running for project: $(lds_project)"
+      return 69
+    fi
+    if _container_docker exec "$tools_ctr" sh -c '[ -d "$1" ]' sh "/app/$requested" >/dev/null 2>&1; then
+      _shell_resolve_app "$requested"
+      return $?
+    fi
+  fi
+
+  err "Shell target not found: $requested (checked domain, tools, service, container, and /app directory)"
+  return 66
+}
+
 cmd_core() {
   local target="${1:-}"
   [[ -n "$target" ]] && shift || true
