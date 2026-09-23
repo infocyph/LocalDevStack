@@ -155,23 +155,57 @@ Shortcuts::
    lds notify ...
    lds ui
 
-Tools Control Plane
--------------------
+Tools and Execution Surfaces
+----------------------------
 
-::
+LocalDevStack exposes four related execution surfaces with distinct roles.
+
+``lds cli`` is the generic low-level service/container executor::
+
+   lds cli <service|container>
+   lds cli <service|container> -- <command> [args...]
+   lds cli <service|container> <command> [args...]
+
+Current-project Compose services are resolved first. Exact running Docker container
+names/IDs remain supported as a fallback. Explicit commands preserve argv literally;
+they are not flattened through a host/container shell. With no command, ``cli`` opens
+an interactive Bash shell when available, otherwise ``sh``.
+
+``lds core`` adds domain/application awareness::
+
+   lds core
+   lds core <domain>
+   lds core <domain> -- <command> [args...]
+   lds core <service|container>
+   lds core <service|container> -- <command> [args...]
+
+A domain is resolved through Tools ``domain-which``. Node applications use ``/app``;
+other applications use the resolved document root when it exists, then ``/app`` and
+``/`` as fallbacks. With no target, one discovered domain is selected automatically;
+multiple domains require an interactive picker. A non-TTY invocation with multiple
+domains prints the stable domain list and exits with actionable usage.
+
+``lds stack exec`` / ``lds exec`` stay service-only::
+
+   lds stack exec <service> [--] [command...]
+   lds exec <service> [--] [command...]
+
+They use the same argv/TTY/shell substrate as ``cli`` but intentionally do not fall
+back to arbitrary external containers.
+
+``lds tools`` is server-tools-specific::
 
    lds tools sh
-   lds tools exec "<command>"
+   lds tools exec <command> [args...]
+   lds tools shell-exec '<shell expression>'
    lds tools file <path>
 
-Open a generic container shell or run a command::
+``tools exec`` preserves argv. Use ``tools shell-exec`` only when shell syntax
+(pipelines, redirections, compound expressions) is intentionally required.
 
-   lds cli <container>
-   lds cli <container> <command...>
-
-Resolve a domain/container to its application shell::
-
-   lds core [domain|container]
+TTY allocation follows the operation: interactive shells/programs require a real TTY;
+piped commands keep stdin with ``-i`` but never force ``-t``; non-interactive commands
+without terminal stdin do not allocate unnecessary TTY flags.
 
 Secrets
 -------
