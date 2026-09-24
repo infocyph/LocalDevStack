@@ -391,5 +391,15 @@ Troubleshooting
 Use ``lds logs llm-fastflow`` or ``lds logs llm-ollama`` only when you explicitly
 want the provider-specific service identity.
 
+For an interactive provider container through the canonical shell navigator, use the
+exact active service identity::
+
+   lds shell service:llm-fastflow
+   lds shell service:llm-ollama
+
+Only the active provider service is expected to exist. The logical ``llm`` alias belongs
+to stack/service operations and is not rewritten by the exact ``service:`` shell
+qualifier.
+
 If FastFlow was expected but not selected, verify ``/dev/accel/accel0`` and the host
 ``amdxdna`` driver before forcing ``lds llm runtime npu``.
