@@ -153,15 +153,26 @@ cmd_convert() {
     return 66
   }
 
-  local -a docker_args=(
+  local -a run_args=(
+    run --rm --pull=missing
     -v "$input_mount:/lds-input:ro"
     -v "$output_mount:/lds-output"
     -w /lds-input
+    --entrypoint pandoc
+    "$_DOCUMENT_CONVERT_IMAGE"
     --resource-path=/lds-input
     "./$input_name"
     -o "/lds-output/$output_name"
   )
-  docker_args+=("${pandoc_args[@]}")
+  run_args+=("${pandoc_args[@]}")
 
-  _convert_run_pandoc "${docker_args[@]}"
+  if [[ -n "${MSYSTEM:-}${CYGWIN:-}" ]]; then
+    (
+      export MSYS_NO_PATHCONV=1
+      export MSYS2_ARG_CONV_EXCL='*'
+      "$(bin_path docker)" "${run_args[@]}"
+    )
+  else
+    "$(bin_path docker)" "${run_args[@]}"
+  fi
 }
