@@ -776,7 +776,7 @@ cmd_help() {
 - `lds shell <target> [--] <command> [args...]` — argv-preserving execution.
 - `lds shell <target> --shell <shell-expression>` — intentional shell parsing.
 - `lds shell <target> --interactive <command> [args...]` — interactive/TUI argv execution.
-- Qualified selectors: `domain:`, `app:`, `service:`, `container:`.
+- Qualified selectors: `domain:`, `app:`, `service:`, `container:`, `utility:tools`.
 - `lds core [domain|service|container] [--] [command...]` — compatibility application/domain-aware execution with resolved working directory.
 - `lds cli <service|container> [--] [command...]` — generic current-project service or exact-container execution.
 - `lds stack exec <service> [--] [command...]` *(alias: `lds exec`)* — Compose-service-only execution.
@@ -866,6 +866,7 @@ ${CYAN}Execution / Shells:${NC}
   shell [target] [--] [command...]                    Unified selector/execution
   shell <target> --shell <expression>                 Intentional shell syntax
   shell <target> --interactive <command> [args...]    Interactive/TUI command
+  qualifiers: domain: app: service: container: utility:tools
   core [domain|service|container] [--] [command...]   Compatibility domain/app entry
   cli <service|container> [--] [command...]          Generic service/container exec
   stack exec <service> [--] [command...]             Compose-service only
