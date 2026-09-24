@@ -54,16 +54,16 @@ Write-Host "PASS: Windows bridge quoting/discovery contract"
 
 $ldsPath = Join-Path $root "lds"
 $execPath = Join-Path $root "lib/container-exec.sh"
-$documentsPath = Join-Path $root "lib/documents.sh"
+$conversionPath = Join-Path $root "lib/conversion.sh"
 if (-not (Test-Path $execPath)) {
     throw "shared container execution helper not found"
 }
-if (-not (Test-Path $documentsPath)) {
-    throw "document conversion helper not found"
+if (-not (Test-Path $conversionPath)) {
+    throw "conversion helper not found"
 }
 $ldsContent = Get-Content -Raw -Path $ldsPath
 $execContent = Get-Content -Raw -Path $execPath
-$documentsContent = Get-Content -Raw -Path $documentsPath
+$conversionContent = Get-Content -Raw -Path $conversionPath
 foreach ($needle in @(
     'source "$DIR/lib/container-exec.sh"',
     '_is_public_lds_command()'
@@ -89,8 +89,8 @@ foreach ($needle in @(
     'MSYS_NO_PATHCONV=1',
     "MSYS2_ARG_CONV_EXCL='*'"
 )) {
-    if (-not $documentsContent.Contains($needle)) {
-        throw "document conversion is missing Windows/Git Bash contract: $needle"
+    if (-not $conversionContent.Contains($needle)) {
+        throw "conversion is missing Windows/Git Bash contract: $needle"
     }
 }
 Write-Host "PASS: document conversion uses MSYS-safe host mounts"
