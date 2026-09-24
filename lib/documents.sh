@@ -67,7 +67,7 @@ _convert_reject_output_option() {
   local arg
   for arg in "$@"; do
     case "$arg" in
-    -o|--output|--output=*)
+    -o|-o?*|--output|--output=*)
       err "lds convert owns Pandoc output selection; use the second LDS path argument instead of $arg"
       return 64
       ;;
