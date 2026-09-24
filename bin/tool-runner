@@ -89,8 +89,12 @@ append_server_tools_env() {
     LDS_AI_MAX_REQUEST_BYTES LDS_AI_MAX_RESPONSE_BYTES
   do
     value="$(server_tools_env_value "$key" || true)"
-    [[ -n "$value" ]] && target+=(-e "$key=$value")
+    if [[ -n "$value" ]]; then
+      target+=(-e "$key=$value")
+    fi
   done
+
+  return 0
 }
 
 resolve_workspace() {
