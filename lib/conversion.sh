@@ -22,7 +22,7 @@ Examples:
   lds convert docs README.md README.html
   lds convert docs docs/guide.rst guide.docx --toc
   lds convert image photo.jpg photo.png
-  lds convert image photo.png photo.webp --quality 82
+  lds convert image photo.png photo.webp -- -quality 82
   lds convert image animation.gif animation.webp
 EOF
 }
@@ -46,7 +46,7 @@ Usage:
 
 Examples:
   lds convert image photo.jpg photo.png
-  lds convert image photo.png photo.webp --quality 82
+  lds convert image photo.png photo.webp -- -quality 82
   lds convert image animation.gif animation.webp
   lds convert image animation.gif preview.jpg
 
