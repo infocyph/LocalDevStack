@@ -181,6 +181,7 @@ name exists in multiple categories, use a qualified selector::
    app:project
    service:php84
    container:localdevstack-php84-1
+   utility:tools
 
 Explicit targets use deterministic precedence: exact discovered domain, reserved
 ``tools`` target, exact current-project service, exact Docker container, then an
@@ -206,6 +207,7 @@ hatch for pipelines, redirections, and compound shell syntax.
 Interactive shells and TUIs require a real TTY on both stdin and stdout; piped
 commands keep stdin without forcing a TTY.
 
+New documentation and interactive workflows should prefer ``lds shell``.
 The older execution surfaces remain compatible during migration::
 
    lds core [domain|service|container] [--] [command...]
