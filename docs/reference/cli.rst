@@ -108,6 +108,19 @@ Configuration
 
 ``config show`` is redacted by default.
 
+Document Conversion
+-------------------
+
+Pandoc-backed host conversion runs in a short-lived Tools container; the stack does not
+need to be running::
+
+   lds convert [--force] <input> <output> [--] [pandoc-options...]
+   lds convert --list-input-formats
+   lds convert --list-output-formats
+   lds convert --version
+
+The input directory is read-only and the output directory is the only writable host
+mount. Existing output requires ``--force``. ``-o`` / ``--output`` is reserved by LDS.
 Certificates
 ------------
 
