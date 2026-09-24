@@ -468,7 +468,10 @@ cmd_profiles() {
 cmd_secrets() {
   local ctr
   ctr="$(_project_tools_container_running || true)"
-  [[ -n "$ctr" ]] || die "server-tools container is not running for project: $(lds_project)"
+  [[ -n "$ctr" ]] || {
+    err "server-tools container is not running for project: $(lds_project)"
+    return 69
+  }
   docker exec -it "$ctr" senv "$@"
 }
 
@@ -507,26 +510,37 @@ cmd_host() {
 }
 
 cmd_ui() {
-  local ctr
-  ctr="$(_project_tools_container_running || true)"
-  [[ -n "$ctr" ]] || die "server-tools container is not running for project: $(lds_project)"
-  docker exec -it "$ctr" lazydocker
+  _shell_context_reset
+  _shell_resolve_tools || return $?
+  _shell_context_exec_interactive lazydocker
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 6f. EXEC / EVENTS / CLEAN / DISK
 # ─────────────────────────────────────────────────────────────────────────────
 cmd_exec() {
-  local svc="${1:-}"
+  local requested="${1:-}"
   shift || true
-  [[ -n "$svc" ]] || die "exec <service> [cmd...]"
-  local s
-  s="$(resolve_service "$svc" || true)"
-  [[ -n "$s" ]] || die "Unknown service: $svc"
-  if [[ $# -gt 0 ]]; then
-    docker_compose exec "$s" "$@"
+  [[ -n "$requested" ]] || {
+    err "Usage: lds stack exec <service> [--] [command...]"
+    return 64
+  }
+  [[ "${1:-}" == -- ]] && shift
+
+  local service
+  service="$(resolve_service "$requested" || true)"
+  if [[ -z "$service" ]] || ! compose_service_exists "$service"; then
+    err "Current-project service not found: $requested"
+    return 66
+  fi
+
+  _shell_context_reset
+  _shell_resolve_service "$service" || return $?
+
+  if (($# > 0)); then
+    _shell_context_exec_argv "$@"
   else
-    docker_compose exec "$s" sh -lc 'command -v bash >/dev/null 2>&1 && exec bash || exec sh'
+    _shell_context_open
   fi
 }
 
@@ -812,157 +826,719 @@ cmd_rebuild() {
 }
 
 
-docker_shell() {
-  local c="${1:-}"
-  [[ -n "$c" ]] || die "container name required"
-  if docker exec "$c" sh -lc 'command -v bash >/dev/null 2>&1' >/dev/null 2>&1; then
-    exec docker exec -it "$c" bash
-  else
-    exec docker exec -it "$c" sh
-  fi
-}
 cmd_tools() {
   local sub="${1:-sh}"
   shift || true
-  local ctr
-  ctr="$(_project_tools_container_running || true)"
-  [[ -n "$ctr" ]] || die "server-tools container is not running for project: $(lds_project)"
+
+  _shell_context_reset
+  _shell_resolve_tools || return $?
+
   case "${sub,,}" in
   sh | shell | "")
-    docker_shell "$ctr"
+    _shell_context_open
     ;;
   exec)
-    [[ $# -gt 0 ]] || die "tools exec <cmd>"
-    docker exec -it "$ctr" sh -lc "$*"
+    [[ "${1:-}" == -- ]] && shift
+    (($# > 0)) || {
+      err "Usage: lds tools exec [--] <command> [args...]"
+      return 64
+    }
+    _shell_context_exec_argv "$@"
+    ;;
+  shell-exec)
+    (($# == 1)) || {
+      err "Usage: lds tools shell-exec <shell-expression>"
+      return 64
+    }
+    _shell_context_exec_expression "$1"
     ;;
   file)
-    local p="${1:-}"
-    [[ -n "$p" ]] || die "tools file <path>"
-    docker exec -it "$ctr" sh -lc "ls -la -- \"$p\" 2>/dev/null || true; echo; sed -n '1,200p' -- \"$p\" 2>/dev/null || true"
+    local path="${1:-}"
+    [[ -n "$path" ]] || {
+      err "Usage: lds tools file <path>"
+      return 64
+    }
+    _shell_context_exec_argv sh -lc '
+      ls -la -- "$1" 2>/dev/null || true
+      printf "\n"
+      sed -n "1,200p" -- "$1" 2>/dev/null || true
+    ' sh "$path"
     ;;
   *)
-    die "tools <sh|exec|file>"
+    die "tools <sh|exec|shell-exec|file>"
     ;;
   esac
 }
+
 cmd_http() { [[ ${1:-} == reload ]] && http_reload; }
 cmd_cli() {
-  local ctr="${1:-}"
+  local target="${1:-}"
   shift || true
 
-  [[ -n "$ctr" ]] || die "Usage: lds cli <container> [cmd...]"
+  [[ -n "$target" ]] || {
+    err "Usage: lds cli <service|container> [--] [command...]"
+    return 64
+  }
+  [[ "${1:-}" == -- ]] && shift
 
-  docker inspect "$ctr" >/dev/null 2>&1 || die "Container not found: $ctr"
-  docker inspect -f '{{.State.Running}}' "$ctr" 2>/dev/null | grep -qx true || die "Container not running: $ctr"
+  _shell_resolve_service_or_container "$target" || return $?
 
-  # If user provided a command, run it; otherwise open an interactive shell.
-  if [[ "$#" -gt 0 ]]; then
-    local cmd="$*"
-    docker exec -it "$ctr" sh -lc '
-      if command -v bash >/dev/null 2>&1; then
-        exec bash --login -lc "$1"
-      fi
-      exec sh -lc "$1"
-    ' sh "$cmd"
-    return
+  if (($# > 0)); then
+    _shell_context_exec_argv "$@"
+  else
+    _shell_context_open
   fi
-
-  docker exec -it "$ctr" sh -lc '
-    if command -v bash >/dev/null 2>&1; then
-      exec bash --login
-    fi
-    exec sh
-  '
 }
 
-cmd_core() {
-  # Usage:
-  #   lds core <domain>     -> open correct container for that domain (PHP/Node)
-  #   lds core <container>  -> open a shell in that container
-  #   lds core              -> list domains and let user pick
+_CORE_DOMAIN=''
+_CORE_APP=''
+_CORE_CONTAINER_ID=''
+_CORE_CONTAINER_NAME=''
+_CORE_WORKDIR=''
 
-  local target="${1:-}"
+_core_is_domain() {
+  local target="${1:-}" domain
+  [[ -n "$target" ]] || return 1
 
-  # domain regex (same as domain-which/mkhost family)
-  local re='^([a-zA-Z0-9]([-a-zA-Z0-9]{0,61}[a-zA-Z0-9])?\.)+(localhost|local|test|loc|[a-zA-Z]{2,})$'
+  # Domain ownership lives in Tools. Only an exact discovered domain is treated
+  # as a domain here; hostname-shaped service/container names remain valid
+  # execution targets instead of being guessed from their spelling.
+  while IFS= read -r domain; do
+    [[ "$domain" == "$target" ]] && return 0
+  done < <(_core_domain_list 2>/dev/null || true)
 
-  # If no target -> prompt from domain-which list
-  if [[ -z "$target" ]]; then
-    local tools_ctr
-    tools_ctr="$(_project_tools_container_running || true)"
-    [[ -n "$tools_ctr" ]] || die "server-tools container is not running for project: $(lds_project)"
+  return 1
+}
 
-    local -a domains=()
-    mapfile -t domains < <(docker exec "$tools_ctr" domain-which --list-domains 2>/dev/null | sed '/^[[:space:]]*$/d' || true)
+_core_domain_list() {
+  local tools_ctr
+  tools_ctr="$(_project_tools_container_running || true)"
+  [[ -n "$tools_ctr" ]] || {
+    err "server-tools container is not running for project: $(lds_project)"
+    return 69
+  }
 
-    ((${#domains[@]} > 0)) || die "No domains found"
+  docker exec "$tools_ctr" domain-which --list-domains 2>/dev/null |
+    sed '/^[[:space:]]*$/d' |
+    LC_ALL=C sort -u
+}
 
-    # stable ordering
-    IFS=$'\n' domains=($(printf '%s\n' "${domains[@]}" | LC_ALL=C sort -u))
+_core_choose_domain() {
+  local -a domains=()
+  mapfile -t domains < <(_core_domain_list) || return $?
+  (("${#domains[@]}" > 0)) || {
+    err "No domains found"
+    return 66
+  }
 
-    if ((${#domains[@]} == 1)); then
-      target="${domains[0]}"
-    else
-      if [[ ! -t 0 ]]; then
-        printf "%b[core]%b No domain provided. Available domains:\n" "$YELLOW" "$NC" >&2
-        local i=1
-        local d
-        for d in "${domains[@]}"; do
-          printf "  %2d) %s\n" "$i" "$d" >&2
-          ((i++))
-        done
-        die "No TTY to prompt. Use: lds core <domain>"
-      fi
-
-      printf "%bSelect domain:%b\n" "$CYAN" "$NC" >&2
-      local i=1 d
-      for d in "${domains[@]}"; do
-        printf "  %b%2d)%b %s\n" "$CYAN" "$i" "$NC" "$d" >&2
-        ((i++))
-      done
-
-      local ans=""
-      while true; do
-        read -r -p "Enter number (1-${#domains[@]}): " ans
-        ans="$(echo "$ans" | xargs)"
-        [[ "$ans" =~ ^[0-9]+$ ]] || {
-          printf "%bInvalid input.%b\n" "$YELLOW" "$NC" >&2
-          continue
-        }
-        ((ans >= 1 && ans <= ${#domains[@]})) || {
-          printf "%bOut of range.%b\n" "$YELLOW" "$NC" >&2
-          continue
-        }
-        target="${domains[$((ans - 1))]}"
-        break
-      done
-    fi
-  fi
-
-  # If target looks like a domain -> resolve via domain-which then shell in
-  if [[ "$target" =~ $re ]]; then
-    local tools_ctr
-    tools_ctr="$(_project_tools_container_running || true)"
-    [[ -n "$tools_ctr" ]] || die "server-tools container is not running for project: $(lds_project)"
-
-    local app container wd
-    app="$(docker exec "$tools_ctr" domain-which --app --quiet "$target" 2>/dev/null)" || die "Unknown domain: $target"
-    container="$(docker exec "$tools_ctr" domain-which --container --quiet "$target" 2>/dev/null)" || die "No container resolved for: $target"
-    wd="$(docker exec "$tools_ctr" domain-which --docroot --quiet "$target" 2>/dev/null)" || true
-    [[ -n "${container:-}" ]] || die "No container resolved for: $target"
-
-    # Node apps should always land at /app. Others follow resolved docroot.
-    if [[ "${app:-}" == "node" ]]; then
-      wd="/app"
-    fi
-    [[ -n "${wd:-}" ]] || wd="/app"
-
-    docker exec -it "$container" bash -lc "cd \"$wd\" 2>/dev/null || cd /app 2>/dev/null || cd /; exec bash"
+  if (("${#domains[@]}" == 1)); then
+    printf '%s' "${domains[0]}"
     return 0
   fi
 
-  # Otherwise treat target as a container name
-  docker exec -it "$(printf '%s' "$target" | tr '[:lower:]' '[:upper:]')" sh -lc 'exec bash -i || exec sh'
+  if [[ ! -t 0 ]]; then
+    printf "%b[core]%b No domain provided. Available domains:\n" "$YELLOW" "$NC" >&2
+    local i=1 domain
+    for domain in "${domains[@]}"; do
+      printf "  %2d) %s\n" "$i" "$domain" >&2
+      ((i++))
+    done
+    err "No TTY to prompt. Use: lds core <domain>"
+    return 64
+  fi
+
+  printf "%bSelect domain:%b\n" "$CYAN" "$NC" >&2
+  local i=1 domain
+  for domain in "${domains[@]}"; do
+    printf "  %b%2d)%b %s\n" "$CYAN" "$i" "$NC" "$domain" >&2
+    ((i++))
+  done
+
+  local answer=''
+  while true; do
+    read -r -p "Enter number (1-${#domains[@]}): " answer
+    answer="${answer#"${answer%%[![:space:]]*}"}"
+    answer="${answer%"${answer##*[![:space:]]}"}"
+    [[ "$answer" =~ ^[0-9]+$ ]] || {
+      printf "%bInvalid input.%b\n" "$YELLOW" "$NC" >&2
+      continue
+    }
+    ((answer >= 1 && answer <= ${#domains[@]})) || {
+      printf "%bOut of range.%b\n" "$YELLOW" "$NC" >&2
+      continue
+    }
+    printf '%s' "${domains[$((answer - 1))]}"
+    return 0
+  done
+}
+
+_core_domain_resolve() {
+  local domain="${1:-}" tools_ctr app target docroot preferred
+
+  _CORE_DOMAIN=''
+  _CORE_APP=''
+  _CORE_CONTAINER_ID=''
+  _CORE_CONTAINER_NAME=''
+  _CORE_WORKDIR=''
+
+  [[ -n "$domain" ]] || {
+    err "Core domain is required"
+    return 64
+  }
+
+  tools_ctr="$(_project_tools_container_running || true)"
+  [[ -n "$tools_ctr" ]] || {
+    err "server-tools container is not running for project: $(lds_project)"
+    return 69
+  }
+
+  app="$(docker exec "$tools_ctr" domain-which --app --quiet "$domain" 2>/dev/null)" || {
+    err "Unknown domain: $domain"
+    return 66
+  }
+  target="$(docker exec "$tools_ctr" domain-which --container --quiet "$domain" 2>/dev/null)" || {
+    err "No container resolved for: $domain"
+    return 66
+  }
+  docroot="$(docker exec "$tools_ctr" domain-which --docroot --quiet "$domain" 2>/dev/null || true)"
+  [[ -n "$target" ]] || {
+    err "No container resolved for: $domain"
+    return 66
+  }
+
+  _container_resolve_target "$target" || return $?
+  _container_require_running "$_CONTAINER_TARGET_ID" || return $?
+
+  if [[ "${app,,}" == node ]]; then
+    preferred=/app
+  else
+    preferred="${docroot:-/app}"
+  fi
+
+  _CORE_DOMAIN="$domain"
+  _CORE_APP="$app"
+  _CORE_CONTAINER_ID="$_CONTAINER_TARGET_ID"
+  _CORE_CONTAINER_NAME="$_CONTAINER_TARGET_NAME"
+  _CORE_WORKDIR="$(_container_first_existing_dir "$_CORE_CONTAINER_ID" "$preferred" /app /)" || return $?
+}
+
+_SHELL_TARGET_KIND=''
+_SHELL_TARGET_REQUESTED=''
+_SHELL_DOMAIN=''
+_SHELL_APP=''
+_SHELL_SERVICE=''
+_SHELL_CONTAINER_ID=''
+_SHELL_CONTAINER_NAME=''
+_SHELL_WORKDIR=''
+
+_shell_context_reset() {
+  _SHELL_TARGET_KIND=''
+  _SHELL_TARGET_REQUESTED=''
+  _SHELL_DOMAIN=''
+  _SHELL_APP=''
+  _SHELL_SERVICE=''
+  _SHELL_CONTAINER_ID=''
+  _SHELL_CONTAINER_NAME=''
+  _SHELL_WORKDIR=''
+}
+
+_shell_context_from_resolved_container() {
+  local kind="${1:-container}" requested="${2:-}"
+  _SHELL_TARGET_KIND="$kind"
+  _SHELL_TARGET_REQUESTED="$requested"
+  _SHELL_SERVICE="$_CONTAINER_TARGET_SERVICE"
+  _SHELL_CONTAINER_ID="$_CONTAINER_TARGET_ID"
+  _SHELL_CONTAINER_NAME="$_CONTAINER_TARGET_NAME"
+}
+
+_shell_resolve_domain() {
+  local domain="${1:-}"
+  [[ -n "$domain" ]] || {
+    err "Shell domain target is required"
+    return 64
+  }
+  _core_is_domain "$domain" || {
+    err "Domain not found: $domain"
+    return 66
+  }
+  _core_domain_resolve "$domain" || return $?
+
+  _SHELL_TARGET_KIND=domain
+  _SHELL_TARGET_REQUESTED="$domain"
+  _SHELL_DOMAIN="$_CORE_DOMAIN"
+  _SHELL_APP="$_CORE_APP"
+  _SHELL_SERVICE="$_CONTAINER_TARGET_SERVICE"
+  _SHELL_CONTAINER_ID="$_CORE_CONTAINER_ID"
+  _SHELL_CONTAINER_NAME="$_CORE_CONTAINER_NAME"
+  _SHELL_WORKDIR="$_CORE_WORKDIR"
+}
+
+_shell_resolve_tools() {
+  local ctr
+  ctr="$(_project_tools_container_running || true)"
+  [[ -n "$ctr" ]] || {
+    err "server-tools container is not running for project: $(lds_project)"
+    return 69
+  }
+  _container_require_running "$ctr" || return $?
+
+  _SHELL_TARGET_KIND=tools
+  _SHELL_TARGET_REQUESTED=tools
+  _SHELL_SERVICE=server-tools
+  _SHELL_CONTAINER_ID="$ctr"
+  _SHELL_CONTAINER_NAME="$ctr"
+}
+
+_shell_resolve_service() {
+  local service="${1:-}"
+  [[ -n "$service" ]] || {
+    err "Shell service target is required"
+    return 64
+  }
+  _container_project_service_exists "$service" || {
+    err "Current-project service not found: $service"
+    return 66
+  }
+  _container_resolve_target "$service" || return $?
+  _shell_context_from_resolved_container service "$service"
+}
+
+_shell_exact_container_exists() {
+  local target="${1:-}" running
+  [[ -n "$target" ]] || return 1
+  running="$(_container_docker inspect -f '{{.State.Running}}' "$target" 2>/dev/null || true)"
+  [[ "$running" == true || "$running" == false ]]
+}
+
+_shell_resolve_container() {
+  local target="${1:-}" id name service
+  [[ -n "$target" ]] || {
+    err "Shell container target is required"
+    return 64
+  }
+  _shell_exact_container_exists "$target" || {
+    err "Container not found: $target"
+    return 66
+  }
+
+  id="$(_container_docker inspect -f '{{.Id}}' "$target" 2>/dev/null || true)"
+  [[ -n "$id" ]] || {
+    err "Container not found: $target"
+    return 66
+  }
+  name="$(_container_name_from_id "$id" || true)"
+  [[ -n "$name" ]] || name="$target"
+  service="$(_container_docker inspect -f '{{ index .Config.Labels "com.docker.compose.service" }}' "$id" 2>/dev/null || true)"
+
+  _SHELL_TARGET_KIND=container
+  _SHELL_TARGET_REQUESTED="$target"
+  _SHELL_SERVICE="$service"
+  _SHELL_CONTAINER_ID="$id"
+  _SHELL_CONTAINER_NAME="$name"
+}
+
+_shell_app_name_valid() {
+  local name="${1:-}"
+  [[ -n "$name" && "$name" != . && "$name" != .. && "$name" != */* ]]
+}
+
+_shell_resolve_app() {
+  local name="${1:-}" ctr path
+  _shell_app_name_valid "$name" || {
+    err "Application directory must be a direct child name under /app: $name"
+    return 64
+  }
+
+  ctr="$(_project_tools_container_running || true)"
+  [[ -n "$ctr" ]] || {
+    err "server-tools container is not running for project: $(lds_project)"
+    return 69
+  }
+  _container_require_running "$ctr" || return $?
+
+  path="/app/$name"
+  _container_docker exec "$ctr" sh -c '[ -d "$1" ]' sh "$path" >/dev/null 2>&1 || {
+    err "Application directory not found: $path"
+    return 66
+  }
+
+  _SHELL_TARGET_KIND=app
+  _SHELL_TARGET_REQUESTED="$name"
+  _SHELL_APP="$name"
+  _SHELL_SERVICE=server-tools
+  _SHELL_CONTAINER_ID="$ctr"
+  _SHELL_CONTAINER_NAME="$ctr"
+  _SHELL_WORKDIR="$path"
+}
+
+_shell_resolve_target() {
+  local requested="${1:-}" target state
+  _shell_context_reset
+
+  [[ -n "$requested" ]] || {
+    err "Shell target is required"
+    return 64
+  }
+
+  case "$requested" in
+  domain:*)
+    target="${requested#domain:}"
+    _shell_resolve_domain "$target"
+    return $?
+    ;;
+  service:*)
+    target="${requested#service:}"
+    _shell_resolve_service "$target"
+    return $?
+    ;;
+  container:*)
+    target="${requested#container:}"
+    _shell_resolve_container "$target"
+    return $?
+    ;;
+  app:*)
+    target="${requested#app:}"
+    _shell_resolve_app "$target"
+    return $?
+    ;;
+  utility:tools)
+    _shell_resolve_tools
+    return $?
+    ;;
+  esac
+
+  if _core_is_domain "$requested"; then
+    _shell_resolve_domain "$requested"
+    return $?
+  fi
+
+  if [[ "$requested" == tools ]]; then
+    _shell_resolve_tools
+    return $?
+  fi
+
+  if _container_project_service_exists "$requested"; then
+    _shell_resolve_service "$requested"
+    return $?
+  fi
+
+  state="$(_container_docker inspect -f '{{.State.Running}}' "$requested" 2>/dev/null || true)"
+  if [[ "$state" == true || "$state" == false ]]; then
+    _shell_resolve_container "$requested"
+    return $?
+  fi
+
+  if _shell_app_name_valid "$requested"; then
+    local tools_ctr
+    tools_ctr="$(_project_tools_container_running || true)"
+    if [[ -z "$tools_ctr" ]]; then
+      err "server-tools container is not running for project: $(lds_project)"
+      return 69
+    fi
+    if _container_docker exec "$tools_ctr" sh -c '[ -d "$1" ]' sh "/app/$requested" >/dev/null 2>&1; then
+      _shell_resolve_app "$requested"
+      return $?
+    fi
+  fi
+
+  err "Shell target not found: $requested (checked domain, tools, service, container, and /app directory)"
+  return 66
+}
+
+_shell_resolve_service_or_container() {
+  local target="${1:-}"
+  _shell_context_reset
+  _container_resolve_target "$target" || return $?
+  _shell_context_from_resolved_container "$_CONTAINER_TARGET_KIND" "$target"
+}
+
+_shell_context_open() {
+  local container="$_SHELL_CONTAINER_ID" workdir="$_SHELL_WORKDIR"
+  [[ -n "$container" ]] || {
+    err "Shell context has no container"
+    return 64
+  }
+  if [[ -n "$workdir" ]]; then
+    _container_open_shell "$container" --workdir "$workdir"
+  else
+    _container_open_shell "$container"
+  fi
+}
+
+_shell_context_exec_argv() {
+  local container="$_SHELL_CONTAINER_ID" workdir="$_SHELL_WORKDIR"
+  (($# > 0)) || {
+    err "Shell context command is required"
+    return 64
+  }
+  if [[ -n "$workdir" ]]; then
+    _container_exec_argv "$container" --workdir "$workdir" -- "$@"
+  else
+    _container_exec_argv "$container" -- "$@"
+  fi
+}
+
+_shell_context_exec_expression() {
+  (($# == 1)) || {
+    err "Shell expression is required"
+    return 64
+  }
+  _shell_context_exec_argv sh -lc "$1"
+}
+
+_shell_context_exec_interactive() {
+  local container="$_SHELL_CONTAINER_ID" workdir="$_SHELL_WORKDIR"
+  (($# > 0)) || {
+    err "Interactive shell context command is required"
+    return 64
+  }
+  if [[ -n "$workdir" ]]; then
+    _container_exec_interactive_argv "$container" --workdir "$workdir" -- "$@"
+  else
+    _container_exec_interactive_argv "$container" -- "$@"
+  fi
+}
+
+declare -a _SHELL_MENU_KIND=()
+declare -a _SHELL_MENU_NAME=()
+declare -a _SHELL_MENU_SELECTOR=()
+
+_shell_menu_reset() {
+  _SHELL_MENU_KIND=()
+  _SHELL_MENU_NAME=()
+  _SHELL_MENU_SELECTOR=()
+}
+
+_shell_menu_add() {
+  local kind="${1:-}" name="${2:-}" selector="${3:-}"
+  [[ -n "$kind" && -n "$name" && -n "$selector" ]] || return 1
+  _SHELL_MENU_KIND+=("$kind")
+  _SHELL_MENU_NAME+=("$name")
+  _SHELL_MENU_SELECTOR+=("$selector")
+}
+
+_shell_app_list() {
+  local ctr
+  ctr="$(_project_tools_container_running || true)"
+  [[ -n "$ctr" ]] || return 0
+
+  _container_docker exec "$ctr" sh -c '
+    for path in /app/*; do
+      [ -d "$path" ] || continue
+      basename "$path"
+    done
+  ' 2>/dev/null |
+    sed '/^[[:space:]]*$/d' |
+    LC_ALL=C sort -u
+}
+
+_shell_service_list() {
+  docker_compose config --services 2>/dev/null |
+    sed '/^[[:space:]]*$/d' |
+    LC_ALL=C sort -u
+}
+
+_shell_container_list() {
+  _container_docker ps --format '{{.Names}}' 2>/dev/null |
+    sed '/^[[:space:]]*$/d' |
+    LC_ALL=C sort -u
+}
+
+_shell_menu_build() {
+  _shell_menu_reset
+  local item
+
+  while IFS= read -r item; do
+    [[ -n "$item" ]] && _shell_menu_add domain "$item" "domain:$item"
+  done < <(_core_domain_list 2>/dev/null || true)
+
+  while IFS= read -r item; do
+    [[ -n "$item" ]] && _shell_menu_add app "$item" "app:$item"
+  done < <(_shell_app_list 2>/dev/null || true)
+
+  while IFS= read -r item; do
+    [[ -n "$item" ]] && _shell_menu_add service "$item" "service:$item"
+  done < <(_shell_service_list 2>/dev/null || true)
+
+  while IFS= read -r item; do
+    [[ -n "$item" ]] && _shell_menu_add container "$item" "container:$item"
+  done < <(_shell_container_list 2>/dev/null || true)
+
+  if [[ -n "$(_project_tools_container_running || true)" ]]; then
+    _shell_menu_add utility tools utility:tools
+  fi
+}
+
+_shell_menu_label() {
+  case "${1:-}" in
+  domain) printf '%s' 'Applications / Domains' ;;
+  app) printf '%s' 'Application Directories' ;;
+  service) printf '%s' 'Services' ;;
+  container) printf '%s' 'Containers' ;;
+  utility) printf '%s' 'Utilities' ;;
+  *) printf '%s' 'Other' ;;
+  esac
+}
+
+_shell_menu_print() {
+  local previous='' kind label i
+  for ((i = 0; i < ${#_SHELL_MENU_NAME[@]}; i++)); do
+    kind="${_SHELL_MENU_KIND[$i]}"
+    if [[ "$kind" != "$previous" ]]; then
+      label="$(_shell_menu_label "$kind")"
+      [[ -z "$previous" ]] || printf '\n' >&2
+      printf '%b%s%b\n' "$CYAN" "$label" "$NC" >&2
+      previous="$kind"
+    fi
+    printf '  %2d) %s\n' "$((i + 1))" "${_SHELL_MENU_NAME[$i]}" >&2
+  done
+}
+
+_shell_selector_is_tty() {
+  [[ -t 0 ]]
+}
+
+_shell_menu_match_name() {
+  local answer="${1:-}" i count=0 match=''
+  for ((i = 0; i < ${#_SHELL_MENU_NAME[@]}; i++)); do
+    if [[ "${_SHELL_MENU_NAME[$i]}" == "$answer" ]]; then
+      ((count += 1))
+      match="${_SHELL_MENU_SELECTOR[$i]}"
+    fi
+  done
+
+  if ((count == 1)); then
+    printf '%s' "$match"
+    return 0
+  fi
+  if ((count > 1)); then
+    printf '%bAmbiguous name:%b %s\n' "$YELLOW" "$NC" "$answer" >&2
+    printf 'Use one of:\n' >&2
+    for ((i = 0; i < ${#_SHELL_MENU_NAME[@]}; i++)); do
+      [[ "${_SHELL_MENU_NAME[$i]}" == "$answer" ]] &&
+        printf '  %s\n' "${_SHELL_MENU_SELECTOR[$i]}" >&2
+    done
+    return 65
+  fi
+  return 66
+}
+
+_shell_choose_target() {
+  _shell_menu_build
+  (("${#_SHELL_MENU_NAME[@]}" > 0)) || {
+    err "No shell targets are available"
+    return 66
+  }
+
+  _shell_menu_print
+
+  if ! _shell_selector_is_tty; then
+    err "No TTY to prompt. Use: lds shell <target>"
+    return 64
+  fi
+
+  local answer='' i selector rc
+  while true; do
+    read -r -p "Enter number or name: " answer
+    answer="${answer#"${answer%%[![:space:]]*}"}"
+    answer="${answer%"${answer##*[![:space:]]}"}"
+
+    if [[ "$answer" =~ ^[0-9]+$ ]]; then
+      if ((answer >= 1 && answer <= ${#_SHELL_MENU_SELECTOR[@]})); then
+        printf '%s' "${_SHELL_MENU_SELECTOR[$((answer - 1))]}"
+        return 0
+      fi
+      printf '%bOut of range.%b\n' "$YELLOW" "$NC" >&2
+      continue
+    fi
+
+    for ((i = 0; i < ${#_SHELL_MENU_SELECTOR[@]}; i++)); do
+      if [[ "${_SHELL_MENU_SELECTOR[$i]}" == "$answer" ]]; then
+        printf '%s' "$answer"
+        return 0
+      fi
+    done
+
+    if selector="$(_shell_menu_match_name "$answer")"; then
+      printf '%s' "$selector"
+      return 0
+    else
+      rc=$?
+    fi
+    ((rc == 65)) && continue
+
+    printf '%bUnknown target.%b %s\n' "$YELLOW" "$NC" "$answer" >&2
+  done
+}
+
+cmd_shell() {
+  local target="${1:-}"
+  if [[ -z "$target" ]]; then
+    target="$(_shell_choose_target)" || return $?
+  else
+    shift || true
+  fi
+
+  _shell_resolve_target "$target" || return $?
+
+  if (($# == 0)); then
+    _shell_context_open
+    return $?
+  fi
+
+  case "${1:-}" in
+  --)
+    shift
+    (($# > 0)) || {
+      err "Usage: lds shell <target> -- <command> [args...]"
+      return 64
+    }
+    _shell_context_exec_argv "$@"
+    ;;
+  --shell)
+    shift
+    (($# == 1)) || {
+      err "Usage: lds shell <target> --shell <shell-expression>"
+      return 64
+    }
+    _shell_context_exec_expression "$1"
+    ;;
+  --interactive | -i)
+    shift
+    (($# > 0)) || {
+      err "Usage: lds shell <target> --interactive <command> [args...]"
+      return 64
+    }
+    _shell_context_exec_interactive "$@"
+    ;;
+  *)
+    _shell_context_exec_argv "$@"
+    ;;
+  esac
+}
+
+cmd_core() {
+  local target="${1:-}"
+  [[ -n "$target" ]] && shift || true
+
+  if [[ -z "$target" ]]; then
+    target="$(_core_choose_domain)" || return $?
+  fi
+
+  [[ "${1:-}" == -- ]] && shift
+
+  if _core_is_domain "$target"; then
+    _shell_context_reset
+    _shell_resolve_domain "$target" || return $?
+  else
+    _shell_resolve_service_or_container "$target" || return $?
+  fi
+
+  if (($# > 0)); then
+    _shell_context_exec_argv "$@"
+  else
+    _shell_context_open
+  fi
 }
 
 cmd_setup() {

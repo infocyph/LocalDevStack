@@ -5,6 +5,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 "$ROOT/tests/static.sh"
 "$ROOT/tests/cli-contract.sh"
+"$ROOT/tests/execution-contract.sh"
+"$ROOT/tests/container-exec-contract.sh"
 "$ROOT/tests/env-contract.sh"
 "$ROOT/tests/catalog-contract.sh"
 "$ROOT/tests/compose-contract.sh"

@@ -434,6 +434,12 @@ on_error() {
 source "$DIR/lib/compose.sh"
 
 ###############################################################################
+# 1a.1 SHARED CONTAINER EXECUTION
+###############################################################################
+# shellcheck source=lib/container-exec.sh
+source "$DIR/lib/container-exec.sh"
+
+###############################################################################
 # 1b. PROMPTS + DOTENV HELPERS
 ###############################################################################
 # shellcheck source=lib/env.sh
@@ -764,12 +770,22 @@ cmd_help() {
 - `lds images`
 - `lds urls`
 
-## Tools / shells / secrets
-- `lds tools sh`
-- `lds tools exec "<cmd>"`
-- `lds tools file <path>`
-- `lds cli <container> [cmd...]`
-- `lds core [domain|container]`
+## Execution / shells
+- `lds shell` — grouped interactive selector for domains, application directories, services, containers, and Tools.
+- `lds shell <target>` — open an interactive shell in the resolved context.
+- `lds shell <target> [--] <command> [args...]` — argv-preserving execution.
+- `lds shell <target> --shell <shell-expression>` — intentional shell parsing.
+- `lds shell <target> --interactive <command> [args...]` — interactive/TUI argv execution.
+- Qualified selectors: `domain:`, `app:`, `service:`, `container:`, `utility:tools`.
+- `lds core [domain|service|container] [--] [command...]` — compatibility application/domain-aware execution with resolved working directory.
+- `lds cli <service|container> [--] [command...]` — generic current-project service or exact-container execution.
+- `lds stack exec <service> [--] [command...]` *(alias: `lds exec`)* — Compose-service-only execution.
+- `lds tools sh` — interactive shell in the project `server-tools` container.
+- `lds tools exec [--] <command> [args...]` — argv-preserving execution in `server-tools`.
+- `lds tools shell-exec <shell-expression>` — intentional shell parsing in `server-tools`.
+- `lds tools file <path>` — inspect a file inside `server-tools`.
+
+## Secrets
 - `lds secrets <senv-args...>`
 
 ## AI consumer
@@ -821,8 +837,6 @@ ${CYAN}Stack:${NC}
 ${CYAN}Domains:${NC}
   domain add|rm|ls
   host add|rm|list                     Legacy aliases
-  core [domain|container]
-  cli <container> [cmd...]
 
 ${CYAN}Setup / Profiles:${NC}
   setup init|permissions|domain|profile|profiles
@@ -848,8 +862,17 @@ ${CYAN}Config:${NC}
   images
   urls
 
-${CYAN}Tools / Secrets:${NC}
-  tools sh|exec|file
+${CYAN}Execution / Shells:${NC}
+  shell [target] [--] [command...]                    Unified selector/execution
+  shell <target> --shell <expression>                 Intentional shell syntax
+  shell <target> --interactive <command> [args...]    Interactive/TUI command
+  qualifiers: domain: app: service: container: utility:tools
+  core [domain|service|container] [--] [command...]   Compatibility domain/app entry
+  cli <service|container> [--] [command...]          Generic service/container exec
+  stack exec <service> [--] [command...]             Compose-service only
+  tools sh|exec|shell-exec|file                       server-tools only
+
+${CYAN}Secrets:${NC}
   secrets <senv-args...>
 
 ${CYAN}AI:${NC}
@@ -877,6 +900,15 @@ ${CYAN}Help:${NC}
 EOF
 }
 
+
+_is_public_lds_command() {
+  case "${1:-}" in
+  stack|domain|support|bundle|up|start|down|stop|restart|reboot|status|ps|logs|exec|events|clean|config|http|host|setup|profiles|cert|certificate|doctor|diag|sniff|open|notify|ui|images|urls|tools|cli|core|shell|graphify|secrets|rebuild|run)
+    return 0
+    ;;
+  esac
+  return 1
+}
 
 ###############################################################################
 # 7. MAIN
@@ -953,7 +985,7 @@ main() {
   llm) cmd_llm "$@" ;;
   vpn-fix) cmd_vpn_fix "$@" ;;
   *)
-    if declare -F "cmd_$cmd" >/dev/null 2>&1; then
+    if _is_public_lds_command "$cmd"; then
       "cmd_$cmd" "$@"
     else
       exec "$DIR/bin/tool-runner" "$cmd" "$@"

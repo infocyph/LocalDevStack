@@ -47,13 +47,17 @@ Status and Logs
 ``lds status`` delegates the richer status view to Tools. ``lds ps`` uses Compose
 directly.
 
-Execute a command in a service::
+Execute a command in an exact current-project service through the canonical
+execution surface::
 
-   lds stack exec nginx nginx -t
+   lds shell service:nginx -- nginx -t
 
-Open an interactive shell when no command is supplied::
+Open an interactive shell in that service::
 
-   lds stack exec nginx
+   lds shell service:nginx
+
+``lds stack exec nginx ...`` and the top-level ``lds exec nginx ...`` alias remain
+service-only compatibility forms.
 
 Stack Diff
 ----------

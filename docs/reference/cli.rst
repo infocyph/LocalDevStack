@@ -35,7 +35,7 @@ Stack
    lds stack status [status-args...]
    lds stack ps
    lds stack logs [service] [--follow] [--since <duration>] [--grep <pattern>]
-   lds stack exec <service> [command...]
+   lds stack exec <service> [--] [command...]
    lds stack events [since]
    lds stack clean --yes [--volumes] [--global]
    lds stack diff [--config] [--json]
@@ -155,23 +155,71 @@ Shortcuts::
    lds notify ...
    lds ui
 
-Tools Control Plane
--------------------
+Execution and Shells
+--------------------
 
-::
+``lds shell`` is the canonical execution/navigation surface.
 
+With no arguments it builds a stable grouped catalog::
+
+   Applications / Domains
+   Application Directories
+   Services
+   Containers
+   Utilities
+
+The groups contain discovered domains, direct ``server-tools:/app`` child
+directories, current-project Compose services, running Docker containers, and
+the ``tools`` utility target::
+
+   lds shell
+
+The selector accepts the displayed global number or an exact name. If the same
+name exists in multiple categories, use a qualified selector::
+
+   domain:project.localhost
+   app:project
+   service:php84
+   container:localdevstack-php84-1
+   utility:tools
+
+Explicit targets use deterministic precedence: exact discovered domain, reserved
+``tools`` target, exact current-project service, exact Docker container, then an
+exact direct child ``/app/<target>`` inside the current project's server-tools
+container. No fuzzy matching or implicit case conversion is performed. Image
+names are not implicitly instantiated.
+
+Canonical forms::
+
+   lds shell <target>
+   lds shell <target> [--] <command> [args...]
+   lds shell <target> --shell <shell-expression>
+   lds shell <target> --interactive <command> [args...]
+
+Domain targets retain application-aware working-directory behavior: Node uses
+``/app``; other applications use the resolved document root when available,
+then ``/app`` and ``/``. Application-directory fallback opens
+``server-tools`` at ``/app/<target>``.
+
+Normal command forms preserve argv exactly. ``--shell`` is the explicit escape
+hatch for pipelines, redirections, and compound shell syntax.
+``--interactive`` routes argv through the shared real-TTY execution helper.
+Interactive shells and TUIs require a real TTY on both stdin and stdout; piped
+commands keep stdin without forcing a TTY.
+
+New documentation and interactive workflows should prefer ``lds shell``.
+The older execution surfaces remain compatible during migration::
+
+   lds core [domain|service|container] [--] [command...]
+   lds cli <service|container> [--] [command...]
+   lds stack exec <service> [--] [command...]
    lds tools sh
-   lds tools exec "<command>"
+   lds tools exec [--] <command> [args...]
+   lds tools shell-exec <shell-expression>
    lds tools file <path>
 
-Open a generic container shell or run a command::
-
-   lds cli <container>
-   lds cli <container> <command...>
-
-Resolve a domain/container to its application shell::
-
-   lds core [domain|container]
+``stack exec`` remains service-only. ``tools file`` remains inspection
+functionality rather than generic shell navigation.
 
 Secrets
 -------
@@ -277,6 +325,12 @@ Generic service operations also accept ``llm`` and resolve it to the active prov
    lds restart llm
    lds exec llm ...
    lds rebuild llm
+
+The logical ``llm`` name is an operational alias handled by those service commands.
+``lds shell service:<name>`` is intentionally exact and does not rewrite logical
+service aliases. For the canonical shell navigator, target the active provider service
+explicitly as ``service:llm-fastflow`` or ``service:llm-ollama``. The
+``lds exec llm`` form remains the provider-neutral compatibility path.
 
 FastFlow/NPU and Ollama both default to ``qwen3.5:9b``. Leaving ``LDS_AI_MODEL``
 blank allows the provider default to apply.

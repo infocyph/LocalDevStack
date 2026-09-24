@@ -20,9 +20,8 @@ runner="$ROOT/docs/guides/ad-hoc-runner.rst"
 notify="$ROOT/docs/guides/notifications.rst"
 secrets="$ROOT/docs/guides/secrets-sops-age.rst"
 cli="$ROOT/docs/reference/cli.rst"
-plan="$ROOT/docs/plans/lds-core-cli-hardening-plan.md"
 
-for file in "$index" "$readme" "$quick" "$arch" "$profiles" "$storage" "$domain" "$tls" "$ai" "$databases" "$ops" "$runner" "$notify" "$secrets" "$cli" "$plan"; do
+for file in "$index" "$readme" "$quick" "$arch" "$profiles" "$storage" "$domain" "$tls" "$ai" "$databases" "$ops" "$runner" "$notify" "$secrets" "$cli"; do
   assert_file "$file"
 done
 
@@ -44,6 +43,14 @@ assert_file_contains "$ops" 'lds support bundle'
 assert_file_contains "$ops" 'lds clean --global --yes'
 assert_file_contains "$runner" 'lds run --sock'
 assert_file_contains "$notify" 'Windows/Git Bash'
+assert_file_contains "$arch" 'lds shell'
+assert_file_contains "$arch" 'utility:tools'
+assert_file_contains "$quick" 'lds shell'
+assert_file_contains "$domain" 'lds shell project.localhost'
+assert_file_contains "$domain" 'lds shell service:php84'
+assert_file_contains "$ops" 'lds shell service:nginx -- nginx -t'
+assert_file_contains "$secrets" 'lds shell tools'
+assert_file_contains "$databases" 'lds shell service:postgres'
 pass "docs describe current architecture, operations, and complete user surfaces"
 
 assert_file_contains "$profiles" 'docker/release.env'
@@ -81,9 +88,14 @@ assert_file_contains "$ai" 'docker/compose/companion.yaml'
 assert_file_contains "$ai" 'docker/.runtime/'
 assert_file_contains "$ai" 'lds llm runtime npu'
 assert_file_contains "$ai" 'lds logs llm'
+assert_file_contains "$ai" 'lds shell service:llm-fastflow'
+assert_file_contains "$ai" 'lds shell service:llm-ollama'
 assert_file_contains "$cli" 'lds restart llm'
 assert_file_contains "$cli" 'lds exec llm'
 assert_file_contains "$cli" 'lds rebuild llm'
+assert_file_contains "$cli" 'does not rewrite logical'
+assert_file_contains "$cli" 'service:llm-fastflow'
+assert_file_contains "$cli" 'service:llm-ollama'
 assert_file_contains "$ai" 'backend=lds-fastflow'
 assert_file_contains "$ai" 'backend=lds-ollama'
 assert_file_contains "$ai" 'extra_body={"think": false}'
@@ -145,10 +157,38 @@ pass "documentation toctree targets exist"
 
 
 help_md="$("$ROOT/lds" help --markdown)"
-for required in   'lds profiles add <profile...>'   'lds support trace <domain>'   'lds support bundle [--redact|--full] [output.zip]'   'lds cli <container> [cmd...]'   'lds run shell|ps|logs|stop|rm|open'   'MongoDB:'   'Elasticsearch:'; do
+for required in   'lds profiles add <profile...>'   'lds support trace <domain>'   'lds support bundle [--redact|--full] [output.zip]'   'lds shell <target> [--] <command> [args...]'   'lds shell <target> --shell <shell-expression>'   'lds cli <service|container> [--] [command...]'   'lds core [domain|service|container] [--] [command...]'   'lds stack exec <service> [--] [command...]'   'lds tools exec [--] <command> [args...]'   'lds tools shell-exec <shell-expression>'   'lds run shell|ps|logs|stop|rm|open'   'MongoDB:'   'Elasticsearch:'; do
   assert_contains "$help_md" "$required"
 done
 pass "embedded CLI help covers documented command groups"
+
+assert_file_contains "$cli" 'Execution and Shells'
+assert_file_contains "$cli" 'lds shell <target> [--] <command> [args...]'
+assert_file_contains "$cli" 'Applications'
+assert_file_contains "$cli" 'domain:project.localhost'
+assert_file_contains "$cli" 'utility:tools'
+assert_file_contains "$cli" 'Image'
+assert_file_contains "$cli" 'lds core [domain|service|container] [--] [command...]'
+assert_file_contains "$cli" 'lds cli <service|container> [--] [command...]'
+assert_file_contains "$cli" 'lds stack exec <service> [--] [command...]'
+assert_file_contains "$cli" 'lds tools exec [--] <command> [args...]'
+assert_file_contains "$cli" 'lds tools shell-exec <shell-expression>'
+assert_file_contains "$cli" 'preserve argv exactly'
+assert_file_contains "$cli" 'require a real TTY'
+assert_file_contains "$readme" '## Execution and shells'
+assert_file_contains "$readme" 'lds shell'
+assert_file_contains "$readme" 'lds shell project.localhost -- php artisan about'
+assert_file_contains "$readme" 'lds shell php84 -- php -v'
+assert_file_contains "$readme" 'lds shell tools --interactive lazydocker'
+assert_file_contains "$readme" 'utility:tools'
+assert_contains "$help_md" 'utility:tools'
+if grep -Fq 'lds core project.localhost' "$domain"; then
+  fail "domain guide still teaches lds core as the primary domain shell"
+fi
+if grep -Fq 'lds cli <container>' "$domain"; then
+  fail "domain guide still teaches lds cli as the primary container shell"
+fi
+pass "execution-surface docs match the shared Core/CLI contract"
 
 
 for stale in LDS_TOOLS_IMAGE LDS_RUNNER_IMAGE LDS_NGINX_IMAGE LDS_APACHE_IMAGE; do
@@ -159,13 +199,7 @@ done
 assert_file_contains "$ai" 'Both provider definitions live in ``docker/compose/companion.yaml``'
 pass "docs reflect fixed infrastructure images and ephemeral AI overrides"
 
-assert_file_contains "$plan" 'lds cli'
-assert_file_contains "$plan" 'lds core'
-assert_file_contains "$plan" 'shared container execution substrate'
-assert_file_contains "$plan" 'preserve argv'
-assert_file_contains "$plan" 'adaptive `docker exec` flags'
-assert_file_contains "$plan" 'Windows/Git Bash'
-assert_file_contains "$plan" 'remove this plan when every item is complete'
-[[ ! -d "$ROOT/docs/plans/docker-ecosystem" ]] ||
-  fail "completed docker-ecosystem planning directory still exists"
-pass "active Core/CLI hardening plan is canonical and completed ecosystem plans are retired"
+if [[ -d "$ROOT/docs/plans" ]] && find "$ROOT/docs/plans" -type f -print -quit | grep -q .; then
+  fail "completed planning artifact remains under docs/plans"
+fi
+pass "completed LocalDevStack planning artifacts are retired"

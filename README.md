@@ -343,6 +343,36 @@ lds clean --global --yes
 
 That global mode can remove unrelated stopped containers, unused images/networks, build cache, and optionally volumes. `lds down --volumes --yes` is also destructive and should not be used for normal upgrades.
 
+## Execution and shells
+
+`lds shell` is the canonical execution navigator. With no arguments it presents a numbered catalog grouped as **Applications / Domains**, **Application Directories**, **Services**, **Containers**, and **Utilities**; choose by number, exact name, or a qualified selector.
+
+```bash
+# Interactive grouped selector.
+lds shell
+
+# Domain/application-aware shell and command.
+lds shell project.localhost
+lds shell project.localhost -- php artisan about
+
+# Current-project service or exact container.
+lds shell php84 -- php -v
+
+# Direct server-tools /app child fallback.
+lds shell billing
+
+# Reserved Tools target.
+lds shell tools -- jq --version
+
+# Intentional shell syntax or interactive TUI.
+lds shell tools --shell 'printf "%s\n" "hello world" | cat'
+lds shell tools --interactive lazydocker
+```
+
+Explicit unqualified targets resolve in this order: discovered domain, reserved `tools`, exact current-project service, exact container, then an exact direct child under `server-tools:/app`. Qualified `domain:`, `app:`, `service:`, `container:`, and `utility:tools` selectors bypass collisions. Image names are not implicitly instantiated.
+
+Normal commands preserve argv rather than being flattened into a shell string. Interactive shells/TUIs require a real TTY; piped/non-interactive commands do not force one. `core`, `cli`, `stack exec`, `exec`, and execution-oriented `tools` commands remain compatibility surfaces during migration. See `docs/reference/cli.rst` for target resolution and exit-code details.
+
 ## Ad-hoc Dockerfile runner
 
 From a directory containing a Dockerfile:

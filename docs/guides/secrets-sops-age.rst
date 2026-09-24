@@ -35,12 +35,12 @@ The LocalDevStack command::
 delegates directly to the Tools ``senv`` command inside the running ``server-tools``
 container.
 
-Use::
+Use the canonical Tools shell target::
 
-   lds tools sh
+   lds shell tools
 
 when you need to inspect the trusted Tools environment interactively before running a
-manual SOPS/Age operation.
+manual SOPS/Age operation. ``lds tools sh`` remains a compatibility form.
 
 Trust Boundary
 --------------

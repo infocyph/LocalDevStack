@@ -7,6 +7,8 @@ on:
       - "plan/**"
       - "feature/**"
       - "graphify/**"
+      - "core-cli/**"
+      - "lds-core-cli/**"
   pull_request:
   schedule:
     # Related moving latest images refresh weekly; re-run the full compatibility
@@ -40,6 +42,14 @@ jobs:
 
       - name: CLI contract
         run: tests/cli-contract.sh
+
+      - name: Execution baseline contract
+        run: tests/execution-contract.sh
+
+      - name: Container execution substrate contract
+        run: tests/container-exec-contract.sh
+
+
 
       - name: Environment contract
         run: tests/env-contract.sh
