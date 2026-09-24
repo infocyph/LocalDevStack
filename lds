@@ -783,6 +783,10 @@ cmd_help() {
 - `lds core [domain|service|container] [--] [command...]` — compatibility application/domain-aware execution with resolved working directory.
 - `lds cli <service|container> [--] [command...]` — generic current-project service or exact-container execution.
 - `lds stack exec <service> [--] [command...]` *(alias: `lds exec`)* — Compose-service-only execution.
+- `lds tools list` — show the curated Tools/Toolset catalog.
+- `lds tools <tool> [args...]` — run a Tools command in a temporary workspace-aware container.
+- `lds tools run <tool> [args...]` — explicit collision-safe form of the same runner.
+- `lds tools ui [args...]` — run lazydocker through the temporary Tools runner.
 - `lds tools sh` — interactive shell in the project `server-tools` container.
 - `lds tools exec [--] <command> [args...]` — argv-preserving execution in `server-tools`.
 - `lds tools shell-exec <shell-expression>` — intentional shell parsing in `server-tools`.
@@ -879,7 +883,9 @@ ${CYAN}Execution / Shells:${NC}
   core [domain|service|container] [--] [command...]   Compatibility domain/app entry
   cli <service|container> [--] [command...]          Generic service/container exec
   stack exec <service> [--] [command...]             Compose-service only
-  tools sh|exec|shell-exec|file                       server-tools only
+  tools list|run|ui                                  Curated/temporary Tools runner
+  tools <tool> [args...]                              Run a Tools command in workspace
+  tools sh|exec|shell-exec|file                       Long-running server-tools context
 
 ${CYAN}Secrets:${NC}
   secrets <senv-args...>
