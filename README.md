@@ -345,7 +345,7 @@ That global mode can remove unrelated stopped containers, unused images/networks
 
 ## Execution and shells
 
-`lds shell` is the canonical execution navigator. With no arguments it presents a numbered catalog grouped into domains, application directories, services, containers, and utilities; choose by number, exact name, or a qualified selector.
+`lds shell` is the canonical execution navigator. With no arguments it presents a numbered catalog grouped as **Applications / Domains**, **Application Directories**, **Services**, **Containers**, and **Utilities**; choose by number, exact name, or a qualified selector.
 
 ```bash
 # Interactive grouped selector.
@@ -369,7 +369,7 @@ lds shell tools --shell 'printf "%s\n" "hello world" | cat'
 lds shell tools --interactive lazydocker
 ```
 
-Explicit unqualified targets resolve in this order: discovered domain, reserved `tools`, exact current-project service, exact container, then an exact direct child under `server-tools:/app`. Qualified `domain:`, `app:`, `service:`, and `container:` selectors bypass collisions. Image names are not implicitly instantiated.
+Explicit unqualified targets resolve in this order: discovered domain, reserved `tools`, exact current-project service, exact container, then an exact direct child under `server-tools:/app`. Qualified `domain:`, `app:`, `service:`, `container:`, and `utility:tools` selectors bypass collisions. Image names are not implicitly instantiated.
 
 Normal commands preserve argv rather than being flattened into a shell string. Interactive shells/TUIs require a real TTY; piped/non-interactive commands do not force one. `core`, `cli`, `stack exec`, `exec`, and execution-oriented `tools` commands remain compatibility surfaces during migration. See `docs/reference/cli.rst` for target resolution and exit-code details.
 
