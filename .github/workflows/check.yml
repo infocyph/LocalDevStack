@@ -185,6 +185,17 @@ jobs:
       - name: Validate published compatibility images
         run: tests/published-images.sh
 
+      - name: Smoke host document conversion
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          mkdir -p "$tmp/input" "$tmp/output"
+          printf '# LocalDevStack conversion\n\nPandoc-backed host document.\n' >"$tmp/input/source.md"
+          ./lds convert "$tmp/input/source.md" "$tmp/output/source.html" --standalone
+          grep -Fq '<h1' "$tmp/output/source.html"
+          ./lds convert --list-input-formats | grep -qx markdown
+
   windows-bridge:
     name: Windows bridge
     runs-on: windows-latest
