@@ -136,6 +136,10 @@ writers available in the current image.
 Image conversion uses ImageMagick::
 
    lds convert image photo.jpg photo.webp -- -quality 82
+Audio/video conversion uses FFmpeg::
+
+   lds convert audio recording.wav recording.mp3
+   lds convert video recording.mov recording.mp4
 
 
 Updating an Existing Installation
