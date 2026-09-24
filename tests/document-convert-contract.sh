@@ -102,7 +102,7 @@ pass "document conversion overwrite protection"
 
 before="$(wc -l <"$log" | tr -d '[:space:]')"
 set +e
-DOCUMENT_CONVERT_TEST_LOG="$log" PATH="$bin:$PATH"   "$ROOT/lds" convert --force "$input" "$output" -- -o elsewhere.html >/dev/null 2>"$tmp/output-option.err"
+DOCUMENT_CONVERT_TEST_LOG="$log" PATH="$bin:$PATH"   "$ROOT/lds" convert --force "$input" "$output" -- -oelsewhere.html >/dev/null 2>"$tmp/output-option.err"
 rc=$?
 set -e
 after="$(wc -l <"$log" | tr -d '[:space:]')"
@@ -110,7 +110,19 @@ after="$(wc -l <"$log" | tr -d '[:space:]')"
 [[ "$before" == "$after" ]] || fail "conflicting output option reached Docker"
 grep -Fq 'owns Pandoc output selection' "$tmp/output-option.err" ||
   fail "conflicting output option diagnostic missing"
-pass "document conversion owns output path"
+ln -s "$input" "$tmp/Output Docs/input-link.md"
+before="$(wc -l <"$log" | tr -d '[:space:]')"
+set +e
+DOCUMENT_CONVERT_TEST_LOG="$log" PATH="$bin:$PATH" \
+  "$ROOT/lds" convert --force "$input" "$tmp/Output Docs/input-link.md" >/dev/null 2>"$tmp/same.err"
+rc=$?
+set -e
+after="$(wc -l <"$log" | tr -d '[:space:]')"
+[[ "$rc" -eq 64 ]] || fail "input/output symlink collision returned $rc instead of 64"
+[[ "$before" == "$after" ]] || fail "input/output symlink collision reached Docker"
+grep -Fq 'Input and output must be different files' "$tmp/same.err" ||
+  fail "input/output symlink collision diagnostic missing"
+pass "document conversion blocks in-place and symlink overwrite"
 
 formats="$(
   DOCUMENT_CONVERT_TEST_LOG="$log" PATH="$bin:$PATH"     "$ROOT/lds" convert --list-input-formats
