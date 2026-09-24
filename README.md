@@ -243,9 +243,12 @@ lds tools ui
 
 `lds tools <tool>` starts a temporary Tools container with the current host directory at
 `/workspace`, shares the running server-tools network/volumes, preserves stdin/TTY, and
-inherits the active LDS AI/Git runtime settings. Use `lds tools run <tool> ...` when a
-tool name collides with an LDS `tools` subcommand. The older `tools sh/exec/file`
-forms continue to target the long-running control-plane container.
+inherits the active LDS AI/Git runtime settings. Because `server-tools` owns the Docker
+socket and trusted control-plane/secret mounts, this runner is a privileged workstation
+context—not a sandbox—and should be used only with trusted commands from the Tools image.
+Use `lds tools run <tool> ...` when a tool name collides with an LDS `tools` subcommand.
+The older `tools sh/exec/file` forms continue to target the long-running control-plane
+container.
 
 ## File conversion
 
