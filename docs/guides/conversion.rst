@@ -86,3 +86,46 @@ Raster/image conversion uses ImageMagick from the same Tools image::
    lds convert image animation.gif preview.jpg
 
 Use ``lds convert image --formats`` to inspect the delegates/formats available in the current image. Static outputs such as JPEG and PNG use the first frame of animated inputs by default; animation-capable GIF/WebP outputs preserve frames when supported.
+
+Audio and Video Conversion
+--------------------------
+
+Audio and video conversion use FFmpeg from the Tools image::
+
+   lds convert audio recording.wav recording.mp3
+   lds convert audio recording.wav recording.ogg -- -c:a libopus -b:a 128k
+   lds convert video recording.mov recording.mp4
+   lds convert video recording.mkv recording.webm -- -c:v libvpx-vp9 -crf 32 -b:v 0
+
+The first-class media converter owns one input, overwrite policy, and one output path.
+FFmpeg output options are passed after the input as exact argv. LDS reserves ``-i``,
+``-y``, and ``-n`` because it owns input/output and ``--force`` behavior.
+
+Inspect FFmpeg capabilities with::
+
+   lds convert audio --formats
+   lds convert audio --codecs
+   lds convert audio --encoders
+   lds convert video --version
+
+For multi-input, concat, capture, or complex filtergraph workflows use the raw Tools
+surface instead::
+
+   lds tools ffmpeg ...
+   lds tools ffprobe media.mkv
+
+Specialist Media Tools
+----------------------
+
+The Tools image also exposes media utilities directly::
+
+   lds tools sox ...
+   lds tools soxi recording.wav
+   lds tools mkvmerge ...
+   lds tools mkvinfo media.mkv
+   lds tools mkvextract ...
+   lds tools mkvpropedit ...
+   lds tools mediainfo media.mkv
+
+``xvidcore`` is installed as an explicit FFmpeg codec runtime dependency; it is a
+library rather than a standalone command.
