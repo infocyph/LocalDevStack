@@ -28,7 +28,7 @@ LocalDevStack is designed for trusted developer workstations, not production dep
 
    guides/domain-setup
    guides/databases-and-clients
-   guides/document-conversion
+   guides/conversion
    guides/tls-and-certificates
    guides/local-ai
    guides/operations-and-support
