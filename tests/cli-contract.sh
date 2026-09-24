@@ -74,6 +74,13 @@ assert_contains "$markdown_output" "lds convert image [--force] <input> <output>
 assert_contains "$markdown_output" "lds convert image --formats"
 pass "docs and image conversion are exposed in embedded help"
 
+assert_contains "$help_output" "tools list|run|ui"
+assert_contains "$help_output" "tools <tool> [args...]"
+assert_contains "$markdown_output" "lds tools list"
+assert_contains "$markdown_output" "lds tools <tool> [args...]"
+assert_contains "$markdown_output" "lds tools run <tool> [args...]"
+pass "Tools catalog and temporary runner are exposed in embedded help"
+
 graphify_log="$(mktemp)"
 cat >"$tmpbin/graphify" <<'SH'
 #!/usr/bin/env sh
