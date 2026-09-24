@@ -66,6 +66,26 @@ server_tools_env_value() {
     | awk -F= -v k="$key" '$1==k { sub(/^[^=]*=/, ""); print; exit }'
 }
 
+stdin_has_data() {
+  [[ -p /dev/stdin || -f /dev/stdin ]]
+}
+
+append_server_tools_env() {
+  local key value
+  local -n target="${1:?}"
+
+  for key in \
+    TZ USERNAME GIT_USER_NAME GIT_USER_EMAIL GIT_CREDENTIAL_MODE \
+    LDS_AI_ENABLED LDS_AI_RUNTIME LDS_AI_MODEL LDS_AI_THINK \
+    LDS_AI_CONNECT_TIMEOUT LDS_AI_PREFLIGHT_TIMEOUT LDS_AI_TIMEOUT \
+    LDS_AI_AVAILABILITY_TTL LDS_AI_MAX_CONTEXT_BYTES \
+    LDS_AI_MAX_REQUEST_BYTES LDS_AI_MAX_RESPONSE_BYTES
+  do
+    value="$(server_tools_env_value "$key" || true)"
+    [[ -n "$value" ]] && target+=(-e "$key=$value")
+  done
+}
+
 resolve_workspace() {
   local workdir git_root
 
@@ -100,15 +120,13 @@ main() {
   server_tools_running || die "$SERVER_TOOLS_CONTAINER is not running"
   server_tools_has "$cmd" || die "command '$cmd' not found in $SERVER_TOOLS_CONTAINER"
 
-  local image workspace tz username home_dir
+  local image workspace home_dir
   image="$(server_tools_image)" || die "unable to inspect $SERVER_TOOLS_CONTAINER image"
   [[ -n "$image" ]] || die "unable to resolve $SERVER_TOOLS_CONTAINER image"
 
   workspace="$(resolve_workspace)"
   [[ -n "$workspace" ]] || die "unable to resolve workspace"
 
-  tz="$(server_tools_env_value TZ || true)"
-  username="$(server_tools_env_value USERNAME || true)"
   home_dir="/home/root"
 
   local -a flags envs
@@ -120,14 +138,15 @@ main() {
     -e TERM="${TERM:-xterm-256color}"
   )
 
-  [[ -n "$tz" ]] && envs+=(-e TZ="$tz")
-  [[ -n "$username" ]] && envs+=(-e USERNAME="$username")
+  append_server_tools_env envs
   [[ -n "${COLORTERM:-}" ]] && envs+=(-e COLORTERM="$COLORTERM")
   [[ -n "${NO_COLOR:-}" ]] && envs+=(-e NO_COLOR="$NO_COLOR")
   [[ -n "${CLICOLOR_FORCE:-}" ]] && envs+=(-e CLICOLOR_FORCE="$CLICOLOR_FORCE")
   [[ -n "${FORCE_COLOR:-}" ]] && envs+=(-e FORCE_COLOR="$FORCE_COLOR")
 
-  [[ -t 0 ]] && flags+=(-i)
+  if [[ -t 0 ]] || stdin_has_data; then
+    flags+=(-i)
+  fi
   [[ -t 1 ]] && flags+=(-t)
 
   if [[ -n "${MSYSTEM:-}${CYGWIN:-}" ]]; then
