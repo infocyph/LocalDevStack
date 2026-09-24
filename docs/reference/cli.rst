@@ -262,11 +262,14 @@ Graphify's raw semantic LLM extractor. Other semantic formats remain Graphify-ow
 Use ``LDS_GRAPHIFY_DOCSTRUCT=off`` to force the legacy path,
 ``LDS_GRAPHIFY_DOCSTRUCT=on`` to require the deterministic path, and
 ``LDS_GRAPHIFY_DOC_REVIEW=off|auto|on`` to control bounded semantic review.
-For a brand-new graph it performs a code-only ``extract --no-cluster`` first, clusters
-that structural graph, then performs a normal incremental ``extract --no-cluster`` to
-enrich docs/papers/images and reclusters and force-relabels the combined graph again. Existing graphs use a
-single incremental extract followed by one ``cluster-only`` pass. Explicit ``--code-only``
-remains a single structural build.
+For a brand-new docstruct-enabled graph it performs a code-only
+``extract --no-cluster``, then a second ``extract --no-cluster`` for semantic
+formats not owned by docstruct. The deterministic document layer is merged into a staged
+graph, and LocalDevStack runs an isolated LLM-free
+``graphify cluster-only --no-label --no-viz`` round trip before publishing it. The
+normal ``graphify label`` pass then relabels the canonical combined graph. Existing
+docstruct-enabled graphs use the same staged merge + canonicalization before labeling.
+Explicit ``--code-only`` remains a single structural build.
 
 For the built-in local route, LocalDevStack creates a temporary Graphify provider
 configuration that points directly to ``http://llm.localhost:11434/v1``. No Graphify
