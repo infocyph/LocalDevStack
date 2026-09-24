@@ -53,6 +53,7 @@ jobs:
         run: |
           bash tests/document-convert-contract.sh
           bash tests/image-convert-contract.sh
+          bash tests/media-convert-contract.sh
 
       - name: Environment contract
         run: tests/env-contract.sh
