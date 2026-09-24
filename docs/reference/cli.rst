@@ -246,7 +246,10 @@ The older execution surfaces remain compatible during migration::
 ``tools <tool>`` and ``tools run`` start a short-lived Tools container with the
 current host workspace mounted at ``/workspace``, inherit the active server-tools
 network/volumes and selected LDS AI/Git environment, preserve stdin/TTY, then remove the
-container. This is the preferred surface for Toolset utilities such as ``gitx``,
+container. The inherited volumes include the Docker socket and trusted control-plane /
+secret material, so this is a privileged workstation context rather than a sandbox and
+must be used only with trusted Tools-image commands. This is the preferred surface for
+Toolset utilities such as ``gitx``,
 ``sqlitex``, ``chromacat``, and ``netx``, plus bundled utilities such as
 ``jq``, ``yq``, ``rg``, ``fd``, ``tree``, ``shellcheck``,
 ``ncdu``, ``zip``, and ``unzip``.
