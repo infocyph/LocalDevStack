@@ -836,6 +836,18 @@ Toolset:
   chromacat   Pipeline-safe colour/log/banner presentation
   netx        Network/DNS/TLS/HTTP diagnostics from the Tools network context
 
+Media:
+  ffmpeg      audio/video transcode, remux and filter
+  ffprobe     stream/container probing
+  sox         audio processing/effects
+  soxi        audio metadata inspection
+  mkvmerge    Matroska muxing/remuxing
+  mkvinfo     Matroska structure inspection
+  mkvextract  Matroska stream/attachment extraction
+  mkvpropedit Matroska property editing
+  mediainfo   media/container metadata inspection
+  xvidcore    codec runtime used by FFmpeg (library; no standalone CLI)
+
 Data / search:
   jq          JSON processor
   yq          YAML processor
@@ -862,6 +874,9 @@ Examples:
   lds tools sqlitex --db app.db tables
   cat app.log | lds tools chromacat --log
   lds tools netx route show
+  lds tools ffprobe media.mkv
+  lds tools mediainfo media.mkv
+  lds tools soxi recording.wav
   lds tools jq --version
 
 Any non-reserved tool name is delegated to the current Tools image. Use
