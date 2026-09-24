@@ -116,6 +116,11 @@ Useful First Checks
    lds config validate
    lds status
    lds ps
+   lds shell
+
+``lds shell`` opens the grouped execution selector for domains, application
+directories, services, containers, and Tools. Select by number or exact name; use a
+qualified target when names collide.
 
 ``lds config show`` is redacted by default. Use ``--raw`` only when unredacted output is
 deliberately required.
