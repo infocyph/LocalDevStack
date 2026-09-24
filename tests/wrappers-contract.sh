@@ -85,6 +85,8 @@ exit 0
 SH
 chmod +x "$runner_bin/docker"
 
+runner_err="$runner_tmp/runner.err"
+set +e
 printf '%s\n' 'stream payload' | (
   cd "$runner_workspace"
   PATH="$runner_bin:$PATH" \
@@ -92,7 +94,13 @@ printf '%s\n' 'stream payload' | (
   TOOL_RUNNER_TEST_LOG="$runner_log" \
   TOOL_RUNNER_TEST_STDIN="$runner_stdin" \
     "$runner" chromacat --log
-)
+) 2>"$runner_err"
+runner_rc=$?
+set -e
+if ((runner_rc != 0)); then
+  cat "$runner_err" >&2 || true
+  fail "tool-runner mock exited $runner_rc"
+fi
 
 assert_file_contains "$runner_log" '<-i>'
 assert_file_contains "$runner_log" '<--network> <container:SERVER_TOOLS>'
