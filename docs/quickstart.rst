@@ -127,10 +127,15 @@ deliberately required.
 
 Document conversion is also available without starting the stack::
 
-   lds convert README.md README.html
+   lds convert docs README.md README.html
 
-Pandoc runs from the Tools image; use ``lds convert --list-output-formats`` to inspect the
+Pandoc runs from the Tools image; use ``lds convert docs --list-output-formats`` to inspect the
 writers available in the current image.
+
+Image conversion uses ImageMagick::
+
+   lds convert image photo.jpg photo.webp -- -quality 82
+
 
 Updating an Existing Installation
 ---------------------------------
