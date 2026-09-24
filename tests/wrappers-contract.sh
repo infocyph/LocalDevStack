@@ -20,12 +20,17 @@ done
 pass "wrapper syntax and Docker-DNS independence"
 
 runner="$ROOT/bin/tool-runner"
-assert_file_contains "$runner" '[[ -t 0 ]] && flags+=(-i)'
+assert_file_contains "$runner" 'stdin_has_data()'
+assert_file_contains "$runner" 'if [[ -t 0 ]] || stdin_has_data; then'
 assert_file_contains "$runner" '[[ -t 1 ]] && flags+=(-t)'
 assert_file_contains "$runner" 'MSYS_NO_PATHCONV=1'
 assert_file_contains "$runner" 'MSYS2_ARG_CONV_EXCL='
 assert_file_contains "$runner" '--network "container:$SERVER_TOOLS_CONTAINER"'
 assert_file_contains "$runner" '--volumes-from "$SERVER_TOOLS_CONTAINER"'
+assert_file_contains "$runner" 'append_server_tools_env envs'
+assert_file_contains "$runner" 'LDS_AI_RUNTIME'
+assert_file_contains "$runner" 'LDS_AI_MODEL'
+assert_file_contains "$runner" 'GIT_CREDENTIAL_MODE'
 assert_file_contains "$runner" 'exec "$(bin_path docker)" run'
 pass "tool-runner preserves TTY, path, namespace and exit-code contracts"
 
