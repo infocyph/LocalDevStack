@@ -17,6 +17,10 @@ Usage:
   lds convert docs --list-input-formats|--list-output-formats|--version
   lds convert image [--force] <input> <output> [--] [imagemagick-options...]
   lds convert image --formats|--version
+  lds convert audio [--force] <input> <output> [--] [ffmpeg-output-options...]
+  lds convert audio --formats|--codecs|--encoders|--version
+  lds convert video [--force] <input> <output> [--] [ffmpeg-output-options...]
+  lds convert video --formats|--codecs|--encoders|--version
 
 Examples:
   lds convert docs README.md README.html
@@ -24,6 +28,8 @@ Examples:
   lds convert image photo.jpg photo.png
   lds convert image photo.png photo.webp -- -quality 82
   lds convert image animation.gif animation.webp
+  lds convert audio recording.wav recording.mp3
+  lds convert video recording.mov recording.mp4 -- -c:v libx264 -crf 23 -c:a aac
 EOF
 }
 
@@ -53,6 +59,115 @@ Examples:
 GIF/WebP output preserves animation when supported by ImageMagick. Static output
 formats such as JPEG/PNG use the first frame of a multi-frame input by default.
 EOF
+}
+
+_convert_media_usage() {
+  local kind="${1:-media}"
+  cat <<EOF
+Usage:
+  lds convert $kind [--force] <input> <output> [--] [ffmpeg-output-options...]
+  lds convert $kind --formats
+  lds convert $kind --codecs
+  lds convert $kind --encoders
+  lds convert $kind --version
+
+Examples:
+  lds convert audio recording.wav recording.mp3
+  lds convert audio recording.wav recording.ogg -- -c:a libopus -b:a 128k
+  lds convert video recording.mov recording.mp4
+  lds convert video recording.mkv recording.webm -- -c:v libvpx-vp9 -crf 32 -b:v 0
+
+The first-class media converter owns the single input, overwrite policy and one
+output path. For multi-input, concat, capture, or advanced filtergraph workflows
+use "lds tools ffmpeg ..." directly.
+EOF
+}
+
+_convert_ffmpeg_capability() {
+  local option="${1:-}"
+  case "$option" in
+  --version)
+    _convert_engine ffmpeg -version
+    ;;
+  --formats)
+    _convert_engine ffmpeg -hide_banner -formats
+    ;;
+  --codecs)
+    _convert_engine ffmpeg -hide_banner -codecs
+    ;;
+  --encoders)
+    _convert_engine ffmpeg -hide_banner -encoders
+    ;;
+  *)
+    return 64
+    ;;
+  esac
+}
+
+_convert_reject_ffmpeg_owned_options() {
+  local kind="${1:-media}"
+  shift || true
+  local arg
+  for arg in "$@"; do
+    case "$arg" in
+    -i|-y|-n)
+      err "lds convert $kind owns FFmpeg input/output and overwrite selection; option $arg is not allowed"
+      return 64
+      ;;
+    esac
+  done
+}
+
+_convert_media() {
+  local kind="${1:-media}"
+  shift || true
+  local force=0 input='' output='' overwrite_flag=-n
+  local -a args=() run_args=()
+
+  case "${1:-}" in
+  ''|-h|--help|help)
+    _convert_media_usage "$kind"
+    return 0
+    ;;
+  --version|--formats|--codecs|--encoders)
+    _convert_ffmpeg_capability "$1"
+    return $?
+    ;;
+  --force)
+    force=1
+    overwrite_flag=-y
+    shift
+    ;;
+  esac
+
+  input="${1:-}"
+  output="${2:-}"
+  [[ -n "$input" && -n "$output" ]] || {
+    _convert_media_usage "$kind" >&2
+    return 64
+  }
+  shift 2
+  [[ "${1:-}" != '--' ]] || shift
+  args=("$@")
+  _convert_reject_ffmpeg_owned_options "$kind" "${args[@]}" || return $?
+  _convert_prepare_paths "$input" "$output" "$force" || return $?
+
+  run_args=(
+    run --rm --pull=missing --network none
+    --user "$(id -u):$(id -g)"
+    -e HOME=/tmp
+    -v "$_CONVERT_INPUT_MOUNT:/lds-input:ro"
+    -v "$_CONVERT_OUTPUT_MOUNT:/lds-output"
+    --entrypoint ffmpeg
+    "$_CONVERT_TOOLS_IMAGE"
+    -hide_banner
+    -nostdin
+    "$overwrite_flag"
+    -i "/lds-input/$_CONVERT_INPUT_NAME"
+  )
+  run_args+=("${args[@]}")
+  run_args+=("/lds-output/$_CONVERT_OUTPUT_NAME")
+  _convert_docker "${run_args[@]}"
 }
 
 _convert_host_fs_path() {
@@ -298,11 +413,14 @@ cmd_convert() {
   image)
     _convert_image "$@"
     ;;
+  audio | video)
+    _convert_media "${kind,,}" "$@"
+    ;;
   ''|-h|--help|help)
     _convert_usage
     ;;
   *)
-    err "Unknown conversion type: $kind (expected docs or image)"
+    err "Unknown conversion type: $kind (expected docs, image, audio, or video)"
     _convert_usage >&2
     return 64
     ;;
