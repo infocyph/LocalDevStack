@@ -326,6 +326,12 @@ Generic service operations also accept ``llm`` and resolve it to the active prov
    lds exec llm ...
    lds rebuild llm
 
+The logical ``llm`` name is an operational alias handled by those service commands.
+``lds shell service:<name>`` is intentionally exact and does not rewrite logical
+service aliases. For the canonical shell navigator, target the active provider service
+explicitly as ``service:llm-fastflow`` or ``service:llm-ollama``. The
+``lds exec llm`` form remains the provider-neutral compatibility path.
+
 FastFlow/NPU and Ollama both default to ``qwen3.5:9b``. Leaving ``LDS_AI_MODEL``
 blank allows the provider default to apply.
 Rebuild
