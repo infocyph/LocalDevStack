@@ -108,19 +108,27 @@ Configuration
 
 ``config show`` is redacted by default.
 
-Document Conversion
--------------------
+Conversion
+----------
 
 Pandoc-backed host conversion runs in a short-lived Tools container; the stack does not
 need to be running::
 
-   lds convert [--force] <input> <output> [--] [pandoc-options...]
-   lds convert --list-input-formats
-   lds convert --list-output-formats
-   lds convert --version
+   lds convert docs [--force] <input> <output> [--] [pandoc-options...]
+   lds convert docs --list-input-formats
+   lds convert docs --list-output-formats
+   lds convert docs --version
 
 The input directory is read-only and the output directory is the only writable host
 mount. Existing output requires ``--force``. ``-o`` / ``--output`` is reserved by LDS.
+
+Image conversion uses ImageMagick::
+
+   lds convert image [--force] <input> <output> [--] [imagemagick-options...]
+   lds convert image --formats
+   lds convert image --version
+
+Static JPEG/PNG-style outputs use the first frame of animated inputs; GIF/WebP outputs preserve animation when supported.
 Certificates
 ------------
 
