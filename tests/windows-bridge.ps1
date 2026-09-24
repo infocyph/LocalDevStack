@@ -93,4 +93,4 @@ foreach ($needle in @(
         throw "conversion is missing Windows/Git Bash contract: $needle"
     }
 }
-Write-Host "PASS: document conversion uses MSYS-safe host mounts"
+Write-Host "PASS: conversion uses MSYS-safe host mounts"
