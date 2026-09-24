@@ -15,25 +15,25 @@ domain="$ROOT/docs/guides/domain-setup.rst"
 tls="$ROOT/docs/guides/tls-and-certificates.rst"
 ai="$ROOT/docs/guides/local-ai.rst"
 databases="$ROOT/docs/guides/databases-and-clients.rst"
-documents="$ROOT/docs/guides/conversion.rst"
+conversion="$ROOT/docs/guides/conversion.rst"
 ops="$ROOT/docs/guides/operations-and-support.rst"
 runner="$ROOT/docs/guides/ad-hoc-runner.rst"
 notify="$ROOT/docs/guides/notifications.rst"
 secrets="$ROOT/docs/guides/secrets-sops-age.rst"
 cli="$ROOT/docs/reference/cli.rst"
 
-for file in "$index" "$readme" "$quick" "$arch" "$profiles" "$storage" "$domain" "$tls" "$ai" "$databases" "$documents" "$ops" "$runner" "$notify" "$secrets" "$cli"; do
+for file in "$index" "$readme" "$quick" "$arch" "$profiles" "$storage" "$domain" "$tls" "$ai" "$databases" "$conversion" "$ops" "$runner" "$notify" "$secrets" "$cli"; do
   assert_file "$file"
 done
 
 assert_file_contains "$index" 'guides/local-ai'
 assert_file_contains "$index" 'guides/databases-and-clients'
 assert_file_contains "$index" 'guides/conversion'
-assert_file_contains "$documents" 'lds convert docs README.md README.html'
-assert_file_contains "$documents" 'lds convert docs --list-output-formats'
-assert_file_contains "$documents" 'lds convert image photo.jpg photo.png'
-assert_file_contains "$documents" 'lds convert image --formats'
-assert_file_contains "$documents" 'no Docker socket'
+assert_file_contains "$conversion" 'lds convert docs README.md README.html'
+assert_file_contains "$conversion" 'lds convert docs --list-output-formats'
+assert_file_contains "$conversion" 'lds convert image photo.jpg photo.png'
+assert_file_contains "$conversion" 'lds convert image --formats'
+assert_file_contains "$conversion" 'no Docker socket'
 assert_file_contains "$cli" 'lds convert docs [--force] <input> <output>'
 assert_file_contains "$cli" 'lds convert image [--force] <input> <output>'
 assert_file_contains "$quick" 'lds convert docs README.md README.html'
