@@ -236,6 +236,10 @@ lds tools gitx worklog HEAD~20..HEAD
 lds tools sqlitex --db app.db tables
 cat app.log | lds tools chromacat --log
 lds tools netx route show
+lds tools ffprobe media.mkv
+lds tools mediainfo media.mkv
+lds tools soxi recording.wav
+lds tools mkvinfo media.mkv
 lds tools jq --version
 lds tools shellcheck script.sh
 lds tools ui
@@ -265,9 +269,13 @@ lds convert docs --list-output-formats
 lds convert image photo.jpg photo.webp -- -quality 82 -strip
 lds convert image animation.gif animation.webp
 lds convert image --formats
+lds convert audio recording.wav recording.mp3
+lds convert audio recording.wav recording.ogg -- -c:a libopus -b:a 128k
+lds convert video recording.mov recording.mp4
+lds convert video recording.mkv recording.webm -- -c:v libvpx-vp9 -crf 32 -b:v 0
 ```
 
-Documents use Pandoc; images use ImageMagick. The input mount is read-only and only the output mount is writable. The
+Documents use Pandoc, images use ImageMagick, and audio/video use FFmpeg. The input mount is read-only and only the output mount is writable. The
 short-lived converter receives no Docker socket or LocalDevStack networks. Existing
 outputs require `--force`. PDF generation additionally depends on a PDF engine; the base
 Tools image ships Pandoc itself, not a TeX/PDF rendering stack.
