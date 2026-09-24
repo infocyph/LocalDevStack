@@ -320,6 +320,46 @@ _graphify_tools_put() {
   docker cp "$host_file" "$_GRAPHIFY_TOOLS_CTR:$container_file" >/dev/null
 }
 
+_graphify_canonicalize_staged_graph() {
+  local graphify_bin="$1" staged_graph="$2"
+  local roundtrip_dir roundtrip_input roundtrip_output rc=0
+
+  roundtrip_dir="$(mktemp -d "${TMPDIR:-/tmp}/lds-graphify-roundtrip.XXXXXX")" ||
+    die "Unable to create temporary Graphify round-trip directory"
+  chmod 700 "$roundtrip_dir" 2>/dev/null || true
+  roundtrip_input="$roundtrip_dir/staged.json"
+  roundtrip_output="$roundtrip_dir/graphify-out/graph.json"
+
+  if ! cp -- "$staged_graph" "$roundtrip_input"; then
+    rm -rf "$roundtrip_dir"
+    die "Unable to stage merged graph for Graphify round-trip validation"
+  fi
+
+  printf '%s\n' "[lds graphify] documents: canonicalizing merged graph through Graphify before publication" >&2
+  if (
+    cd "$roundtrip_dir"
+    "$graphify_bin" cluster-only --graph "$roundtrip_input" --no-label --no-viz >/dev/null
+  ); then
+    :
+  else
+    rc=$?
+    rm -rf "$roundtrip_dir"
+    return "$rc"
+  fi
+
+  if [[ ! -s "$roundtrip_output" ]]; then
+    rm -rf "$roundtrip_dir"
+    die "Graphify round-trip validation did not produce graph.json"
+  fi
+
+  if ! cp -- "$roundtrip_output" "$staged_graph"; then
+    rm -rf "$roundtrip_dir"
+    die "Unable to stage Graphify-canonical document merge"
+  fi
+
+  rm -rf "$roundtrip_dir"
+}
+
 _graphify_docstruct_enrich() {
   local graphify_bin="$1" target_abs="$2" review_mode="$3"
   shift 3
@@ -405,6 +445,14 @@ _graphify_docstruct_enrich() {
     _graphify_tools_session_cleanup
     rm -rf "$workdir"
     return "$rc"
+  fi
+
+  if ! _graphify_canonicalize_staged_graph "$graphify_bin" "$publish_tmp"; then
+    rc=$?
+    rm -f "$publish_tmp"
+    _graphify_tools_session_cleanup
+    rm -rf "$workdir"
+    die "Merged document graph is not round-trip compatible with the installed Graphify"
   fi
 
   chmod 0644 "$publish_tmp" 2>/dev/null || true
