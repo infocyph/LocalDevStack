@@ -224,6 +224,24 @@ lds es ...
 
 See `docs/guides/databases-and-clients.rst` for the profile/client map.
 
+## Document conversion
+
+Pandoc is available from the Tools image without installing it on the host or starting
+the LocalDevStack services:
+
+```bash
+lds convert README.md README.html
+lds convert docs/guide.rst guide.docx --toc
+lds convert report.docx report.md --wrap=none
+lds convert book.md book.epub --toc
+lds convert --list-input-formats
+lds convert --list-output-formats
+```
+
+The input directory is mounted read-only; only the output directory is writable. The
+short-lived converter receives no Docker socket or LocalDevStack networks. Existing
+outputs require `--force`. PDF generation additionally depends on a PDF engine; the base
+Tools image ships Pandoc itself, not a TeX/PDF rendering stack.
 ## Optional local AI
 
 Enable the `ai` profile through `lds setup profile`.
