@@ -13,7 +13,7 @@ assert_contains "$help_output" "Setup"
 assert_contains "$help_output" "Execution / Shells"
 assert_contains "$help_output" "Generic service/container exec"
 assert_contains "$help_output" "Compose-service only"
-assert_contains "$help_output" "server-tools only"
+assert_contains "$help_output" "Long-running server-tools context"
 pass "lds help"
 
 markdown_output="$("$ROOT/lds" help --markdown)"
