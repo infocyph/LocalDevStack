@@ -179,7 +179,7 @@ _convert_image_static_output() {
   local ext="${1##*.}"
   ext="${ext,,}"
   case "$ext" in
-  jpg|jpeg|jpe|png|bmp|tif|tiff|ico|avif|heic|heif) return 0 ;;
+  jpg|jpeg|jpe|png|bmp|ico) return 0 ;;
   esac
   return 1
 }
