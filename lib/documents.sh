@@ -90,7 +90,7 @@ _convert_run_pandoc() {
 }
 
 cmd_convert() {
-  local force=0 input='' output='' input_abs output_abs
+  local force=0 input='' output='' input_abs output_abs existing_output_abs
   local input_dir output_dir input_name output_name input_mount output_mount
   local -a pandoc_args=()
 
@@ -134,6 +134,13 @@ cmd_convert() {
     err "Input and output must be different files"
     return 64
   }
+  if [[ -e "$output_abs" ]]; then
+    existing_output_abs="$(_realpath "$output_abs" 2>/dev/null || true)"
+    [[ -z "$existing_output_abs" || "$existing_output_abs" != "$input_abs" ]] || {
+      err "Input and output must be different files"
+      return 64
+    }
+  fi
   if [[ -e "$output_abs" && "$force" -ne 1 ]]; then
     err "Output already exists: $output_abs (use --force to replace it)"
     return 73
