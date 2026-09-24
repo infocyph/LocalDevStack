@@ -40,6 +40,12 @@ assert_file_contains "$quick" 'lds convert docs README.md README.html'
 assert_file_contains "$quick" 'lds convert image photo.jpg photo.webp'
 assert_file_contains "$readme" 'lds convert docs docs/guide.rst guide.docx --toc'
 assert_file_contains "$readme" 'lds convert image animation.gif animation.webp'
+assert_file_contains "$readme" 'lds tools gitx status'
+assert_file_contains "$readme" 'lds tools sqlitex --db app.db tables'
+assert_file_contains "$readme" 'cat app.log | lds tools chromacat --log'
+assert_file_contains "$quick" 'lds tools list'
+assert_file_contains "$cli" 'lds tools <tool> [args...]'
+assert_file_contains "$cli" 'lds tools run <tool> [args...]'
 assert_file_contains "$index" 'guides/operations-and-support'
 assert_file_contains "$index" 'guides/ad-hoc-runner'
 assert_file_contains "$index" 'reference/cli'
@@ -173,7 +179,7 @@ pass "documentation toctree targets exist"
 
 
 help_md="$("$ROOT/lds" help --markdown)"
-for required in   'lds profiles add <profile...>'   'lds support trace <domain>'   'lds support bundle [--redact|--full] [output.zip]'   'lds shell <target> [--] <command> [args...]'   'lds shell <target> --shell <shell-expression>'   'lds cli <service|container> [--] [command...]'   'lds core [domain|service|container] [--] [command...]'   'lds stack exec <service> [--] [command...]'   'lds tools exec [--] <command> [args...]'   'lds tools shell-exec <shell-expression>'   'lds run shell|ps|logs|stop|rm|open'   'MongoDB:'   'Elasticsearch:'; do
+for required in   'lds profiles add <profile...>'   'lds support trace <domain>'   'lds support bundle [--redact|--full] [output.zip]'   'lds shell <target> [--] <command> [args...]'   'lds shell <target> --shell <shell-expression>'   'lds cli <service|container> [--] [command...]'   'lds core [domain|service|container] [--] [command...]'   'lds stack exec <service> [--] [command...]'   'lds tools list'   'lds tools <tool> [args...]'   'lds tools run <tool> [args...]'   'lds tools exec [--] <command> [args...]'   'lds tools shell-exec <shell-expression>'   'lds run shell|ps|logs|stop|rm|open'   'MongoDB:'   'Elasticsearch:'; do
   assert_contains "$help_md" "$required"
 done
 pass "embedded CLI help covers documented command groups"
@@ -187,6 +193,9 @@ assert_file_contains "$cli" 'Image'
 assert_file_contains "$cli" 'lds core [domain|service|container] [--] [command...]'
 assert_file_contains "$cli" 'lds cli <service|container> [--] [command...]'
 assert_file_contains "$cli" 'lds stack exec <service> [--] [command...]'
+assert_file_contains "$cli" 'lds tools list'
+assert_file_contains "$cli" 'lds tools <tool> [args...]'
+assert_file_contains "$cli" 'lds tools run <tool> [args...]'
 assert_file_contains "$cli" 'lds tools exec [--] <command> [args...]'
 assert_file_contains "$cli" 'lds tools shell-exec <shell-expression>'
 assert_file_contains "$cli" 'preserve argv exactly'
