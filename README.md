@@ -224,7 +224,7 @@ lds es ...
 
 See `docs/guides/databases-and-clients.rst` for the profile/client map.
 
-## Document conversion
+## File conversion
 
 Pandoc is available from the Tools image without installing it on the host or starting
 the LocalDevStack services:
