@@ -295,8 +295,12 @@ When the active docker-tools image exposes the docstruct Graphify handoff,
 5. optional semantic review runs in bounded chunks against the active local model;
 6. docker-tools emits a Graphify-compatible fragment;
 7. Graphify's public ``merge-chunks`` validates that fragment;
-8. docker-tools atomically replaces only the reserved ``docstruct_`` semantic layer;
-9. ``graphify label`` reclusters and relabels the final combined graph.
+8. docker-tools replaces only the reserved ``docstruct_`` semantic layer in a staged graph;
+9. LocalDevStack copies that staged graph into an isolated temporary workspace and runs
+   ``graphify cluster-only --no-label --no-viz``; only Graphify's canonical round-trip
+   output is eligible for publication;
+10. the canonical graph is atomically published to ``graphify-out/graph.json``, then
+    ``graphify label`` reclusters and relabels the final combined graph.
 
 This removes Markdown/RST/config parsing and recognized Python pip requirement manifests
 from the fragile raw LLM extraction path while preserving Graphify's existing support for
@@ -321,7 +325,8 @@ Controls
 ``LDS_GRAPHIFY_DOC_REVIEW``:
 
 - ``auto`` (default): review bounded document chunks on the built-in local provider;
-  if review fails, keep the deterministic structure and continue;
+  docker-tools retries one malformed structured response once, then LocalDevStack keeps
+  the deterministic structure and continues if review still fails;
 - ``on``: require semantic review to succeed;
 - ``off``: use deterministic document structure only.
 
