@@ -20,6 +20,23 @@ Host Orchestration
 ``configuration/compose/``
    Generated runtime Compose fragments discovered and merged into the effective stack.
 
+Execution Navigation
+--------------------
+
+``lds shell`` is the canonical host-side execution and navigation surface. It resolves
+discovered domains, direct application directories under ``server-tools:/app``, exact
+current-project Compose services, exact Docker containers, and the trusted Tools target
+into one normalized execution context.
+
+Unqualified targets resolve deterministically in this order: discovered domain,
+``tools``, exact Compose service, exact Docker container, then an exact direct child
+under ``/app``. Qualified ``domain:``, ``app:``, ``service:``, ``container:``, and
+``utility:tools`` selectors bypass collisions.
+
+The compatibility commands ``core``, ``cli``, ``stack exec``, and the
+execution-oriented ``tools`` subcommands delegate to the same shell-context execution
+layer while retaining their intentionally narrower public contracts.
+
 Core Services
 -------------
 
