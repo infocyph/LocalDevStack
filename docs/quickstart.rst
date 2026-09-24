@@ -19,9 +19,10 @@ Windows
 macOS
    Docker Desktop.
 
-Docker is always a host-side requirement. Some developer utilities such as ``jq``,
-``yq``, ``rg``, ``fd``, ``tree``, and ``shellcheck`` can be proxied through a running
-``server-tools`` container when they are not installed on the host.
+Docker is always a host-side requirement. Bundled developer utilities are available through
+``lds tools <tool>`` without installing them on the host. The temporary runner mounts the
+current workspace and shares the running ``server-tools`` context. Use ``lds tools list``
+to see the curated Toolset/data/search/file utilities.
 
 Recommended Layout
 ------------------
