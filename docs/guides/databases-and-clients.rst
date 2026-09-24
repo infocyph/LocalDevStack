@@ -154,8 +154,11 @@ Check the whole stack with::
 Inspect a service directly with::
 
    lds logs postgres
-   lds stack exec postgres
+   lds shell service:postgres
    lds restart postgres
+
+The older ``lds stack exec postgres`` form remains available for service-only
+compatibility.
 
 Admin UIs
 ---------
