@@ -224,6 +224,29 @@ lds es ...
 
 See `docs/guides/databases-and-clients.rst` for the profile/client map.
 
+## Tools and Toolset utilities
+
+The Tools image also provides developer utilities through an explicit workspace-aware
+runner:
+
+```bash
+lds tools list
+lds tools gitx status
+lds tools gitx worklog HEAD~20..HEAD
+lds tools sqlitex --db app.db tables
+cat app.log | lds tools chromacat --log
+lds tools netx route show
+lds tools jq --version
+lds tools shellcheck script.sh
+lds tools ui
+```
+
+`lds tools <tool>` starts a temporary Tools container with the current host directory at
+`/workspace`, shares the running server-tools network/volumes, preserves stdin/TTY, and
+inherits the active LDS AI/Git runtime settings. Use `lds tools run <tool> ...` when a
+tool name collides with an LDS `tools` subcommand. The older `tools sh/exec/file`
+forms continue to target the long-running control-plane container.
+
 ## File conversion
 
 Pandoc is available from the Tools image without installing it on the host or starting
