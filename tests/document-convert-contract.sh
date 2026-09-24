@@ -65,44 +65,47 @@ input="$tmp/Input Docs/Guide File.md"
 output="$tmp/Output Docs/Guide File.html"
 printf '# Guide\n' >"$input"
 
-DOCUMENT_CONVERT_TEST_LOG="$log" PATH="$bin:$PATH"   "$ROOT/lds" convert "$input" "$output" --toc --standalone
+DOCUMENT_CONVERT_TEST_LOG="$log" PATH="$bin:$PATH"   "$ROOT/lds" convert docs "$input" "$output" --toc --standalone
 
-[[ -f "$output" ]] || fail "lds convert did not publish the host output file"
+[[ -f "$output" ]] || fail "lds convert docs did not publish the host output file"
 grep -Fq "<$tmp/Input Docs:/lds-input:ro>" "$log" ||
-  fail "lds convert did not mount the input directory read-only"
+  fail "lds convert docs did not mount the input directory read-only"
 grep -Fq "<$tmp/Output Docs:/lds-output>" "$log" ||
-  fail "lds convert did not mount the output directory writable"
-grep -Fq '<--entrypoint>' "$log" || fail "lds convert did not use an explicit Pandoc entrypoint"
-grep -Fq '<pandoc>' "$log" || fail "lds convert did not invoke Pandoc"
+  fail "lds convert docs did not mount the output directory writable"
+grep -Fq '<--entrypoint>' "$log" || fail "lds convert docs did not use an explicit Pandoc entrypoint"
+grep -Fq '<pandoc>' "$log" || fail "lds convert docs did not invoke Pandoc"
+grep -Fq '<--network>' "$log" || fail "lds convert docs did not disable container networking"
+grep -Fq '<none>' "$log" || fail "lds convert docs did not use the none network"
+grep -Fq '<--user>' "$log" || fail "lds convert docs did not preserve host output ownership"
 grep -Fq '<--resource-path=/lds-input>' "$log" ||
-  fail "lds convert did not preserve relative input resources"
+  fail "lds convert docs did not preserve relative input resources"
 grep -Fq '<./Guide File.md>' "$log" || fail "input filename with spaces was not preserved"
 grep -Fq '</lds-output/Guide File.html>' "$log" || fail "output filename with spaces was not preserved"
 grep -Fq '<--toc>' "$log" || fail "Pandoc option passthrough lost --toc"
 grep -Fq '<--standalone>' "$log" || fail "Pandoc option passthrough lost --standalone"
 if grep -Fq '/var/run/docker.sock' "$log"; then
-  fail "lds convert must not expose the Docker socket"
+  fail "lds convert docs must not expose the Docker socket"
 fi
 if grep -Fq '<compose>' "$log"; then
-  fail "lds convert must not require a running Compose stack"
+  fail "lds convert docs must not require a running Compose stack"
 fi
 pass "containerized host document conversion"
 
 set +e
-DOCUMENT_CONVERT_TEST_LOG="$log" PATH="$bin:$PATH"   "$ROOT/lds" convert "$input" "$output" >/dev/null 2>"$tmp/existing.err"
+DOCUMENT_CONVERT_TEST_LOG="$log" PATH="$bin:$PATH"   "$ROOT/lds" convert docs "$input" "$output" >/dev/null 2>"$tmp/existing.err"
 rc=$?
 set -e
 [[ "$rc" -eq 73 ]] || fail "existing output returned $rc instead of 73"
 grep -Fq 'use --force to replace it' "$tmp/existing.err" ||
   fail "existing output refusal did not explain --force"
 
-DOCUMENT_CONVERT_TEST_LOG="$log" PATH="$bin:$PATH"   "$ROOT/lds" convert --force "$input" "$output" --wrap=none
+DOCUMENT_CONVERT_TEST_LOG="$log" PATH="$bin:$PATH"   "$ROOT/lds" convert docs --force "$input" "$output" --wrap=none
 grep -Fq '<--wrap=none>' "$log" || fail "--force conversion lost Pandoc options"
 pass "document conversion overwrite protection"
 
 before="$(wc -l <"$log" | tr -d '[:space:]')"
 set +e
-DOCUMENT_CONVERT_TEST_LOG="$log" PATH="$bin:$PATH"   "$ROOT/lds" convert --force "$input" "$output" -- -oelsewhere.html >/dev/null 2>"$tmp/output-option.err"
+DOCUMENT_CONVERT_TEST_LOG="$log" PATH="$bin:$PATH"   "$ROOT/lds" convert docs --force "$input" "$output" -- -oelsewhere.html >/dev/null 2>"$tmp/output-option.err"
 rc=$?
 set -e
 after="$(wc -l <"$log" | tr -d '[:space:]')"
@@ -114,7 +117,7 @@ ln -s "$input" "$tmp/Output Docs/input-link.md"
 before="$(wc -l <"$log" | tr -d '[:space:]')"
 set +e
 DOCUMENT_CONVERT_TEST_LOG="$log" PATH="$bin:$PATH" \
-  "$ROOT/lds" convert --force "$input" "$tmp/Output Docs/input-link.md" >/dev/null 2>"$tmp/same.err"
+  "$ROOT/lds" convert docs --force "$input" "$tmp/Output Docs/input-link.md" >/dev/null 2>"$tmp/same.err"
 rc=$?
 set -e
 after="$(wc -l <"$log" | tr -d '[:space:]')"
@@ -125,23 +128,23 @@ grep -Fq 'Input and output must be different files' "$tmp/same.err" ||
 pass "document conversion blocks in-place and symlink overwrite"
 
 formats="$(
-  DOCUMENT_CONVERT_TEST_LOG="$log" PATH="$bin:$PATH"     "$ROOT/lds" convert --list-input-formats
+  DOCUMENT_CONVERT_TEST_LOG="$log" PATH="$bin:$PATH"     "$ROOT/lds" convert docs --list-input-formats
 )"
 grep -qx 'markdown' <<<"$formats" || fail "input format discovery did not reach Pandoc"
 version="$(
-  DOCUMENT_CONVERT_TEST_LOG="$log" PATH="$bin:$PATH"     "$ROOT/lds" convert --version
+  DOCUMENT_CONVERT_TEST_LOG="$log" PATH="$bin:$PATH"     "$ROOT/lds" convert docs --version
 )"
 grep -q '^pandoc ' <<<"$version" || fail "Pandoc version discovery failed"
 pass "document conversion capability discovery"
 
 set +e
-DOCUMENT_CONVERT_TEST_LOG="$log" PATH="$bin:$PATH"   "$ROOT/lds" convert "$tmp/missing.md" "$tmp/Output Docs/missing.html" >/dev/null 2>"$tmp/missing.err"
+DOCUMENT_CONVERT_TEST_LOG="$log" PATH="$bin:$PATH"   "$ROOT/lds" convert docs "$tmp/missing.md" "$tmp/Output Docs/missing.html" >/dev/null 2>"$tmp/missing.err"
 rc=$?
 set -e
 [[ "$rc" -eq 66 ]] || fail "missing input returned $rc instead of 66"
 
 set +e
-DOCUMENT_CONVERT_TEST_LOG="$log" PATH="$bin:$PATH"   "$ROOT/lds" convert "$input" "$tmp/no-such-dir/output.html" >/dev/null 2>"$tmp/outdir.err"
+DOCUMENT_CONVERT_TEST_LOG="$log" PATH="$bin:$PATH"   "$ROOT/lds" convert docs "$input" "$tmp/no-such-dir/output.html" >/dev/null 2>"$tmp/outdir.err"
 rc=$?
 set -e
 [[ "$rc" -eq 66 ]] || fail "missing output directory returned $rc instead of 66"
