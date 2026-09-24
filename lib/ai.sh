@@ -330,7 +330,7 @@ _graphify_canonicalize_staged_graph() {
   roundtrip_input="$roundtrip_dir/staged.json"
   roundtrip_output="$roundtrip_dir/graphify-out/graph.json"
 
-  if ! cp -- "$staged_graph" "$roundtrip_input"; then
+  if ! cp "$staged_graph" "$roundtrip_input"; then
     rm -rf "$roundtrip_dir"
     die "Unable to stage merged graph for Graphify round-trip validation"
   fi
@@ -352,7 +352,7 @@ _graphify_canonicalize_staged_graph() {
     die "Graphify round-trip validation did not produce graph.json"
   fi
 
-  if ! cp -- "$roundtrip_output" "$staged_graph"; then
+  if ! cp "$roundtrip_output" "$staged_graph"; then
     rm -rf "$roundtrip_dir"
     die "Unable to stage Graphify-canonical document merge"
   fi
