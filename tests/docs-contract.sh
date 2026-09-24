@@ -15,7 +15,7 @@ domain="$ROOT/docs/guides/domain-setup.rst"
 tls="$ROOT/docs/guides/tls-and-certificates.rst"
 ai="$ROOT/docs/guides/local-ai.rst"
 databases="$ROOT/docs/guides/databases-and-clients.rst"
-documents="$ROOT/docs/guides/document-conversion.rst"
+documents="$ROOT/docs/guides/conversion.rst"
 ops="$ROOT/docs/guides/operations-and-support.rst"
 runner="$ROOT/docs/guides/ad-hoc-runner.rst"
 notify="$ROOT/docs/guides/notifications.rst"
@@ -28,7 +28,7 @@ done
 
 assert_file_contains "$index" 'guides/local-ai'
 assert_file_contains "$index" 'guides/databases-and-clients'
-assert_file_contains "$index" 'guides/document-conversion'
+assert_file_contains "$index" 'guides/conversion'
 assert_file_contains "$documents" 'lds convert docs README.md README.html'
 assert_file_contains "$documents" 'lds convert docs --list-output-formats'
 assert_file_contains "$documents" 'lds convert image photo.jpg photo.png'
