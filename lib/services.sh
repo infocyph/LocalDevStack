@@ -826,12 +826,98 @@ cmd_rebuild() {
 }
 
 
+_tools_catalog_print() {
+  cat <<'EOF'
+Tools / Toolset catalog
+
+Toolset:
+  gitx        Git workflow, summaries, worklogs and commit helpers
+  sqlitex     SQLite administration, migrations, backup/export and tuning
+  chromacat   Pipeline-safe colour/log/banner presentation
+  netx        Network/DNS/TLS/HTTP diagnostics from the Tools network context
+
+Media:
+  ffmpeg      audio/video transcode, remux and filter
+  ffprobe     stream/container probing
+  sox         audio processing/effects
+  soxi        audio metadata inspection
+  mkvmerge    Matroska muxing/remuxing
+  mkvinfo     Matroska structure inspection
+  mkvextract  Matroska stream/attachment extraction
+  mkvpropedit Matroska property editing
+  mediainfo   media/container metadata inspection
+  xvidcore    codec runtime used by FFmpeg (library; no standalone CLI)
+
+Data / search:
+  jq          JSON processor
+  yq          YAML processor
+  rg          ripgrep
+  fd          file finder
+
+Files / quality:
+  tree        directory tree
+  shellcheck  shell static analysis
+  ncdu        terminal disk-usage browser
+  zip         ZIP archive creator
+  unzip       ZIP archive extractor
+
+TUI:
+  lazydocker  Docker terminal UI (also: lds support ui)
+
+Usage:
+  lds tools <tool> [args...]
+  lds tools run <tool> [args...]
+  lds tools list
+
+Examples:
+  lds tools gitx status
+  lds tools sqlitex --db app.db tables
+  cat app.log | lds tools chromacat --log
+  lds tools netx route show
+  lds tools ffprobe media.mkv
+  lds tools mediainfo media.mkv
+  lds tools soxi recording.wav
+  lds tools jq --version
+
+Any non-reserved tool name is delegated to the current Tools image. Use
+"lds tools run <name>" when a tool name collides with an LDS tools subcommand.
+EOF
+}
+
+_tools_runner_exec() {
+  (($# > 0)) || {
+    err "Usage: lds tools run <tool> [args...]"
+    return 64
+  }
+  "$DIR/bin/tool-runner" "$@"
+}
+
 cmd_tools() {
   local sub="${1:-sh}"
   shift || true
 
-  _shell_context_reset
-  _shell_resolve_tools || return $?
+  case "${sub,,}" in
+  list | catalog | help | -h | --help)
+    _tools_catalog_print
+    return 0
+    ;;
+  run)
+    _tools_runner_exec "$@"
+    return $?
+    ;;
+  ui)
+    _tools_runner_exec lazydocker "$@"
+    return $?
+    ;;
+  sh | shell | "" | exec | shell-exec | file)
+    _shell_context_reset
+    _shell_resolve_tools || return $?
+    ;;
+  *)
+    _tools_runner_exec "$sub" "$@"
+    return $?
+    ;;
+  esac
 
   case "${sub,,}" in
   sh | shell | "")
@@ -865,7 +951,8 @@ cmd_tools() {
     ' sh "$path"
     ;;
   *)
-    die "tools <sh|exec|shell-exec|file>"
+    err "Usage: lds tools <list|run|sh|exec|shell-exec|file|ui|tool-name>"
+    return 64
     ;;
   esac
 }

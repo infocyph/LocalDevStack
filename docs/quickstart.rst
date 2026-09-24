@@ -19,9 +19,10 @@ Windows
 macOS
    Docker Desktop.
 
-Docker is always a host-side requirement. Some developer utilities such as ``jq``,
-``yq``, ``rg``, ``fd``, ``tree``, and ``shellcheck`` can be proxied through a running
-``server-tools`` container when they are not installed on the host.
+Docker is always a host-side requirement. Bundled developer utilities are available through
+``lds tools <tool>`` without installing them on the host. The temporary runner mounts the
+current workspace and shares the running ``server-tools`` context. Use ``lds tools list``
+to see the curated Toolset/data/search/file utilities.
 
 Recommended Layout
 ------------------
@@ -124,6 +125,23 @@ qualified target when names collide.
 
 ``lds config show`` is redacted by default. Use ``--raw`` only when unredacted output is
 deliberately required.
+
+File conversion is also available without starting the stack::
+
+   lds convert docs README.md README.html
+
+Pandoc runs from the Tools image; use ``lds convert docs --list-output-formats`` to inspect the
+writers available in the current image.
+
+Image conversion uses ImageMagick::
+
+   lds convert image photo.jpg photo.webp -- -quality 82
+
+Audio/video conversion uses FFmpeg::
+
+   lds convert audio recording.wav recording.mp3
+   lds convert video recording.mov recording.mp4
+
 
 Updating an Existing Installation
 ---------------------------------

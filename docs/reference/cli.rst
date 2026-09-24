@@ -108,6 +108,40 @@ Configuration
 
 ``config show`` is redacted by default.
 
+Conversion
+----------
+
+Pandoc-backed host conversion runs in a short-lived Tools container; the stack does not
+need to be running::
+
+   lds convert docs [--force] <input> <output> [--] [pandoc-options...]
+   lds convert docs --list-input-formats
+   lds convert docs --list-output-formats
+   lds convert docs --version
+
+The input directory is read-only and the output directory is the only writable host
+mount. Existing output requires ``--force``. ``-o`` / ``--output`` is reserved by LDS.
+
+Image conversion uses ImageMagick::
+
+   lds convert image [--force] <input> <output> [--] [imagemagick-options...]
+   lds convert image --formats
+   lds convert image --version
+
+Static JPEG/PNG-style outputs use the first frame of animated inputs; GIF/WebP outputs preserve animation when supported.
+
+Audio/video conversion uses FFmpeg::
+
+   lds convert audio [--force] <input> <output> [--] [ffmpeg-output-options...]
+   lds convert video [--force] <input> <output> [--] [ffmpeg-output-options...]
+   lds convert audio|video --formats
+   lds convert audio|video --codecs
+   lds convert audio|video --encoders
+   lds convert audio|video --version
+
+The first-class media converter owns one input and one output. Use ``lds tools ffmpeg``
+for multi-input/concat/capture/complex filtergraph workflows. ``ffprobe``, ``sox``,
+``soxi``, MKVToolNix commands, and ``mediainfo`` are available through ``lds tools``.
 Certificates
 ------------
 
@@ -213,13 +247,29 @@ The older execution surfaces remain compatible during migration::
    lds core [domain|service|container] [--] [command...]
    lds cli <service|container> [--] [command...]
    lds stack exec <service> [--] [command...]
+   lds tools list
+   lds tools <tool> [args...]
+   lds tools run <tool> [args...]
+   lds tools ui [args...]
    lds tools sh
    lds tools exec [--] <command> [args...]
    lds tools shell-exec <shell-expression>
    lds tools file <path>
 
-``stack exec`` remains service-only. ``tools file`` remains inspection
-functionality rather than generic shell navigation.
+``tools <tool>`` and ``tools run`` start a short-lived Tools container with the
+current host workspace mounted at ``/workspace``, inherit the active server-tools
+network/volumes and selected LDS AI/Git environment, preserve stdin/TTY, then remove the
+container. The inherited volumes include the Docker socket and trusted control-plane /
+secret material, so this is a privileged workstation context rather than a sandbox and
+must be used only with trusted Tools-image commands. This is the preferred surface for
+Toolset utilities such as ``gitx``,
+``sqlitex``, ``chromacat``, and ``netx``, plus bundled utilities such as
+``jq``, ``yq``, ``rg``, ``fd``, ``tree``, ``shellcheck``,
+``ncdu``, ``zip``, and ``unzip``.
+
+``tools sh/exec/shell-exec/file`` intentionally remain operations against the
+long-running ``server-tools`` control-plane container. ``stack exec`` remains
+service-only.
 
 Secrets
 -------
@@ -262,11 +312,14 @@ Graphify's raw semantic LLM extractor. Other semantic formats remain Graphify-ow
 Use ``LDS_GRAPHIFY_DOCSTRUCT=off`` to force the legacy path,
 ``LDS_GRAPHIFY_DOCSTRUCT=on`` to require the deterministic path, and
 ``LDS_GRAPHIFY_DOC_REVIEW=off|auto|on`` to control bounded semantic review.
-For a brand-new graph it performs a code-only ``extract --no-cluster`` first, clusters
-that structural graph, then performs a normal incremental ``extract --no-cluster`` to
-enrich docs/papers/images and reclusters and force-relabels the combined graph again. Existing graphs use a
-single incremental extract followed by one ``cluster-only`` pass. Explicit ``--code-only``
-remains a single structural build.
+For a brand-new docstruct-enabled graph it performs a code-only
+``extract --no-cluster``, then a second ``extract --no-cluster`` for semantic
+formats not owned by docstruct. The deterministic document layer is merged into a staged
+graph, and LocalDevStack runs an isolated LLM-free
+``graphify cluster-only --no-label --no-viz`` round trip before publishing it. The
+normal ``graphify label`` pass then relabels the canonical combined graph. Existing
+docstruct-enabled graphs use the same staged merge + canonicalization before labeling.
+Explicit ``--code-only`` remains a single structural build.
 
 For the built-in local route, LocalDevStack creates a temporary Graphify provider
 configuration that points directly to ``http://llm.localhost:11434/v1``. No Graphify

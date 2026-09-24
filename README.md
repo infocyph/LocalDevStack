@@ -224,6 +224,61 @@ lds es ...
 
 See `docs/guides/databases-and-clients.rst` for the profile/client map.
 
+## Tools and Toolset utilities
+
+The Tools image also provides developer utilities through an explicit workspace-aware
+runner:
+
+```bash
+lds tools list
+lds tools gitx status
+lds tools gitx worklog HEAD~20..HEAD
+lds tools sqlitex --db app.db tables
+cat app.log | lds tools chromacat --log
+lds tools netx route show
+lds tools ffprobe media.mkv
+lds tools mediainfo media.mkv
+lds tools soxi recording.wav
+lds tools mkvinfo media.mkv
+lds tools jq --version
+lds tools shellcheck script.sh
+lds tools ui
+```
+
+`lds tools <tool>` starts a temporary Tools container with the current host directory at
+`/workspace`, shares the running server-tools network/volumes, preserves stdin/TTY, and
+inherits the active LDS AI/Git runtime settings. Because `server-tools` owns the Docker
+socket and trusted control-plane/secret mounts, this runner is a privileged workstation
+context—not a sandbox—and should be used only with trusted commands from the Tools image.
+Use `lds tools run <tool> ...` when a tool name collides with an LDS `tools` subcommand.
+The older `tools sh/exec/file` forms continue to target the long-running control-plane
+container.
+
+## File conversion
+
+Pandoc is available from the Tools image without installing it on the host or starting
+the LocalDevStack services:
+
+```bash
+lds convert docs README.md README.html
+lds convert docs docs/guide.rst guide.docx --toc
+lds convert docs report.docx report.md --wrap=none
+lds convert docs book.md book.epub --toc
+lds convert docs --list-input-formats
+lds convert docs --list-output-formats
+lds convert image photo.jpg photo.webp -- -quality 82 -strip
+lds convert image animation.gif animation.webp
+lds convert image --formats
+lds convert audio recording.wav recording.mp3
+lds convert audio recording.wav recording.ogg -- -c:a libopus -b:a 128k
+lds convert video recording.mov recording.mp4
+lds convert video recording.mkv recording.webm -- -c:v libvpx-vp9 -crf 32 -b:v 0
+```
+
+Documents use Pandoc, images use ImageMagick, and audio/video use FFmpeg. The input mount is read-only and only the output mount is writable. The
+short-lived converter receives no Docker socket or LocalDevStack networks. Existing
+outputs require `--force`. PDF generation additionally depends on a PDF engine; the base
+Tools image ships Pandoc itself, not a TeX/PDF rendering stack.
 ## Optional local AI
 
 Enable the `ai` profile through `lds setup profile`.
@@ -286,7 +341,7 @@ lds graphify ./your-project --mode deep
 
 Nginx owns the loopback-only native route `127.0.0.1:11434 -> nginx:11434 -> llm:11434`. Provider containers do not publish host ports.
 
-`lds graphify` keeps the host Graphify CLI on `http://llm.localhost:11434/v1`, with no Graphify proxy service or Python adapter. When the Tools image supports `docstruct`, `.md/.rst/.yaml/.yml/.json/.toml/.ini/.cfg` files are extracted mechanically, optionally reviewed in bounded AI chunks, validated as a Graphify fragment, and merged into a reserved document layer; Graphify continues to own code ASTs and unsupported semantic formats. `LDS_GRAPHIFY_DOCSTRUCT=auto|on|off` and `LDS_GRAPHIFY_DOC_REVIEW=auto|on|off` control the handoff. Explicit `--code-only` remains code-only.
+`lds graphify` keeps the host Graphify CLI on `http://llm.localhost:11434/v1`, with no Graphify proxy service or Python adapter. When the Tools image supports `docstruct`, `.md/.rst/.yaml/.yml/.json/.toml/.ini/.cfg` files are extracted mechanically, optionally reviewed in bounded AI chunks, validated as a Graphify fragment, and merged into a staged reserved document layer. Before publication, LocalDevStack runs that staged graph through an isolated LLM-free `graphify cluster-only --no-label --no-viz` round trip and publishes only Graphify's canonical output; Graphify continues to own code ASTs and unsupported semantic formats. Document review retries one malformed structured response once before deterministic fallback. `LDS_GRAPHIFY_DOCSTRUCT=auto|on|off` and `LDS_GRAPHIFY_DOC_REVIEW=auto|on|off` control the handoff. Explicit `--code-only` remains code-only.
 
 The built-in Compose layout keeps both provider definitions in `docker/compose/companion.yaml`, but runtime-generated profile selectors enable exactly one. NVIDIA/ROCm hardware augmentation is generated ephemerally under `docker/.runtime/`; FastFlow's `/dev/accel/accel0` + memlock contract lives in its tracked service definition.
 
