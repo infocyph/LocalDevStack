@@ -234,13 +234,26 @@ The older execution surfaces remain compatible during migration::
    lds core [domain|service|container] [--] [command...]
    lds cli <service|container> [--] [command...]
    lds stack exec <service> [--] [command...]
+   lds tools list
+   lds tools <tool> [args...]
+   lds tools run <tool> [args...]
+   lds tools ui [args...]
    lds tools sh
    lds tools exec [--] <command> [args...]
    lds tools shell-exec <shell-expression>
    lds tools file <path>
 
-``stack exec`` remains service-only. ``tools file`` remains inspection
-functionality rather than generic shell navigation.
+``tools <tool>`` and ``tools run`` start a short-lived Tools container with the
+current host workspace mounted at ``/workspace``, inherit the active server-tools
+network/volumes and selected LDS AI/Git environment, preserve stdin/TTY, then remove the
+container. This is the preferred surface for Toolset utilities such as ``gitx``,
+``sqlitex``, ``chromacat``, and ``netx``, plus bundled utilities such as
+``jq``, ``yq``, ``rg``, ``fd``, ``tree``, ``shellcheck``,
+``ncdu``, ``zip``, and ``unzip``.
+
+``tools sh/exec/shell-exec/file`` intentionally remain operations against the
+long-running ``server-tools`` control-plane container. ``stack exec`` remains
+service-only.
 
 Secrets
 -------
