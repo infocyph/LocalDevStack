@@ -63,7 +63,14 @@ server_tools_image() {
 server_tools_env_value() {
   local key="${1:?}"
   "$(bin_path docker)" inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$SERVER_TOOLS_CONTAINER" 2>/dev/null \
-    | awk -F= -v k="$key" '$1==k { sub(/^[^=]*=/, ""); print; exit }'
+    | awk -F= -v k="$key" '
+        $1 == k && !found {
+          sub(/^[^=]*=/, "")
+          print
+          found=1
+        }
+        END { if (!found) exit 1 }
+      '
 }
 
 stdin_has_data() {
