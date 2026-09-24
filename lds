@@ -803,6 +803,9 @@ cmd_help() {
 - `lds convert docs --list-input-formats|--list-output-formats|--version`
 - `lds convert image [--force] <input> <output> [--] [imagemagick-options...]`
 - `lds convert image --formats|--version`
+- `lds convert audio [--force] <input> <output> [--] [ffmpeg-output-options...]`
+- `lds convert video [--force] <input> <output> [--] [ffmpeg-output-options...]`
+- `lds convert audio|video --formats|--codecs|--encoders|--version`
 
 ## Host Graphify workflow
 - `lds graphify [path] [graphify-extract-options...]`
@@ -895,6 +898,8 @@ ${CYAN}Conversion:${NC}
   convert docs --list-input-formats|--list-output-formats|--version
   convert image [--force] <input> <output> [--] [imagemagick-options...]
   convert image --formats|--version
+  convert audio|video [--force] <input> <output> [--] [ffmpeg-output-options...]
+  convert audio|video --formats|--codecs|--encoders|--version
 
 ${CYAN}AI:${NC}
   ai status|ask|explain|troubleshoot|review|repo-review|graphify
