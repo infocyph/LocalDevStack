@@ -72,7 +72,7 @@ assert_contains "$markdown_output" "lds convert docs [--force] <input> <output>"
 assert_contains "$markdown_output" "lds convert docs --list-input-formats"
 assert_contains "$markdown_output" "lds convert image [--force] <input> <output>"
 assert_contains "$markdown_output" "lds convert image --formats"
-pass "document conversion is exposed in embedded help"
+pass "docs and image conversion are exposed in embedded help"
 
 graphify_log="$(mktemp)"
 cat >"$tmpbin/graphify" <<'SH'
