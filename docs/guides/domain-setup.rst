@@ -123,22 +123,31 @@ and Tools can include generated domain/service names.
 The wildcard covers built-in convenience endpoints such as ``admin.localhost``,
 ``webmail.localhost``, and ``llm-ollama.localhost``.
 
-Working in a Domain Container
------------------------------
+Working in a Domain or Application Context
+------------------------------------------
 
-Resolve a domain to its application/runtime container and open a shell::
+Use the canonical shell navigator to resolve a discovered domain to its
+application/runtime container and working directory::
 
-   lds core project.localhost
+   lds shell project.localhost
 
-When no domain is supplied, ``lds core`` lists known domains and prompts on an
-interactive terminal.
+Run a command in that same resolved application context without losing argv boundaries::
 
-A direct container name can also be supplied to ``lds core``.
+   lds shell project.localhost -- php artisan about
 
-For a generic container shell/command flow use::
+With no target, ``lds shell`` opens the grouped selector and includes discovered
+domains, direct application directories under ``server-tools:/app``, services,
+containers, and Tools.
 
-   lds cli <container>
-   lds cli <container> <command...>
+Use qualified selectors when you want a specific target class or a name is ambiguous::
+
+   lds shell domain:project.localhost
+   lds shell app:project
+   lds shell service:php84
+   lds shell container:localdevstack-php84-1
+
+``lds core`` and ``lds cli`` remain compatibility commands, but new workflows
+should use ``lds shell``.
 
 Diagnostics
 -----------
