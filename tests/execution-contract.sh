@@ -741,6 +741,16 @@ assert_file_contains "$tmp/tools-catalog.out" 'sqlitex'
 assert_file_contains "$tmp/tools-catalog.out" 'chromacat'
 assert_file_contains "$tmp/tools-catalog.out" 'netx'
 assert_file_contains "$tmp/tools-catalog.out" 'lazydocker'
+assert_file_contains "$tmp/tools-catalog.out" 'ffmpeg'
+assert_file_contains "$tmp/tools-catalog.out" 'ffprobe'
+assert_file_contains "$tmp/tools-catalog.out" 'sox'
+assert_file_contains "$tmp/tools-catalog.out" 'soxi'
+assert_file_contains "$tmp/tools-catalog.out" 'mkvmerge'
+assert_file_contains "$tmp/tools-catalog.out" 'mkvinfo'
+assert_file_contains "$tmp/tools-catalog.out" 'mkvextract'
+assert_file_contains "$tmp/tools-catalog.out" 'mkvpropedit'
+assert_file_contains "$tmp/tools-catalog.out" 'mediainfo'
+assert_file_contains "$tmp/tools-catalog.out" 'xvidcore'
 pass "tools catalog is discoverable without a running Tools container"
 
 case_tools_direct_runner() {
