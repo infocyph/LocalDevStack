@@ -484,8 +484,8 @@ source "$DIR/lib/certificates.sh"
 # shellcheck source=lib/services.sh
 source "$DIR/lib/services.sh"
 
-# shellcheck source=lib/documents.sh
-source "$DIR/lib/documents.sh"
+# shellcheck source=lib/conversion.sh
+source "$DIR/lib/conversion.sh"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 6d. DIAG / SNIFF
@@ -794,9 +794,11 @@ cmd_help() {
 ## AI consumer
 - `lds ai status|ask|explain|troubleshoot|review|repo-review|graphify ...`
 
-## Document conversion
-- `lds convert [--force] <input> <output> [--] [pandoc-options...]`
-- `lds convert --list-input-formats|--list-output-formats|--version`
+## Conversion
+- `lds convert docs [--force] <input> <output> [--] [pandoc-options...]`
+- `lds convert docs --list-input-formats|--list-output-formats|--version`
+- `lds convert image [--force] <input> <output> [--] [imagemagick-options...]`
+- `lds convert image --formats|--version`
 
 ## Host Graphify workflow
 - `lds graphify [path] [graphify-extract-options...]`
@@ -882,9 +884,11 @@ ${CYAN}Execution / Shells:${NC}
 ${CYAN}Secrets:${NC}
   secrets <senv-args...>
 
-${CYAN}Documents:${NC}
-  convert [--force] <input> <output> [--] [pandoc-options...]
-  convert --list-input-formats|--list-output-formats|--version
+${CYAN}Conversion:${NC}
+  convert docs [--force] <input> <output> [--] [pandoc-options...]
+  convert docs --list-input-formats|--list-output-formats|--version
+  convert image [--force] <input> <output> [--] [imagemagick-options...]
+  convert image --formats|--version
 
 ${CYAN}AI:${NC}
   ai status|ask|explain|troubleshoot|review|repo-review|graphify
