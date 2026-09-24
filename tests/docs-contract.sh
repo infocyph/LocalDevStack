@@ -43,6 +43,14 @@ assert_file_contains "$ops" 'lds support bundle'
 assert_file_contains "$ops" 'lds clean --global --yes'
 assert_file_contains "$runner" 'lds run --sock'
 assert_file_contains "$notify" 'Windows/Git Bash'
+assert_file_contains "$arch" 'lds shell'
+assert_file_contains "$arch" 'utility:tools'
+assert_file_contains "$quick" 'lds shell'
+assert_file_contains "$domain" 'lds shell project.localhost'
+assert_file_contains "$domain" 'lds shell service:php84'
+assert_file_contains "$ops" 'lds shell service:nginx -- nginx -t'
+assert_file_contains "$secrets" 'lds shell tools'
+assert_file_contains "$databases" 'lds shell service:postgres'
 pass "docs describe current architecture, operations, and complete user surfaces"
 
 assert_file_contains "$profiles" 'docker/release.env'
@@ -153,6 +161,7 @@ assert_file_contains "$cli" 'Execution and Shells'
 assert_file_contains "$cli" 'lds shell <target> [--] <command> [args...]'
 assert_file_contains "$cli" 'Applications'
 assert_file_contains "$cli" 'domain:project.localhost'
+assert_file_contains "$cli" 'utility:tools'
 assert_file_contains "$cli" 'Image'
 assert_file_contains "$cli" 'lds core [domain|service|container] [--] [command...]'
 assert_file_contains "$cli" 'lds cli <service|container> [--] [command...]'
@@ -166,6 +175,14 @@ assert_file_contains "$readme" 'lds shell'
 assert_file_contains "$readme" 'lds shell project.localhost -- php artisan about'
 assert_file_contains "$readme" 'lds shell php84 -- php -v'
 assert_file_contains "$readme" 'lds shell tools --interactive lazydocker'
+assert_file_contains "$readme" 'utility:tools'
+assert_contains "$help_md" 'utility:tools'
+if grep -Fq 'lds core project.localhost' "$domain"; then
+  fail "domain guide still teaches lds core as the primary domain shell"
+fi
+if grep -Fq 'lds cli <container>' "$domain"; then
+  fail "domain guide still teaches lds cli as the primary container shell"
+fi
 pass "execution-surface docs match the shared Core/CLI contract"
 
 
