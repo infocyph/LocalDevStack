@@ -49,8 +49,10 @@ jobs:
       - name: Container execution substrate contract
         run: tests/container-exec-contract.sh
 
-      - name: Document conversion contract
-        run: bash tests/document-convert-contract.sh
+      - name: Conversion contracts
+        run: |
+          bash tests/document-convert-contract.sh
+          bash tests/image-convert-contract.sh
 
       - name: Environment contract
         run: tests/env-contract.sh
@@ -192,9 +194,9 @@ jobs:
           trap 'rm -rf "$tmp"' EXIT
           mkdir -p "$tmp/input" "$tmp/output"
           printf '# LocalDevStack conversion\n\nPandoc-backed host document.\n' >"$tmp/input/source.md"
-          ./lds convert "$tmp/input/source.md" "$tmp/output/source.html" --standalone
+          ./lds convert docs "$tmp/input/source.md" "$tmp/output/source.html" --standalone
           grep -Fq '<h1' "$tmp/output/source.html"
-          ./lds convert --list-input-formats | grep -qx markdown
+          ./lds convert docs --list-input-formats | grep -qx markdown
 
   windows-bridge:
     name: Windows bridge
