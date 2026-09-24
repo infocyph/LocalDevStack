@@ -129,6 +129,19 @@ Image conversion uses ImageMagick::
    lds convert image --version
 
 Static JPEG/PNG-style outputs use the first frame of animated inputs; GIF/WebP outputs preserve animation when supported.
+
+Audio/video conversion uses FFmpeg::
+
+   lds convert audio [--force] <input> <output> [--] [ffmpeg-output-options...]
+   lds convert video [--force] <input> <output> [--] [ffmpeg-output-options...]
+   lds convert audio|video --formats
+   lds convert audio|video --codecs
+   lds convert audio|video --encoders
+   lds convert audio|video --version
+
+The first-class media converter owns one input and one output. Use ``lds tools ffmpeg``
+for multi-input/concat/capture/complex filtergraph workflows. ``ffprobe``, ``sox``,
+``soxi``, MKVToolNix commands, and ``mediainfo`` are available through ``lds tools``.
 Certificates
 ------------
 
