@@ -89,6 +89,7 @@ IMAGE_CONVERT_TEST_LOG="$log" PATH="$bin:$PATH" \
   "$ROOT/lds" convert image "$gif" "$jpg"
 grep -Fq '</lds-input/Animation.gif[0]>' "$log" ||
   fail "static image output did not select first animation frame"
+: >"$log"
 IMAGE_CONVERT_TEST_LOG="$log" PATH="$bin:$PATH" \
   "$ROOT/lds" convert image "$gif" "$webp"
 if grep -Fq '</lds-input/Animation.gif[0]>' "$log"; then
