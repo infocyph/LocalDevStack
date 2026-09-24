@@ -731,6 +731,54 @@ assert_file_contains "$log" '<sh> <-lc>'
 assert_file_contains "$log" '<sh> </app/path with spaces.txt>'
 pass "batch 4: lds tools file passes paths as shell positional argv rather than interpolating them"
 
+case_tools_catalog_offline() {
+  _project_tools_container_running() { return 1; }
+  cmd_tools list >"$tmp/tools-catalog.out"
+}
+run_case case_tools_catalog_offline
+assert_file_contains "$tmp/tools-catalog.out" 'gitx'
+assert_file_contains "$tmp/tools-catalog.out" 'sqlitex'
+assert_file_contains "$tmp/tools-catalog.out" 'chromacat'
+assert_file_contains "$tmp/tools-catalog.out" 'netx'
+assert_file_contains "$tmp/tools-catalog.out" 'lazydocker'
+pass "tools catalog is discoverable without a running Tools container"
+
+case_tools_direct_runner() {
+  _tools_runner_exec() {
+    printf 'tool-runner:' >>"$EXECUTION_TEST_LOG"
+    printf ' <%s>' "$@" >>"$EXECUTION_TEST_LOG"
+    printf '\n' >>"$EXECUTION_TEST_LOG"
+  }
+  cmd_tools gitx status --short
+}
+run_case case_tools_direct_runner
+assert_file_contains "$log" 'tool-runner: <gitx> <status> <--short>'
+pass "curated/non-reserved tools delegate argv to the temporary tool runner"
+
+case_tools_explicit_runner() {
+  _tools_runner_exec() {
+    printf 'tool-runner:' >>"$EXECUTION_TEST_LOG"
+    printf ' <%s>' "$@" >>"$EXECUTION_TEST_LOG"
+    printf '\n' >>"$EXECUTION_TEST_LOG"
+  }
+  cmd_tools run sqlitex --db 'db path/app.db' tables
+}
+run_case case_tools_explicit_runner
+assert_file_contains "$log" 'tool-runner: <sqlitex> <--db> <db path/app.db> <tables>'
+pass "tools run provides an explicit collision-safe extension path"
+
+case_tools_ui_runner() {
+  _tools_runner_exec() {
+    printf 'tool-runner:' >>"$EXECUTION_TEST_LOG"
+    printf ' <%s>' "$@" >>"$EXECUTION_TEST_LOG"
+    printf '\n' >>"$EXECUTION_TEST_LOG"
+  }
+  cmd_tools ui --debug
+}
+run_case case_tools_ui_runner
+assert_file_contains "$log" 'tool-runner: <lazydocker> <--debug>'
+pass "tools ui reuses the temporary runner for the Docker TUI"
+
 case_ui_interactive() {
   force_interactive_tty
   cmd_ui
