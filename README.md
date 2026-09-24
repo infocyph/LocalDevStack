@@ -230,15 +230,18 @@ Pandoc is available from the Tools image without installing it on the host or st
 the LocalDevStack services:
 
 ```bash
-lds convert README.md README.html
-lds convert docs/guide.rst guide.docx --toc
-lds convert report.docx report.md --wrap=none
-lds convert book.md book.epub --toc
-lds convert --list-input-formats
-lds convert --list-output-formats
+lds convert docs README.md README.html
+lds convert docs docs/guide.rst guide.docx --toc
+lds convert docs report.docx report.md --wrap=none
+lds convert docs book.md book.epub --toc
+lds convert docs --list-input-formats
+lds convert docs --list-output-formats
+lds convert image photo.jpg photo.webp -- -quality 82 -strip
+lds convert image animation.gif animation.webp
+lds convert image --formats
 ```
 
-The input directory is mounted read-only; only the output directory is writable. The
+Documents use Pandoc; images use ImageMagick. The input mount is read-only and only the output mount is writable. The
 short-lived converter receives no Docker socket or LocalDevStack networks. Existing
 outputs require `--force`. PDF generation additionally depends on a PDF engine; the base
 Tools image ships Pandoc itself, not a TeX/PDF rendering stack.
