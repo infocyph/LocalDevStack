@@ -125,7 +125,7 @@ qualified target when names collide.
 ``lds config show`` is redacted by default. Use ``--raw`` only when unredacted output is
 deliberately required.
 
-Document conversion is also available without starting the stack::
+File conversion is also available without starting the stack::
 
    lds convert docs README.md README.html
 
