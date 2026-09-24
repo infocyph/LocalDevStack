@@ -148,7 +148,7 @@ _convert_engine() {
   local entrypoint="${1:-}"
   shift || true
   [[ -n "$entrypoint" ]] || return 64
-  _convert_docker run --rm --pull=missing --entrypoint "$entrypoint" "$_CONVERT_TOOLS_IMAGE" "$@"
+  _convert_docker run --rm --pull=missing --network none --entrypoint "$entrypoint" "$_CONVERT_TOOLS_IMAGE" "$@"
 }
 
 _convert_reject_pandoc_output_option() {
@@ -216,7 +216,9 @@ _convert_docs() {
   _convert_prepare_paths "$input" "$output" "$force" || return $?
 
   run_args=(
-    run --rm --pull=missing
+    run --rm --pull=missing --network none
+    --user "$(id -u):$(id -g)"
+    -e HOME=/tmp
     -v "$_CONVERT_INPUT_MOUNT:/lds-input:ro"
     -v "$_CONVERT_OUTPUT_MOUNT:/lds-output"
     -w /lds-input
@@ -271,7 +273,9 @@ _convert_image() {
   fi
 
   run_args=(
-    run --rm --pull=missing
+    run --rm --pull=missing --network none
+    --user "$(id -u):$(id -g)"
+    -e HOME=/tmp
     -v "$_CONVERT_INPUT_MOUNT:/lds-input:ro"
     -v "$_CONVERT_OUTPUT_MOUNT:/lds-output"
     --entrypoint magick
