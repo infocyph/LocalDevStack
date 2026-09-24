@@ -15,18 +15,26 @@ domain="$ROOT/docs/guides/domain-setup.rst"
 tls="$ROOT/docs/guides/tls-and-certificates.rst"
 ai="$ROOT/docs/guides/local-ai.rst"
 databases="$ROOT/docs/guides/databases-and-clients.rst"
+documents="$ROOT/docs/guides/document-conversion.rst"
 ops="$ROOT/docs/guides/operations-and-support.rst"
 runner="$ROOT/docs/guides/ad-hoc-runner.rst"
 notify="$ROOT/docs/guides/notifications.rst"
 secrets="$ROOT/docs/guides/secrets-sops-age.rst"
 cli="$ROOT/docs/reference/cli.rst"
 
-for file in "$index" "$readme" "$quick" "$arch" "$profiles" "$storage" "$domain" "$tls" "$ai" "$databases" "$ops" "$runner" "$notify" "$secrets" "$cli"; do
+for file in "$index" "$readme" "$quick" "$arch" "$profiles" "$storage" "$domain" "$tls" "$ai" "$databases" "$documents" "$ops" "$runner" "$notify" "$secrets" "$cli"; do
   assert_file "$file"
 done
 
 assert_file_contains "$index" 'guides/local-ai'
 assert_file_contains "$index" 'guides/databases-and-clients'
+assert_file_contains "$index" 'guides/document-conversion'
+assert_file_contains "$documents" 'lds convert README.md README.html'
+assert_file_contains "$documents" '--list-output-formats'
+assert_file_contains "$documents" 'no Docker socket'
+assert_file_contains "$cli" 'lds convert [--force] <input> <output>'
+assert_file_contains "$quick" 'lds convert README.md README.html'
+assert_file_contains "$readme" 'lds convert docs/guide.rst guide.docx --toc'
 assert_file_contains "$index" 'guides/operations-and-support'
 assert_file_contains "$index" 'guides/ad-hoc-runner'
 assert_file_contains "$index" 'reference/cli'
