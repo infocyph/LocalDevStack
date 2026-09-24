@@ -125,6 +125,13 @@ qualified target when names collide.
 ``lds config show`` is redacted by default. Use ``--raw`` only when unredacted output is
 deliberately required.
 
+Document conversion is also available without starting the stack::
+
+   lds convert README.md README.html
+
+Pandoc runs from the Tools image; use ``lds convert --list-output-formats`` to inspect the
+writers available in the current image.
+
 Updating an Existing Installation
 ---------------------------------
 
