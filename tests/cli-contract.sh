@@ -13,7 +13,7 @@ assert_contains "$help_output" "Setup"
 assert_contains "$help_output" "Execution / Shells"
 assert_contains "$help_output" "Generic service/container exec"
 assert_contains "$help_output" "Compose-service only"
-assert_contains "$help_output" "server-tools only"
+assert_contains "$help_output" "Long-running server-tools context"
 pass "lds help"
 
 markdown_output="$("$ROOT/lds" help --markdown)"
@@ -55,7 +55,7 @@ if grep -Fq 'declare -F "cmd_$cmd"' "$ROOT/lds"; then
   fail "top-level dispatch still exposes arbitrary cmd_* functions dynamically"
 fi
 assert_file_contains "$ROOT/lds" 'stack|domain|support|bundle|up|start'
-assert_file_contains "$ROOT/lds" 'tools|cli|core|shell|graphify|secrets|rebuild|run)'
+assert_file_contains "$ROOT/lds" 'tools|cli|core|shell|convert|graphify|secrets|rebuild|run)'
 pass "top-level LDS command routing is explicit and collision-safe"
 
 if PATH="$tmpbin:$PATH" "$ROOT/lds" graphify --help 2>&1 | grep -Fq 'SERVER_TOOLS is not running'; then
@@ -66,6 +66,24 @@ pass "top-level Graphify remains a host-side command"
 assert_contains "$help_output" "shell [target]"
 assert_contains "$markdown_output" "lds shell <target>"
 pass "unified shell is exposed in embedded help"
+
+assert_contains "$help_output" "convert docs [--force] <input> <output>"
+assert_contains "$markdown_output" "lds convert docs [--force] <input> <output>"
+assert_contains "$markdown_output" "lds convert docs --list-input-formats"
+assert_contains "$markdown_output" "lds convert image [--force] <input> <output>"
+assert_contains "$markdown_output" "lds convert image --formats"
+assert_contains "$help_output" "convert audio|video [--force] <input> <output>"
+assert_contains "$markdown_output" "lds convert audio [--force] <input> <output>"
+assert_contains "$markdown_output" "lds convert video [--force] <input> <output>"
+assert_contains "$markdown_output" "lds convert audio|video --formats|--codecs|--encoders|--version"
+pass "docs image audio and video conversion are exposed in embedded help"
+
+assert_contains "$help_output" "tools list|run|ui"
+assert_contains "$help_output" "tools <tool> [args...]"
+assert_contains "$markdown_output" "lds tools list"
+assert_contains "$markdown_output" "lds tools <tool> [args...]"
+assert_contains "$markdown_output" "lds tools run <tool> [args...]"
+pass "Tools catalog and temporary runner are exposed in embedded help"
 
 graphify_log="$(mktemp)"
 cat >"$tmpbin/graphify" <<'SH'
@@ -282,6 +300,18 @@ if [[ "${1:-}" == merge-chunks ]]; then
     esac
   done
   cp "$input" "$out"
+elif [[ "${1:-}" == cluster-only ]]; then
+  shift
+  graph=''
+  while (($#)); do
+    case "$1" in
+      --graph) graph="$2"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  [[ -n "$graph" ]] || exit 96
+  mkdir -p graphify-out
+  cp "$graph" graphify-out/graph.json
 fi
 SH
   chmod +x "$graphify_hybrid"
@@ -323,6 +353,10 @@ SH
     fail "external graph publication failed"
   grep -Fq 'merge-chunks ' "$graphify_hybrid_log" ||
     fail "Graphify public fragment validation was not invoked"
+  grep -Fq 'cluster-only --graph ' "$graphify_hybrid_log" ||
+    fail "Graphify merged graph round-trip canonicalization was not invoked"
+  grep -Fq -- '--no-label --no-viz' "$graphify_hybrid_log" ||
+    fail "Graphify merged graph round-trip must stay deterministic and LLM-free"
 
   [[ "$(_graphify_docstruct_mode)" == auto ]] ||
     fail "Graphify docstruct default mode drifted"
@@ -351,6 +385,9 @@ assert_file_contains "$ROOT/lib/ai.sh" 'server-tools tail -f /dev/null'
 assert_file_contains "$ROOT/lib/ai.sh" 'docker exec -i "$_GRAPHIFY_TOOLS_CTR"'
 assert_file_contains "$ROOT/lib/ai.sh" 'docker rm -f "$ctr"'
 assert_file_contains "$ROOT/lib/ai.sh" 'mktemp "$target_abs/graphify-out/.graph.json.docstruct.XXXXXX"'
+assert_file_contains "$ROOT/lib/ai.sh" '_graphify_canonicalize_staged_graph'
+assert_file_contains "$ROOT/lib/ai.sh" 'cluster-only --graph "$roundtrip_input" --no-label --no-viz'
+assert_file_contains "$ROOT/lib/ai.sh" 'documents: canonicalizing merged graph through Graphify before publication'
 assert_file_contains "$ROOT/lib/ai.sh" "--exclude 'requirements*.txt'"
 assert_file_contains "$ROOT/lib/ai.sh" "--exclude 'constraints*.txt'"
 assert_file_contains "$ROOT/lib/ai.sh" "--exclude 'requirements/*.txt'"

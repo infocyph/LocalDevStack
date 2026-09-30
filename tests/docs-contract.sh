@@ -15,18 +15,51 @@ domain="$ROOT/docs/guides/domain-setup.rst"
 tls="$ROOT/docs/guides/tls-and-certificates.rst"
 ai="$ROOT/docs/guides/local-ai.rst"
 databases="$ROOT/docs/guides/databases-and-clients.rst"
+conversion="$ROOT/docs/guides/conversion.rst"
 ops="$ROOT/docs/guides/operations-and-support.rst"
 runner="$ROOT/docs/guides/ad-hoc-runner.rst"
 notify="$ROOT/docs/guides/notifications.rst"
 secrets="$ROOT/docs/guides/secrets-sops-age.rst"
 cli="$ROOT/docs/reference/cli.rst"
 
-for file in "$index" "$readme" "$quick" "$arch" "$profiles" "$storage" "$domain" "$tls" "$ai" "$databases" "$ops" "$runner" "$notify" "$secrets" "$cli"; do
+for file in "$index" "$readme" "$quick" "$arch" "$profiles" "$storage" "$domain" "$tls" "$ai" "$databases" "$conversion" "$ops" "$runner" "$notify" "$secrets" "$cli"; do
   assert_file "$file"
 done
 
 assert_file_contains "$index" 'guides/local-ai'
 assert_file_contains "$index" 'guides/databases-and-clients'
+assert_file_contains "$index" 'guides/conversion'
+assert_file_contains "$conversion" 'lds convert docs README.md README.html'
+assert_file_contains "$conversion" 'lds convert docs --list-output-formats'
+assert_file_contains "$conversion" 'lds convert image photo.jpg photo.png'
+assert_file_contains "$conversion" 'lds convert image --formats'
+assert_file_contains "$conversion" 'lds convert audio recording.wav recording.mp3'
+assert_file_contains "$conversion" 'lds convert video recording.mov recording.mp4'
+assert_file_contains "$conversion" 'lds tools ffprobe media.mkv'
+assert_file_contains "$conversion" 'lds tools mkvinfo media.mkv'
+assert_file_contains "$conversion" 'lds tools mediainfo media.mkv'
+assert_file_contains "$cli" 'lds convert audio [--force] <input> <output>'
+assert_file_contains "$cli" 'lds convert video [--force] <input> <output>'
+assert_file_contains "$quick" 'lds convert audio recording.wav recording.mp3'
+assert_file_contains "$quick" 'lds convert video recording.mov recording.mp4'
+assert_file_contains "$readme" 'lds tools ffprobe media.mkv'
+assert_file_contains "$readme" 'lds tools mediainfo media.mkv'
+assert_file_contains "$conversion" 'no Docker socket'
+assert_file_contains "$cli" 'lds convert docs [--force] <input> <output>'
+assert_file_contains "$cli" 'lds convert image [--force] <input> <output>'
+assert_file_contains "$quick" 'lds convert docs README.md README.html'
+assert_file_contains "$quick" 'lds convert image photo.jpg photo.webp'
+assert_file_contains "$readme" 'lds convert docs docs/guide.rst guide.docx --toc'
+assert_file_contains "$readme" 'lds convert image animation.gif animation.webp'
+assert_file_contains "$readme" 'lds tools gitx status'
+assert_file_contains "$readme" 'lds tools sqlitex --db app.db tables'
+assert_file_contains "$readme" 'cat app.log | lds tools chromacat --log'
+assert_file_contains "$quick" 'lds tools list'
+assert_file_contains "$cli" 'lds tools <tool> [args...]'
+assert_file_contains "$cli" 'lds tools run <tool> [args...]'
+assert_file_contains "$cli" 'Docker socket'
+assert_file_contains "$cli" 'privileged workstation context'
+assert_file_contains "$readme" 'not a sandbox'
 assert_file_contains "$index" 'guides/operations-and-support'
 assert_file_contains "$index" 'guides/ad-hoc-runner'
 assert_file_contains "$index" 'reference/cli'
@@ -107,6 +140,9 @@ assert_file_contains "$ai" '.md .markdown .rst .yaml .yml .json .toml .ini .cfg'
 assert_file_contains "$ai" 'LDS_GRAPHIFY_DOCSTRUCT'
 assert_file_contains "$ai" 'LDS_GRAPHIFY_DOC_REVIEW'
 assert_file_contains "$ai" '--token-budget 3000'
+assert_file_contains "$ai" 'cluster-only --no-label --no-viz'
+assert_file_contains "$ai" 'retries one malformed structured response once'
+assert_file_contains "$cli" 'cluster-only --no-label --no-viz'
 assert_file_contains "$ai" 'There is no LocalDevStack Graphify HTTP proxy or Python compatibility adapter.'
 assert_file_contains "$ai" 'Graphify'
 assert_file_contains "$ai" 'docstruct'
@@ -157,7 +193,7 @@ pass "documentation toctree targets exist"
 
 
 help_md="$("$ROOT/lds" help --markdown)"
-for required in   'lds profiles add <profile...>'   'lds support trace <domain>'   'lds support bundle [--redact|--full] [output.zip]'   'lds shell <target> [--] <command> [args...]'   'lds shell <target> --shell <shell-expression>'   'lds cli <service|container> [--] [command...]'   'lds core [domain|service|container] [--] [command...]'   'lds stack exec <service> [--] [command...]'   'lds tools exec [--] <command> [args...]'   'lds tools shell-exec <shell-expression>'   'lds run shell|ps|logs|stop|rm|open'   'MongoDB:'   'Elasticsearch:'; do
+for required in   'lds profiles add <profile...>'   'lds support trace <domain>'   'lds support bundle [--redact|--full] [output.zip]'   'lds shell <target> [--] <command> [args...]'   'lds shell <target> --shell <shell-expression>'   'lds cli <service|container> [--] [command...]'   'lds core [domain|service|container] [--] [command...]'   'lds stack exec <service> [--] [command...]'   'lds tools list'   'lds tools <tool> [args...]'   'lds tools run <tool> [args...]'   'lds tools exec [--] <command> [args...]'   'lds tools shell-exec <shell-expression>'   'lds run shell|ps|logs|stop|rm|open'   'MongoDB:'   'Elasticsearch:'; do
   assert_contains "$help_md" "$required"
 done
 pass "embedded CLI help covers documented command groups"
@@ -171,6 +207,9 @@ assert_file_contains "$cli" 'Image'
 assert_file_contains "$cli" 'lds core [domain|service|container] [--] [command...]'
 assert_file_contains "$cli" 'lds cli <service|container> [--] [command...]'
 assert_file_contains "$cli" 'lds stack exec <service> [--] [command...]'
+assert_file_contains "$cli" 'lds tools list'
+assert_file_contains "$cli" 'lds tools <tool> [args...]'
+assert_file_contains "$cli" 'lds tools run <tool> [args...]'
 assert_file_contains "$cli" 'lds tools exec [--] <command> [args...]'
 assert_file_contains "$cli" 'lds tools shell-exec <shell-expression>'
 assert_file_contains "$cli" 'preserve argv exactly'

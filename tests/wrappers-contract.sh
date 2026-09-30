@@ -20,14 +20,100 @@ done
 pass "wrapper syntax and Docker-DNS independence"
 
 runner="$ROOT/bin/tool-runner"
-assert_file_contains "$runner" '[[ -t 0 ]] && flags+=(-i)'
+assert_file_contains "$runner" 'stdin_has_data()'
+assert_file_contains "$runner" 'if [[ -t 0 ]] || stdin_has_data; then'
 assert_file_contains "$runner" '[[ -t 1 ]] && flags+=(-t)'
 assert_file_contains "$runner" 'MSYS_NO_PATHCONV=1'
 assert_file_contains "$runner" 'MSYS2_ARG_CONV_EXCL='
 assert_file_contains "$runner" '--network "container:$SERVER_TOOLS_CONTAINER"'
 assert_file_contains "$runner" '--volumes-from "$SERVER_TOOLS_CONTAINER"'
+assert_file_contains "$runner" 'append_server_tools_env envs'
+assert_file_contains "$runner" 'LDS_AI_RUNTIME'
+assert_file_contains "$runner" 'LDS_AI_MODEL'
+assert_file_contains "$runner" 'GIT_CREDENTIAL_MODE'
 assert_file_contains "$runner" 'exec "$(bin_path docker)" run'
 pass "tool-runner preserves TTY, path, namespace and exit-code contracts"
+
+runner_tmp="$(mktemp -d)"
+runner_bin="$runner_tmp/bin"
+runner_log="$runner_tmp/docker.log"
+runner_stdin="$runner_tmp/stdin.log"
+runner_workspace="$runner_tmp/work space"
+mkdir -p "$runner_bin" "$runner_workspace"
+
+cat >"$runner_bin/docker" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+: "${TOOL_RUNNER_TEST_LOG:?}"
+: "${TOOL_RUNNER_TEST_STDIN:?}"
+
+if [[ "${1:-}" == inspect && "${2:-}" == -f ]]; then
+  case "${3:-}" in
+    *State.Running*) printf '%s\n' true ;;
+    *Config.Image*) printf '%s\n' infocyph/tools:test ;;
+    *Config.Env*)
+      cat <<'ENV'
+TZ=Asia/Dhaka
+USERNAME=tester
+GIT_USER_NAME=Test User
+GIT_USER_EMAIL=test@example.com
+GIT_CREDENTIAL_MODE=store
+LDS_AI_ENABLED=1
+LDS_AI_RUNTIME=npu
+LDS_AI_MODEL=qwen-test
+LDS_AI_THINK=medium
+LDS_AI_TIMEOUT=321
+ENV
+      ;;
+  esac
+  exit 0
+fi
+
+if [[ "${1:-}" == exec ]]; then
+  exit 0
+fi
+
+if [[ "${1:-}" == run ]]; then
+  printf 'docker-run:' >>"$TOOL_RUNNER_TEST_LOG"
+  printf ' <%s>' "$@" >>"$TOOL_RUNNER_TEST_LOG"
+  printf '\n' >>"$TOOL_RUNNER_TEST_LOG"
+  cat >"$TOOL_RUNNER_TEST_STDIN" || true
+  exit 0
+fi
+
+exit 0
+SH
+chmod +x "$runner_bin/docker"
+
+runner_err="$runner_tmp/runner.err"
+set +e
+printf '%s\n' 'stream payload' | (
+  cd "$runner_workspace"
+  PATH="$runner_bin:$PATH" \
+  WORKDIR="$runner_workspace" \
+  TOOL_RUNNER_TEST_LOG="$runner_log" \
+  TOOL_RUNNER_TEST_STDIN="$runner_stdin" \
+    "$runner" chromacat --log
+) 2>"$runner_err"
+runner_rc=$?
+set -e
+if ((runner_rc != 0)); then
+  cat "$runner_err" >&2 || true
+  fail "tool-runner mock exited $runner_rc"
+fi
+
+assert_file_contains "$runner_log" '<-i>'
+assert_file_contains "$runner_log" '<--network> <container:SERVER_TOOLS>'
+assert_file_contains "$runner_log" '<--volumes-from> <SERVER_TOOLS>'
+assert_file_contains "$runner_log" '<-v>'
+assert_file_contains "$runner_log" '<-e> <LDS_AI_RUNTIME=npu>'
+assert_file_contains "$runner_log" '<-e> <LDS_AI_MODEL=qwen-test>'
+assert_file_contains "$runner_log" '<-e> <GIT_CREDENTIAL_MODE=store>'
+assert_file_contains "$runner_log" '<--entrypoint> <chromacat>'
+assert_file_contains "$runner_log" '<--log>'
+assert_file_contains "$runner_stdin" 'stream payload'
+rm -rf "$runner_tmp"
+pass "tool-runner preserves piped stdin and active Tools runtime environment"
 
 php="$ROOT/bin/php"
 assert_file_contains "$php" '-V|--v|--php)'

@@ -484,6 +484,9 @@ source "$DIR/lib/certificates.sh"
 # shellcheck source=lib/services.sh
 source "$DIR/lib/services.sh"
 
+# shellcheck source=lib/conversion.sh
+source "$DIR/lib/conversion.sh"
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 6d. DIAG / SNIFF
 # ─────────────────────────────────────────────────────────────────────────────
@@ -780,6 +783,10 @@ cmd_help() {
 - `lds core [domain|service|container] [--] [command...]` — compatibility application/domain-aware execution with resolved working directory.
 - `lds cli <service|container> [--] [command...]` — generic current-project service or exact-container execution.
 - `lds stack exec <service> [--] [command...]` *(alias: `lds exec`)* — Compose-service-only execution.
+- `lds tools list` — show the curated Tools/Toolset catalog.
+- `lds tools <tool> [args...]` — run a Tools command in a temporary workspace-aware container.
+- `lds tools run <tool> [args...]` — explicit collision-safe form of the same runner.
+- `lds tools ui [args...]` — run lazydocker through the temporary Tools runner.
 - `lds tools sh` — interactive shell in the project `server-tools` container.
 - `lds tools exec [--] <command> [args...]` — argv-preserving execution in `server-tools`.
 - `lds tools shell-exec <shell-expression>` — intentional shell parsing in `server-tools`.
@@ -790,6 +797,15 @@ cmd_help() {
 
 ## AI consumer
 - `lds ai status|ask|explain|troubleshoot|review|repo-review|graphify ...`
+
+## Conversion
+- `lds convert docs [--force] <input> <output> [--] [pandoc-options...]`
+- `lds convert docs --list-input-formats|--list-output-formats|--version`
+- `lds convert image [--force] <input> <output> [--] [imagemagick-options...]`
+- `lds convert image --formats|--version`
+- `lds convert audio [--force] <input> <output> [--] [ffmpeg-output-options...]`
+- `lds convert video [--force] <input> <output> [--] [ffmpeg-output-options...]`
+- `lds convert audio|video --formats|--codecs|--encoders|--version`
 
 ## Host Graphify workflow
 - `lds graphify [path] [graphify-extract-options...]`
@@ -870,10 +886,20 @@ ${CYAN}Execution / Shells:${NC}
   core [domain|service|container] [--] [command...]   Compatibility domain/app entry
   cli <service|container> [--] [command...]          Generic service/container exec
   stack exec <service> [--] [command...]             Compose-service only
-  tools sh|exec|shell-exec|file                       server-tools only
+  tools list|run|ui                                  Curated/temporary Tools runner
+  tools <tool> [args...]                              Run a Tools command in workspace
+  tools sh|exec|shell-exec|file                       Long-running server-tools context
 
 ${CYAN}Secrets:${NC}
   secrets <senv-args...>
+
+${CYAN}Conversion:${NC}
+  convert docs [--force] <input> <output> [--] [pandoc-options...]
+  convert docs --list-input-formats|--list-output-formats|--version
+  convert image [--force] <input> <output> [--] [imagemagick-options...]
+  convert image --formats|--version
+  convert audio|video [--force] <input> <output> [--] [ffmpeg-output-options...]
+  convert audio|video --formats|--codecs|--encoders|--version
 
 ${CYAN}AI:${NC}
   ai status|ask|explain|troubleshoot|review|repo-review|graphify
@@ -903,7 +929,7 @@ EOF
 
 _is_public_lds_command() {
   case "${1:-}" in
-  stack|domain|support|bundle|up|start|down|stop|restart|reboot|status|ps|logs|exec|events|clean|config|http|host|setup|profiles|cert|certificate|doctor|diag|sniff|open|notify|ui|images|urls|tools|cli|core|shell|graphify|secrets|rebuild|run)
+  stack|domain|support|bundle|up|start|down|stop|restart|reboot|status|ps|logs|exec|events|clean|config|http|host|setup|profiles|cert|certificate|doctor|diag|sniff|open|notify|ui|images|urls|tools|cli|core|shell|convert|graphify|secrets|rebuild|run)
     return 0
     ;;
   esac
